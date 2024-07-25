@@ -1,4 +1,17 @@
-Here's how we did things for NCAVE:
+# Restoring a snapshot
+
+Basically, at its most simple:
+
+```
+POST _snapshot/$repo/$snapshot/_mount?wait_for_completion=true
+{
+  "index": "$index_name"
+}
+```
+
+### NCAVE
+
+Here's the script we developed for pulling snapshots and creating scriptlets for each.
 
 ```
 #!/bin/bash
