@@ -1,4 +1,4 @@
-# deepfreeze
+# Deep Freeze
 A project to examine the idea of retaining searchable snapshots after an index is deleted by ILM so that it can later be remounted if needed.
 
 The idea is to use an ILM policy whose `delete` action only removes the index, not the searchable snapshot like this:
