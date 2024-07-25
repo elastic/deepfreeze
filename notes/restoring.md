@@ -9,6 +9,10 @@ POST _snapshot/$repo/$snapshot/_mount?wait_for_completion=true
 }
 ```
 
+## Considerations
+
+We'll want a way to delete the index when we're done with it that doesn't delete the backing snapshot. We could do it with an ILM policy that just has a Delete phase that starts at 0m and includes the `"delete_searchable_shapshot": false` setting. But is there a way to do this with a `DELETE` API call instead? It doesn't appear so, at least as of 8.14.
+
 ### NCAVE
 
 Here's the script we developed for pulling snapshots and creating scriptlets for each.
