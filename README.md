@@ -33,6 +33,11 @@ Given this index's importance, let's make it default to having a replica on ever
 
 No need to update, just insert. What about deletions? Probably a good idea.
 
+## Intelligent Tiering
+
+How does this play with IT? If a searchable snapshot ages into the deepfreeze while ES is still actively working with searchable snapshots in the same bucket, does any data move down in temperature? Will the "ignored" searchable snapshots be ignored by ES sufficiently that they can age to glacier eventually?
+
+
 ## Code
 Python or bash? Keep this as simple as possible and run it daily so that it can update newly-minted searchable snapshots in the deepfreeze index.
 
