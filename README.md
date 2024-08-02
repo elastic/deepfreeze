@@ -44,3 +44,11 @@ How does this play with IT? If a searchable snapshot ages into the deepfreeze wh
 Python or bash? Keep this as simple as possible and run it daily so that it can update newly-minted searchable snapshots in the deepfreeze index.
 
 Another job to go through the list of snapshots and make sure they all still exist, deleting those that don't? Alerting somehow when that happens?
+
+First priority probably are helper scripts:
+
+* Take a monthly snapshot archive offline
+* Create a new monthly snapshot archive
+* Remount a monthly snapshot archive
+* Promote a monthly snapshot archive back from glacier.
+
