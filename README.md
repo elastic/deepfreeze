@@ -33,6 +33,8 @@ Given this index's importance, let's make it default to having a replica on ever
 
 No need to update, just insert. What about deletions? Probably a good idea.
 
+**UPDATE: Looks like the cluster continues to track the snapshot even after the index has been deleted. Need to see how that works if we take the whole folder or bucket offline. Probably ES would re-parse the metadata when the repo reconnects and discover all those lovely seasnaps again.**
+
 ## Intelligent Tiering
 
 How does this play with IT? If a searchable snapshot ages into the deepfreeze while ES is still actively working with searchable snapshots in the same bucket, does any data move down in temperature? Will the "ignored" searchable snapshots be ignored by ES sufficiently that they can age to glacier eventually?
