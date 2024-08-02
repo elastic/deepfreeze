@@ -17,7 +17,7 @@ We'll want a way to delete the index when we're done with it that doesn't delete
 
 Here's the script we developed for pulling snapshots and creating scriptlets for each.
 
-```
+```bash
 #!/bin/bash
 
 policy="migration"
