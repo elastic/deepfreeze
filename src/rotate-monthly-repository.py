@@ -21,7 +21,7 @@ class Processor:
         pass
 
     def update_ilm_policies(self):
-        rv = requests.get(POLICIES)
+        rv = requests.get(self.policies_url)
         pass
 
     def process(self) -> None:
