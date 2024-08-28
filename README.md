@@ -33,7 +33,7 @@ Given this index's importance, let's make it default to having a replica on ever
 
 No need to update, just insert. What about deletions? Probably a good idea.
 
-**UPDATE: Looks like the cluster continues to track the snapshot even after the index has been deleted. Need to see how that works if we take the whole folder or bucket offline. Probably ES would re-parse the metadata when the repo reconnects and discover all those lovely seasnaps again.**
+**UPDATE: Looks like the snapshot metadata persists in the S3 bucket even after the index has been deleted. Need to see how that works if we take the whole folder or bucket offline. Probably ES would re-parse the metadata when the repo reconnects and discover all those lovely seasnaps again.**
 
 ## Intelligent Tiering
 
