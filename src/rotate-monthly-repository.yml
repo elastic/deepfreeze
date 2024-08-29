@@ -1,7 +1,7 @@
 ---
 # The repo_name_pattern determines how the repos are named. Terms in curly 
 # brackets are replaced when the next archive is created.
-repo_name_pattern: rolling_archive_{year}_{month}
+repo_name_pattern: rolling_archive-{year:04d}.{month:02d}
 
 # bucket_name_pattern allows for a different naming scheme for the S3 buckets
 # themselves. If omitted or left blank, then repo_name_pattern is used instead.
