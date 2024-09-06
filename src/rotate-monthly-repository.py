@@ -2,94 +2,150 @@
 #
 import argparse
 import json
-import request
-import yaml
-from dataclasses import dataclass
+import logging
+import requests
+import sys
+from urllib.parse import urlunsplit
+from config import Config
+import boto3
+from botocore.exceptions import ClientError
 
 
-@dataclass
 class Processor:
     """
     The Processor is responsible for managing the repository rotation given
     a config file of user-managed options and settings.
     """
-    def __init__(self, config: dict[str, object]) -> None:
-        repo_name_pattern = config['repo_name_pattern']
-        bucket_name_pattern = config['bucket_name_pattern'] \
-            if 'bucket_name_pattern' in config else repo_name_pattern
+    def __init__(self, args) -> None:
+        self.config = Config()
+        self.args = args
 
-        self.repo_name = repo_name_pattern.format(year=config['year'], 
-                                                  month=config['month'])
-        self.bucket_name = bucket_name_pattern.format(year=config['year'],
-                                                      month=config['month'])
-        self.policies_url = config['urls']['policies']
+        self.new_repo_name = self.config.repo_name_pattern.format(
+            year=self.args.year,
+            month=self.args.month)
+        self.new_bucket_name = self.config.bucket_name_pattern.format(
+            year=self.args.year,
+            month=self.args.month)
 
-        repo_list = self.get_repos()
-        repo_names = get_repo_names(repo_list)
-        if self.repo_name in repo_names:
-            raise Exception(f"Requested repo name {self.repo_name} "
+        self.repo_list = self.get_repos()
+        if self.new_repo_name in self.repo_list:
+            raise Exception(f"Requested repo name {self.new_repo_name} "
                             "already exists!")
-        self.oldest_repo = repo_list[-1]
-        self.newest_repo = repo_list[1]
+
+        netloc = f'{self.config.host}:{self.config.port}'
+
+        self.policies_url = urlunsplit((
+            self.config.scheme,
+            netloc,
+            self.config.policy_ep,
+            '',
+            '',
+        ))
+        self.snapshot_repo_url = urlunsplit((
+            self.config.scheme,
+            netloc,
+            f"{self.config.repo_ep}/{{name}}",
+            '',
+            ''
+        ))
+
+        self.session = requests.Session()
+        self.session.auth = (self.config.username, self.config.password)
+
+    def create_new_bucket(self):
+        # Create a new bucket, required before we can add a new repo which
+        # references it.
+        print("Creating bucket")
+        try:
+            s3 = boto3.client('s3')
+            s3.create_bucket(Bucket=self.new_bucket_name)
+        except ClientError as e:
+            logging.error(e)
+            return False
+        return True
 
     def create_new_repo(self):
-        # Create a new repo using self.repo_name and self.bucket_name
-        pass
+        # Create a new repo using self.new_repo_name and self.new_bucket_name
+        print("Creating repo")
+        repo = {
+            "type": "s3",
+            "settings": {
+                "bucket": self.new_bucket_name,
+                "base_path": self.config.base_path,
+                "canned_acl": self.config.canned_acl,
+                "storage_class": self.config.storage_class
+            }
+        }
+        headers = {
+            "Content-Type": "application/json"
+        }
+        self.session.put(self.snapshot_repo_url.format(name=self.new_repo_name),
+                         data=repo,
+                         headers=headers,
+                         verify=False)
+
+    def update_ilm_policies(self):
+        policies = self.session.get(self.policies_url, verify=False).json()
+        updated_policies = {}
+        for policy in policies:
+            # Go through these looking for any occurrences of self.newest_repo
+            # and change those to use self.new_repo_name instead.
+            p = policies[policy]['policy']['phases']
+            updated = False
+            for phase in p:
+                if 'searchable_snapshot' in p[phase]['actions']:
+                    print(f"repo = {p[phase]['actions']['searchable_snapshot']['snapshot_repository']}")
+                    if p[phase]['actions']['searchable_snapshot']['snapshot_repository'] == self.newest_repo:
+                        p[phase]['actions']['searchable_snapshot']['snapshot_repository'] == self.new_repo_name
+                        updated = True
+            if updated:
+                updated_policies.append(policies[policy]['policy'])
+
+        # Now, submit the updated policies to _ilm/policy/<policyname>
+        for policy in updated_policies:
+            payload = json.dumps(policy)
+            print(payload)
 
     def unmount_oldest_repo(self):
         # Time to call the unmount API on self.oldest_repo
         pass
 
-    def update_ilm_policies(self):
-        policies = json.loads(request.get(self.policies_url))
-        updated_policies = {}
-        # Go through these looking for any occurrences of self.newest_repo
-        # and change those to use self.repo_name instead.
-
-        # Now, submit the updated policies to _ilm/policy/<policyname>
-        for policy in updated_policies:
-            payload = json.dumps(policy)
-        pass
-
     def get_repos(self) -> list[object]:
-
-        return []
+        print("Getting repo list")
+        list = self.session.get(
+                       self.snapshot_repo_url.format(name=self.new_repo_name),
+                       verify=False)
+        return list.json()
 
     def process(self) -> None:
-        self.create_new_repo()
-        self.update_ilm_policies()
-        self.unmount_oldest_repo()
+        if self.create_new_bucket():
+            self.create_new_repo()
+            self.update_ilm_policies()
+            self.unmount_oldest_repo()
+        else:
+            print(f"Could not create bucket {self.new_bucket_name}")
+            sys.exit(1)
 
 
-def get_repo_names(dict[]) -> list[str]:
+def get_repo_names(repos) -> list[str]:
     """
     Helper function to extract repository names from the repo list.
     """
     names = []
 
-
     return names
 
 
-def main(config):
-    Processor(config).process()
-    
+def main(args):
+    Processor(args).process()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', '-c', dest=config,
-                        default='/etc/rotate-monthly-repository.yml',
-                        help='alternate config file (default: /etc/'
-                        'rotate-monthly-repository.yml)')
-    parser.add_argument('year', metavar='YEAR', type=int, 
+    parser.add_argument('year', metavar='YEAR', type=int,
                         help='Year for the new repo')
-    parser.add_argument('month', metavar='MONTH', type=int, 
+    parser.add_argument('month', metavar='MONTH', type=int,
                         help='Month for the new repo')
-    args=parser.parse_args()
+    args = parser.parse_args()
 
-    with open(configfile, 'r') as file:
-        config = yaml.safe_load(file)
-        config['year'] = args.year
-        config['month'] = args.month
-    
-    main(config)
+    main(args)
