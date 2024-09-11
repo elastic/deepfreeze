@@ -34,7 +34,6 @@ class Processor:
 
         self.repo_list = self.get_repos()
         self.repo_list.sort()
-        print(f"self.repo_list={self.repo_list}")
         self.latest_repo = self.repo_list[-1]
 
     #     if self.new_repo_name in self.repo_list:
@@ -44,7 +43,6 @@ class Processor:
     def create_new_bucket(self):
         # Create a new bucket, required before we can add a new repo which
         # references it.
-        print("Creating bucket")
         try:
             s3 = boto3.client('s3')
             s3.create_bucket(Bucket=self.new_bucket_name)
@@ -67,17 +65,19 @@ class Processor:
         )
 
     def update_ilm_policies(self):
+        print(f"Attempting to switch from {self.latest_repo} to "
+              f"{self.new_repo_name}")
         policies = self.elasticsearch.ilm.get_lifecycle()
         updated_policies = {}
         for policy in policies:
-            print(f"Policy {policy}")
-            print(type(policy))
             # Go through these looking for any occurrences of self.latest_repo
             # and change those to use self.new_repo_name instead.
             p = policies[policy]['policy']['phases']
             updated = False
             for phase in p:
                 if 'searchable_snapshot' in p[phase]['actions']:
+                    # FIXME: Need to capture these some other way; this in-place
+                    # update isn't working.
                     if p[phase]['actions']['searchable_snapshot']['snapshot_repository'] == self.latest_repo:
                         p[phase]['actions']['searchable_snapshot']['snapshot_repository'] == self.new_repo_name
                         updated = True
@@ -85,9 +85,14 @@ class Processor:
                 updated_policies[policy] = policies[policy]['policy']
 
         # Now, submit the updated policies to _ilm/policy/<policyname>
-        for policy in updated_policies.keys():
-            payload = json.dumps(updated_policies[policy])
-            # Update this policy with the provided payload using self.elasticsearch
+        if len(updated_policies.keys()) == 0:
+            print("No policies to update")
+        for pol in updated_policies.keys():
+            print(f" updated policy: {updated_policies[pol]}")
+            self.elasticsearch.ilm.put_lifecycle(
+                name=pol,
+                policy=updated_policies[pol]
+            )
 
     def get_next_suffix(self):
         if self.config.style == "monthly":
@@ -96,7 +101,7 @@ class Processor:
             return f"{year:04}.{month:02}"
         elif self.config.style == "oneup":
             pattern = re.compile(f"{self.config.repo_name_prefix}(.+)")
-            cur_suffix = pattern.search(cur_repo).group(1)
+            cur_suffix = pattern.search(self.latest_repo).group(1)
             return cur_suffix
 
     def unmount_oldest_repo(self):
