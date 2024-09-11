@@ -3,30 +3,28 @@
 # You MUST set values for the following; there are no defaults.
 
 # host is the name of the kibana host, which will be used for all URLs.
-# port is the port on which Kibana can be called.d
-scheme: https
-host: es01.lab.thewortmans.org
-port: 9200
+# port is the port on which Kibana can be called.
+# scheme is either http or https.
+elasticsearch: https://192.168.1.151:9200
+
+# ca is the path to the ca cert file for elasticsearch's https.
+ca: http_ca.crt
 
 # Username of the account to use when connecting to kibana
 username: elastic
-password: 'f_TevCkPXTDh6F7pViGT'
-
-aws_access_key_id: AKIAYW2UULNFD6EMEIEX
-aws_secret_key_id: NAFN7+dmKkRU8Tbr2yTXNpC+6ykueb3j7FF8UR1d
-aws_region: us-east-1
+password: 'jNjXR*w8cVSng7Z4luRY'
 
 # OPTIONAL SETTINGS
 # The remaining settings have sensible defaults which may be updated if you
 # wish.
 
-# The repo_name_pattern determines how the repos are named. Terms in curly
-# brackets are replaced when the next archive is created.
-repo_name_pattern: rolling_archive-{year:04d}.{month:02d}
+# The repo_name_prefix determines how the repos are named. What gets appended
+# depends on the setting for style, below.
+repo_name_prefix: 'rolling_archive-'
 
-# bucket_name_pattern allows for a different naming scheme for the S3 buckets
+# bucket_name_prefix allows for a different naming scheme for the S3 buckets
 # themselves.
-bucket_name_pattern: elastic-repo-{year:04d}-{month:02d}
+bucket_name_prefix: 'elastic-repo-'
 
 # style sets the name suffix style. There are currently two values supported.
 #   monthly - YYYY-MM suffix

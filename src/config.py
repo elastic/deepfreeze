@@ -2,18 +2,17 @@
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import yaml
-from pydantic.types import SecretStr
+# from pydantic.types import SecretStr
 
 
 class Config(BaseSettings):
-    host: str
-    port: int
+    elasticsearch: str
+    ca: str
     username: str
     password: str
-    repo_name_pattern: str
-    bucket_name_pattern: str
+    repo_name_prefix: str
+    bucket_name_prefix: str
     style: str
-    scheme: str
     policy_ep: str
     repo_ep: str
     base_path: str
@@ -49,7 +48,7 @@ if __name__ == "__main__":
     print(f"settings.username = {settings.username}")
     print(f"settings.username = {settings.username}")
     print(f"settings.password = {settings.password}")
-    print(f"settings.repo_name_pattern = {settings.repo_name_pattern}")
+    print(f"settings.repo_name_prefix = {settings.repo_name_prefix}")
     print(f"settings.style = {settings.style}")
     print(f"settings.scheme = {settings.scheme}")
     print(f"settings.policy_ep = {settings.policy_ep}")
