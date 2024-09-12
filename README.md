@@ -17,23 +17,8 @@ The idea is to use an ILM policy whose `delete` action only removes the index, n
       },
 ```
 
-The challenge becomes tracking what was in each snapshot so that finding the right one to remount (using the `_mount` API) is easy.
-
-## Tracking Index
-We need an index to track all searchable snapshots which maps the following fields for ease of search & retrieval:
-
-- index_name
-- start_datetime
-- end_datetime
-- repository
-- snapshot_name
-- [anything else we need?]
-
-Given this index's importance, let's make it default to having a replica on every content and hot node. Maybe every data node? Look to enrich indexes and see what they do.
-
-No need to update, just insert. What about deletions? Probably a good idea.
-
-**UPDATE: Looks like the snapshot metadata persists in the S3 bucket even after the index has been deleted. Need to see how that works if we take the whole folder or bucket offline. Probably ES would re-parse the metadata when the repo reconnects and discover all those lovely seasnaps again.**
+We then keep a certain number of searchable snapshot repositories mounted, while unmounting those which exceed that
+total. This allows us to quickly bring back older data without the burden of keeping it in our frozen tier indefinitely.
 
 ## Intelligent Tiering
 
@@ -41,14 +26,17 @@ How does this play with IT? If a searchable snapshot ages into the deepfreeze wh
 
 
 ## Code
-Python or bash? Keep this as simple as possible and run it daily so that it can update newly-minted searchable snapshots in the deepfreeze index.
 
-Another job to go through the list of snapshots and make sure they all still exist, deleting those that don't? Alerting somehow when that happens?
+There is one script, rotate-monthly-repository.py. It manages the whole process, including:
+1. Creating a new S3 bucket,
+2. Mounting that S3 bucket as a new snapshot repository,
+3. Updating ILM Policies which use the current bucket to use the new one, and
+4. Unmounting older repositories
 
-First priority probably are helper scripts:
+It has a few command-line options and a config file, rotate-monthly-repository.yml with explanations of all settings.
 
-* Take a monthly snapshot archive offline
-* Create a new monthly snapshot archive
-* Remount a monthly snapshot archive
-* Promote a monthly snapshot archive back from glacier.
+```
+# ./rotate-monthly-repository.py -?
+```
 
+to see current options.
