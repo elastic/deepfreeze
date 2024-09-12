@@ -32,6 +32,34 @@ class Config(BaseSettings):
             raise ValueError('style must be one of monthly, oneup')
         return v
 
+    @field_validator('canned_acl')
+    @classmethod
+    def check_canned_acl(cls, v: str) -> str:
+        if v not in [
+            'private',
+            'public-read',
+            'public-read-write',
+            'authenticated-read',
+            'log-delivery-write',
+            'bucket-owner-read',
+            'bucket-owner-full-control'
+        ]:
+            raise ValueError('unknown value for canned_acl')
+        return v
+
+    @field_validator('storage_class')
+    @classmethod
+    def check_storage_class(cls, v: str) -> str:
+        if v not in [
+            'standard',
+            'reduced_redundancy',
+            'standard_ia',
+            'intelligent_tiering',
+            'onezone_ia'
+        ]:
+            raise ValueError('unknown value for storage_class')
+        return v
+
     @classmethod
     def load_yaml_settings(cls):
         with open("rotate-monthly-repository.yml", "r") as f:
