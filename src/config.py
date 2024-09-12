@@ -21,7 +21,7 @@ class Config(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_file=".env",
-        env_prefix="APP_",
+        env_prefix="DEEPFREEZE_",
     )
 
     @field_validator('username', 'password')
