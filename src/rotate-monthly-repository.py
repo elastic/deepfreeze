@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 #
 import argparse
-from datetime import datetime
-import json
 import logging
 import re
-from elasticsearch import Elasticsearch
 import sys
-from urllib.parse import urlunsplit
-from config import Config
 import boto3
 from botocore.exceptions import ClientError
+from datetime import datetime
+from elasticsearch import Elasticsearch
+from config import Config
 
 
 class Processor:
@@ -36,13 +34,14 @@ class Processor:
         self.repo_list.sort()
         self.latest_repo = self.repo_list[-1]
 
-    #     if self.new_repo_name in self.repo_list:
-    #         raise Exception(f"Requested repo name {self.new_repo_name} "
-    #                         "already exists!")
+        if self.new_repo_name in self.repo_list:
+            raise Exception(f"Requested repo name {self.new_repo_name} "
+                            "already exists!")
 
     def create_new_bucket(self):
-        # Create a new bucket, required before we can add a new repo which
-        # references it.
+        """
+        Creates a new bucket.
+        """
         try:
             s3 = boto3.client('s3')
             s3.create_bucket(Bucket=self.new_bucket_name)
@@ -52,7 +51,9 @@ class Processor:
         return True
 
     def create_new_repo(self):
-        # Create a new repo using self.new_repo_name and self.new_bucket_name
+        """
+        Creates a new repo using the previously-created bucket.
+        """
         self.elasticsearch.snapshot.create_repository(
             name=self.new_repo_name,
             type="s3",
@@ -65,6 +66,14 @@ class Processor:
         )
 
     def update_ilm_policies(self):
+        """
+        Loop through all existing IML policies looking for ones which reference
+        the latest_repo and update them to use the new repo instead.
+        """
+        if self.latest_repo == self.new_repo_name:
+            print("Already on the latest repo")
+            return
+            sys.exit(0)
         print(f"Attempting to switch from {self.latest_repo} to "
               f"{self.new_repo_name}")
         policies = self.elasticsearch.ilm.get_lifecycle()
@@ -76,10 +85,8 @@ class Processor:
             updated = False
             for phase in p:
                 if 'searchable_snapshot' in p[phase]['actions']:
-                    # FIXME: Need to capture these some other way; this in-place
-                    # update isn't working.
                     if p[phase]['actions']['searchable_snapshot']['snapshot_repository'] == self.latest_repo:
-                        p[phase]['actions']['searchable_snapshot']['snapshot_repository'] == self.new_repo_name
+                        p[phase]['actions']['searchable_snapshot']['snapshot_repository'] = self.new_repo_name
                         updated = True
             if updated:
                 updated_policies[policy] = policies[policy]['policy']
@@ -87,14 +94,19 @@ class Processor:
         # Now, submit the updated policies to _ilm/policy/<policyname>
         if len(updated_policies.keys()) == 0:
             print("No policies to update")
+        else:
+            print(f"Updating {len(updated_policies.keys())} policies:")
         for pol in updated_policies.keys():
-            print(f" updated policy: {updated_policies[pol]}")
+            print(f"\t{pol}")
             self.elasticsearch.ilm.put_lifecycle(
                 name=pol,
                 policy=updated_policies[pol]
             )
 
     def get_next_suffix(self):
+        """
+        Gets the next suffix, depending on the naming style chosen.
+        """
         if self.config.style == "monthly":
             year = self.args.year if self.args.year else datetime.now.year()
             month = self.args.month if self.args.month else datetime.now.month()
@@ -104,32 +116,49 @@ class Processor:
             cur_suffix = pattern.search(self.latest_repo).group(1)
             return cur_suffix
 
-    def unmount_oldest_repo(self):
-        # Time to call the unmount API on self.oldest_repo
-        pass
+    def unmount_oldest_repos(self):
+        """
+        Take the oldest repos from the list and remove them, only retaining
+        the number chosen in the config under "keep".
+        """
+        s = slice(0, len(self.repo_list) - self.config.keep)
+        print(f"Repo list: {self.repo_list}")
+        for repo in self.repo_list[s]:
+            print(f"Removing repo {repo}")
 
     def get_repos(self) -> list[object]:
+        """
+        Get the complete list of repos and return just the ones whose names
+        begin with our prefix.
+
+        :returns:   The repos.
+        :rtype:     list[object]
+        """
         repos = self.elasticsearch.snapshot.get_repository()
         pattern = re.compile(self.config.repo_name_prefix)
         keepers = []
         for repo in repos.keys():
-            # If the repo name starts with self.config.repo_name_prefix,
-            # add it to the list of ones we care about.
             if pattern.search(repo):
                 keepers.append(repo)
         return keepers
 
     def process(self) -> None:
+        """
+        Perform our high-level steps in sequence.
+        """
         if self.create_new_bucket():
             self.create_new_repo()
             self.update_ilm_policies()
-            # self.unmount_oldest_repo()
+            self.unmount_oldest_repos()
         else:
             print(f"Could not create bucket {self.new_bucket_name}")
             sys.exit(1)
 
 
 def main(args):
+    """
+    Does this really need documentation?
+    """
     Processor(args).process()
 
 

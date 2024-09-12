@@ -14,6 +14,10 @@ ca: http_ca.crt
 username: elastic
 password: 'jNjXR*w8cVSng7Z4luRY'
 
+# How many repositories should be kept online? We'll unmount the oldest
+# until we get down to this many.
+keep: 3
+
 # OPTIONAL SETTINGS
 # The remaining settings have sensible defaults which may be updated if you
 # wish.
@@ -27,7 +31,7 @@ repo_name_prefix: 'rolling_archive-'
 bucket_name_prefix: 'elastic-repo-'
 
 # style sets the name suffix style. There are currently two values supported.
-#   monthly - YYYY-MM suffix
+#   monthly - YYYY.MM suffix
 #   oneup   - 000001 followed by increasing numbers (like rollover indices)
 style: monthly
 

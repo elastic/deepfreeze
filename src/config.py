@@ -1,8 +1,8 @@
 # #!/usr/bin/env python3
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import yaml
-# from pydantic.types import SecretStr
 
 
 class Config(BaseSettings):
@@ -18,11 +18,19 @@ class Config(BaseSettings):
     base_path: str
     canned_acl: str
     storage_class: str
+    keep: int
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_prefix="APP_",
     )
+
+    @field_validator('style')
+    @classmethod
+    def check_style(cls, v: str) -> str:
+        if v not in ['monthly', 'oneup']:
+            raise ValueError('style must be one of monthly, oneup')
+        return v
 
     @classmethod
     def load_yaml_settings(cls):
@@ -44,12 +52,17 @@ if __name__ == "__main__":
 
     # Instantiate the settings
     settings = Config()
-    print(f"settings.host = {settings.host}")
-    print(f"settings.username = {settings.username}")
-    print(f"settings.username = {settings.username}")
-    print(f"settings.password = {settings.password}")
-    print(f"settings.repo_name_prefix = {settings.repo_name_prefix}")
-    print(f"settings.style = {settings.style}")
-    print(f"settings.scheme = {settings.scheme}")
-    print(f"settings.policy_ep = {settings.policy_ep}")
-    print(f"settings.repo_ep = {settings.repo_ep}")
+
+    print(f"elasticsearch = {settings.elasticsearch}")
+    print(f"ca = {settings.ca}")
+    print(f"username = {settings.username}")
+    print(f"password = {settings.password}")
+    print(f"repo_name_prefix = {settings.repo_name_prefix}")
+    print(f"bucket_name_prefix = {settings.bucket_name_prefix}")
+    print(f"style = {settings.style}")
+    print(f"policy_ep = {settings.policy_ep}")
+    print(f"repo_ep = {settings.repo_ep}")
+    print(f"base_path = {settings.base_path}")
+    print(f"canned_acl = {settings.canned_acl}")
+    print(f"storage_class = {settings.storage_class}")
+    print(f"keep = {settings.keep}")
