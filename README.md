@@ -36,7 +36,15 @@ There is one script, rotate-monthly-repository.py. It manages the whole process,
 It has a few command-line options and a config file, rotate-monthly-repository.yml with explanations of all settings.
 
 ```
-# ./rotate-monthly-repository.py -?
+# ./rotate-monthly-repository.py -h
+usage: rotate-monthly-repository.py [-h] [YEAR] [MONTH]
+
+positional arguments:
+  YEAR        Year for the new repo
+  MONTH       Month for the new repo
+
+options:
+  -h, --help  show this help message and exit
 ```
 
 to see current options.
