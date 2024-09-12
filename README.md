@@ -48,3 +48,11 @@ options:
 ```
 
 to see current options.
+
+## Setup
+
+First, install the required modules using pip.
+```
+$ pip install -r requirements.txt
+```
+
