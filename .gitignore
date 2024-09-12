@@ -1,6 +1,8 @@
 # Project-specific artifacts that don't belong in the repo
 rotate-monthly-repository.yml
 http_ca.crt
+*.sublime-workspace
+.DS_*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
