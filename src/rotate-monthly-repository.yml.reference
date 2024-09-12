@@ -5,14 +5,14 @@
 # host is the name of the kibana host, which will be used for all URLs.
 # port is the port on which Kibana can be called.
 # scheme is either http or https.
-elasticsearch: https://192.168.1.151:9200
+elasticsearch: https://my.elasticsearch.node.com:9200
 
 # ca is the path to the ca cert file for elasticsearch's https.
-ca: http_ca.crt
+ca: /path/to/http_ca.crt
 
 # Username of the account to use when connecting to kibana
 username: elastic
-password: 'jNjXR*w8cVSng7Z4luRY'
+password: my-strong-password
 
 # How many repositories should be kept online? We'll unmount the oldest
 # until we get down to this many.
