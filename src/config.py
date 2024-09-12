@@ -1,21 +1,20 @@
 # #!/usr/bin/env python3
 
-from pydantic import field_validator
+from pydantic import field_validator, AnyUrl, FilePath
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
 import yaml
 
 
 class Config(BaseSettings):
-    elasticsearch: str
-    ca: str
+    elasticsearch: AnyUrl
+    ca: FilePath
     username: str
     password: str
     repo_name_prefix: str
     bucket_name_prefix: str
     style: str
-    policy_ep: str
-    repo_ep: str
-    base_path: str
+    base_path: Path
     canned_acl: str
     storage_class: str
     keep: int
@@ -24,6 +23,20 @@ class Config(BaseSettings):
         env_file=".env",
         env_prefix="APP_",
     )
+
+    @field_validator('username', 'password')
+    @classmethod
+    def check_no_spaces(cls, v: str) -> str:
+        if ' ' in v:
+            raise ValueError('must not contain spaces')
+        return v
+
+    @field_validator('repo_name_prefix', 'bucket_name_prefix')
+    @classmethod
+    def check_trailing_dash(cls, v: str) -> str:
+        if v[-1] != '-':
+            raise ValueError('must end in "-"')
+        return v
 
     @field_validator('style')
     @classmethod
@@ -88,8 +101,6 @@ if __name__ == "__main__":
     print(f"repo_name_prefix = {settings.repo_name_prefix}")
     print(f"bucket_name_prefix = {settings.bucket_name_prefix}")
     print(f"style = {settings.style}")
-    print(f"policy_ep = {settings.policy_ep}")
-    print(f"repo_ep = {settings.repo_ep}")
     print(f"base_path = {settings.base_path}")
     print(f"canned_acl = {settings.canned_acl}")
     print(f"storage_class = {settings.storage_class}")

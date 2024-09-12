@@ -35,11 +35,6 @@ bucket_name_prefix: 'elastic-repo-'
 #   oneup   - 000001 followed by increasing numbers (like rollover indices)
 style: monthly
 
-# urls is a list of URLs used when connecting to Elasticsearch, and each
-# represents a unique and necessary endpoint.
-policy_ep: _ilm/policy
-repo_ep: _snapshot
-
 # base_path references the path within the bucket where searchable snapshots
 # will be placed and found.
 base_path: snapshots
