@@ -9,8 +9,10 @@ import os
 from botocore.exceptions import ClientError
 from datetime import datetime
 from elasticsearch import Elasticsearch
+from dotenv import load_dotenv
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("deepfreeze")
+load_dotenv()
 
 
 class Deepfreeze:
@@ -23,6 +25,7 @@ class Deepfreeze:
         self,
         year,
         month,
+        debug,
         verbose,
         elasticsearch,
         ca,
@@ -52,8 +55,13 @@ class Deepfreeze:
 
         if verbose:
             logging.basicConfig(level=logging.INFO)
+            print("INFO")
+        elif debug:
+            logging.basicConfig(level=logging.DEBUG)
+            print("DEBUG")
         else:
             logging.basicConfig(level=logging.WARNING)
+            print("WARNING")
 
         self.es_client = Elasticsearch(
             self.elasticsearch,
@@ -81,6 +89,7 @@ class Deepfreeze:
         :returns:   whether the bucket was created or not
         :rtype:     bool
         """
+        logging.info(f"Creating bucket {self.new_bucket_name}")
         try:
             s3 = boto3.client("s3")
             s3.create_bucket(Bucket=self.new_bucket_name)
@@ -93,6 +102,9 @@ class Deepfreeze:
         """
         Creates a new repo using the previously-created bucket.
         """
+        logging.info(
+            f"Creating repo {self.new_repo_name} using bucket {self.new_bucket_name}"
+        )
         self.es_client.snapshot.create_repository(
             name=self.new_repo_name,
             type="s3",
@@ -198,6 +210,7 @@ class Deepfreeze:
 @click.command()
 @click.argument("year", type=int, required=False, default=datetime.now().year)
 @click.argument("month", type=int, required=False, default=datetime.now().month)
+@click.option("--debug", is_flag=True, hidden=True)
 @click.option(
     "--verbose",
     "-v",
@@ -298,6 +311,7 @@ class Deepfreeze:
 def deepfreeze(
     year,
     month,
+    debug,
     verbose,
     elasticsearch,
     ca,
@@ -332,6 +346,7 @@ def deepfreeze(
     Deepfreeze(
         year,
         month,
+        debug,
         verbose,
         elasticsearch,
         ca,
