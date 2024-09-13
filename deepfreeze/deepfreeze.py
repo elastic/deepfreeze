@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-import argparse
+import click
 import logging
 import re
 import sys
@@ -155,23 +155,23 @@ class Processor:
             sys.exit(1)
 
 
-def main(args):
+@click.command()
+@click.argument('year', type=int, required=False)
+@click.argument('month', type=int, required=False)
+def main(year, month):
     """
-    Does this really need documentation?
+    deepfreeze handles creating a new bucket, setting up a repository for
+    that bucket, updating ILM policies to use the new bucket, and unmounting
+    buckets we no longer wish to keep online.
+
+    It uses a configuration stored in /etc/deepfreeze/config.yml. A template
+    is provided at /etc/deepfreeze/config.yml.template.
+
+    Optionally, a year and month can be provided. If not, the current year
+    and month will be used in naming the next bucket and repository.
     """
-    Processor(args).process()
+    Processor(year, month).process()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('year', metavar='YEAR', type=int,
-                        default=datetime.now().year,
-                        nargs='?',
-                        help='Year for the new repo')
-    parser.add_argument('month', metavar='MONTH', type=int,
-                        default=datetime.now().month,
-                        nargs='?',
-                        help='Month for the new repo')
-    args = parser.parse_args()
-
-    main(args)
+    main()
