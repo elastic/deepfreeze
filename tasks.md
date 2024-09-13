@@ -10,5 +10,5 @@
 - [ ] It's generally better to raise custom exceptions derived from appropriate ValueError etc.
 - [ ] sys.exit(0) is unreachable
 - [x] Does unmount_oldest_repos do anything other than output?
-- [ ] Processor(args).process() is indeed a little barebones right now, but you could inject the config here instead of accessing it inside `Processor.__init__` and handle exceptions.
+- [x] Processor(args).process() is indeed a little barebones right now, but you could inject the config here instead of accessing it inside `Processor.__init__` and handle exceptions.
 - [x] Try running pylint and black or ruff, it will find some of the things I mentioned and probably more.

@@ -27,6 +27,8 @@ How does this play with IT? If a searchable snapshot ages into the deepfreeze wh
 
 ## Code
 
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 There is one script, rotate-monthly-repository.py. It manages the whole process, including:
 1. Creating a new S3 bucket,
 2. Mounting that S3 bucket as a new snapshot repository,
