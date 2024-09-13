@@ -10,57 +10,45 @@ from botocore.exceptions import ClientError
 from datetime import datetime
 from elasticsearch import Elasticsearch
 from dotenv import load_dotenv
-
-logger = logging.getLogger("deepfreeze")
-load_dotenv()
+from dataclasses import dataclass
 
 
+class RepositoryException(Exception):
+    pass
+
+
+@dataclass
 class Deepfreeze:
     """
     The Deepfreeze is responsible for managing the repository rotation given
     a config file of user-managed options and settings.
     """
 
-    def __init__(
-        self,
-        year,
-        month,
-        debug,
-        verbose,
-        elasticsearch,
-        ca,
-        username,
-        password,
-        repo_name_prefix,
-        bucket_name_prefix,
-        style,
-        base_path,
-        canned_acl,
-        storage_class,
-        keep,
-    ) -> None:
-        self.year = year
-        self.month = month
-        self.elasticsearch = elasticsearch
-        self.ca = ca
-        self.username = username
-        self.password = password
-        self.repo_name_prefix = repo_name_prefix
-        self.bucket_name_prefix = bucket_name_prefix
-        self.style = style
-        self.base_path = base_path
-        self.canned_acl = canned_acl
-        self.storage_class = storage_class
-        self.keep = keep
+    year: str
+    month: str
+    debug: bool
+    verbose: bool
+    elasticsearch: str
+    ca: str
+    username: str
+    password: str
+    repo_name_prefix: str
+    bucket_name_prefix: str
+    style: str
+    base_path: str
+    canned_acl: str
+    storage_class: str
+    keep: int
 
-        if verbose:
-            logging.basicConfig(level=logging.INFO)
+    def setup(self):
+        if self.verbose:
+            logger.setLevel(level=logging.INFO)
             print("INFO")
-        elif debug:
-            logging.basicConfig(level=logging.DEBUG)
+        elif self.debug:
+            logger.setLevel(level=logging.DEBUG)
             print("DEBUG")
         else:
-            logging.basicConfig(level=logging.WARNING)
+            logger.setLevel(level=logging.WARNING)
             print("WARNING")
 
         self.es_client = Elasticsearch(
@@ -75,12 +63,17 @@ class Deepfreeze:
 
         self.repo_list = self.get_repos()
         self.repo_list.sort()
-        self.latest_repo = self.repo_list[-1]
+        try:
+            self.latest_repo = self.repo_list[-1]
+        except IndexError:
+            raise RepositoryException(
+                f"no matching repositories exist for {self.repo_name_prefix}*"
+            ) from None
 
         if self.new_repo_name in self.repo_list:
-            raise Exception(
-                f"Requested repo name {self.new_repo_name} " "already exists!"
-            )
+            raise RepositoryException(
+                f"repository {self.repo_name} already exists"
+            ) from None
 
     def create_new_bucket(self) -> bool:
         """
@@ -198,13 +191,30 @@ class Deepfreeze:
         """
         Perform our high-level steps in sequence.
         """
-        if self.create_new_bucket():
-            self.create_new_repo()
-            self.update_ilm_policies()
-            self.unmount_oldest_repos()
-        else:
-            logging.warning(f"Could not create bucket {self.new_bucket_name}")
-            sys.exit(1)
+        self.create_new_bucket()
+        self.create_new_repo()
+        self.update_ilm_policies()
+        self.unmount_oldest_repos()
+
+    def dump(self):
+        """
+        Dump the current configuration
+        """
+        print(f"year: {self.year}")
+        print(f"month: {self.month}")
+        print(f"debug: {self.debug}")
+        print(f"verbose: {self.verbose}")
+        print(f"elasticsearch: {self.elasticsearch}")
+        print(f"ca: {self.ca}")
+        print(f"username: {self.username}")
+        print(f"password: {self.password}")
+        print(f"repo_name_prefix: {self.repo_name_prefix}")
+        print(f"bucket_name_prefix: {self.bucket_name_prefix}")
+        print(f"style: {self.style}")
+        print(f"base_path: {self.base_path}")
+        print(f"canned_acl: {self.canned_acl}")
+        print(f"storage_class: {self.storage_class}")
+        print(f"keep: {self.keep}")
 
 
 @click.command()
@@ -227,14 +237,14 @@ class Deepfreeze:
 @click.option(
     "--ca",
     type=str,
-    default=os.environ.get("DEEPFREEZE_CA"),
+    default=os.environ.get("DEEPFREEZE_CA", "/etc/elasticsearch/certs/http_ca.crt"),
     required=True,
     help="path to ca cert file",
 )
 @click.option(
     "--username",
     type=str,
-    default=os.environ.get("DEEPFREEZE_USERNAME"),
+    default=os.environ.get("DEEPFREEZE_USERNAME", "elastic"),
     required=True,
     help="username for elasticsearch connection",
 )
@@ -242,28 +252,28 @@ class Deepfreeze:
 @click.option(
     "--repo_name_prefix",
     type=str,
-    default=os.environ.get("DEEPFREEZE_REPO_NAME_PREFIX"),
+    default=os.environ.get("DEEPFREEZE_REPO_NAME_PREFIX", "deepfreeze-"),
     required=True,
     help="prefix for naming rotating repositories",
 )
 @click.option(
     "--bucket_name_prefix",
     type=str,
-    default=os.environ.get("DEEPFREEZE_BUCKET_NAME_PREFIX"),
+    default=os.environ.get("DEEPFREEZE_BUCKET_NAME_PREFIX", "deepfreeze-"),
     required=True,
     help="prefix for naming buckets",
 )
 @click.option(
     "--style",
     type=click.Choice(["oneup", "monthly"]),
-    default=os.environ.get("DEEPFREEZE_STYLE"),
+    default=os.environ.get("DEEPFREEZE_STYLE", "monthly"),
     required=True,
     help="suffix can be one-up like indices or date-based (YYYY.MM)",
 )
 @click.option(
     "--base_path",
     type=str,
-    default=os.environ.get("DEEPFREEZE_BASE_PATH"),
+    default=os.environ.get("DEEPFREEZE_BASE_PATH", "snapshots"),
     required=True,
     help="base path in the bucket to use for searchable snapshots",
 )
@@ -280,7 +290,7 @@ class Deepfreeze:
             "bucket-owner-full-control",
         ]
     ),
-    default=os.environ.get("DEEPFREEZE_CANNED_ACL"),
+    default=os.environ.get("DEEPFREEZE_CANNED_ACL", "private"),
     required=True,
     help="Canned ACL as defined by AWS",
 )
@@ -295,17 +305,18 @@ class Deepfreeze:
             "onezone_ia",
         ]
     ),
-    default=os.environ.get("DEEPFREEZE_STORAGE_CLASS"),
+    default=os.environ.get("DEEPFREEZE_STORAGE_CLASS", "intelligent_tiering"),
     required=True,
     help="Storage class as defined by AWS",
 )
 @click.option(
     "--keep",
     type=int,
-    default=os.environ.get("DEEPFREEZE_KEEP"),
+    default=os.environ.get("DEEPFREEZE_KEEP", 6),
     required=True,
     help="How many repositories should remain mounted?",
 )
+@click.option("--dump", is_flag=True, hidden=True)
 @click.help_option("--help", "-?")
 @click.version_option()
 def deepfreeze(
@@ -324,6 +335,7 @@ def deepfreeze(
     canned_acl,
     storage_class,
     keep,
+    dump,
 ):
     """
     deepfreeze handles creating a new bucket, setting up a repository for
@@ -343,7 +355,7 @@ def deepfreeze(
     securely provide the password for the elasticsearch username is on the
     command line using secure entry, and so that's what we do.
     """
-    Deepfreeze(
+    freezer = Deepfreeze(
         year,
         month,
         debug,
@@ -359,8 +371,20 @@ def deepfreeze(
         canned_acl,
         storage_class,
         keep,
-    ).rotate()
+    )
+    if dump:
+        freezer.dump()
+    else:
+        freezer.setup()
+        freezer.rotate()
 
 
 if __name__ == "__main__":
+    logger = logging.getLogger("deepfreeze")
+    formatter = logging.Formatter("%(levelname)s - %(message)s")
+    ch = logging.StreamHandler()
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+    load_dotenv()
+
     deepfreeze()

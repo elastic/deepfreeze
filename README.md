@@ -35,17 +35,21 @@ $ pip install deepfreeze
 
 ### Environment variables
 
-Deepfreeze requires several environment variables to work. These can be passed in on the command line, but that will produce a very long command and probably isn't the ideal situation.
+Deepfreeze requires several environment variables to work. These can also be given through command-line options.
 
-You can define the values something like this:
+Sensible defaults are provided wherever possible. If you accept them, then all that's required is the URL of your elasticsearch instance (given by DEEPFREEZE_ELASTICSEARCH or the "--elasticsearch" option) and the password for the elastic user (prompted for on each invocation).
+
+*Note: We will be adding a way to provide the password securely so that the deepfreeze command can be run in a cron job.*
+
+You can define the values in a file (the values given below are the defaults):
 
 ```
 export DEEPFREEZE_ELASTICSEARCH=https://192.168.1.256:9200
-export DEEPFREEZE_CA=/etc/pki/http_ca.crt
+export DEEPFREEZE_CA=/etc/elasticsearch/certs/http_ca.crt
 export DEEPFREEZE_USERNAME=elastic
-export DEEPFREEZE_KEEP=3
-export DEEPFREEZE_REPO_NAME_PREFIX='rolling_archive-'
-export DEEPFREEZE_BUCKET_NAME_PREFIX='elastic-repo-'
+export DEEPFREEZE_KEEP=6
+export DEEPFREEZE_REPO_NAME_PREFIX='deepfreeze-'
+export DEEPFREEZE_BUCKET_NAME_PREFIX='deepfreeze-'
 export DEEPFREEZE_STYLE=monthly
 export DEEPFREEZE_BASE_PATH=snapshots
 export DEEPFREEZE_CANNED_ACL=private
@@ -57,6 +61,12 @@ Then, just source this file before running the command:
 ```
 $ source my-deepfreeze-env.sh
 ```
+
+## Bootstrapping
+
+*Do we want to have a bootstrapping function, which sets up the initial deepfreeze repository & bucket? We'd need to know what current repo(s) it's replacing, but it could be done.*
+
+Currently, deepfreeze expects that at least one repo with the expected name pattern exists. You will need to have created this by hand.
 
 ## Code
 
