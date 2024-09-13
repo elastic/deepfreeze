@@ -27,7 +27,7 @@ How does this play with IT? If a searchable snapshot ages into the deepfreeze wh
 
 ## Installing
 
-*Provide better directions for installing from here until we're stable enough to warrant publishing to pypi*`
+*Provide better directions for installing from here until we're stable enough to warrant publishing to pypi*
 
 ```
 $ pip install deepfreeze
