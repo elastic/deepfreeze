@@ -1,0 +1,14 @@
+- [x] from config import Config only works if the user is in the right folder; you could merge this file into the script or bite the bullet and work on packaging
+- [x] the extra config.py file – artifact related to the previous issue?
+- [x] argparse works, but is very basic, you could do more with click
+- [x] Pythonic things: some things have very reasonable defaults, in particular
+    - [x] for pol in updated_policies.keys() is the same as for pol in updated_policies
+    - [x] if len(updated_policies.keys()) == 0: is the same as if not updated_policies:
+    - [x] try keepers = [repo for repo in repos if pattern.search(repo)]
+- [x] Documentation: for methods like create_new_bucket(self): it's best to provide info on what they return in the doc string (and perhaps as an annotation)
+- [ ] But actually it looks like you have one main happy path and a non-happy path tbat terminates the script. Perhaps raising an exception makes more sense in this case. It also typically makes more sense than sys.exit(1) .
+- [ ] It's generally better to raise custom exceptions derived from appropriate ValueError etc.
+- [ ] sys.exit(0) is unreachable
+- [x] Does unmount_oldest_repos do anything other than output?
+- [ ] Processor(args).process() is indeed a little barebones right now, but you could inject the config here instead of accessing it inside `Processor.__init__` and handle exceptions.
+- [x] Try running pylint and black or ruff, it will find some of the things I mentioned and probably more.
