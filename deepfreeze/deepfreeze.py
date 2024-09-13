@@ -12,6 +12,13 @@ from elasticsearch import Elasticsearch
 from dotenv import load_dotenv
 from dataclasses import dataclass
 
+logger = logging.getLogger("deepfreeze")
+formatter = logging.Formatter("%(levelname)s - %(message)s")
+ch = logging.StreamHandler()
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+load_dotenv()
+
 
 class RepositoryException(Exception):
     pass
@@ -295,21 +302,6 @@ class Deepfreeze:
     help="Canned ACL as defined by AWS",
 )
 @click.option(
-    "--storage_class",
-    type=click.Choice(
-        [
-            "standard",
-            "reduced_redundancy",
-            "standard_ia",
-            "intelligent_tiering",
-            "onezone_ia",
-        ]
-    ),
-    default=os.environ.get("DEEPFREEZE_STORAGE_CLASS", "intelligent_tiering"),
-    required=True,
-    help="Storage class as defined by AWS",
-)
-@click.option(
     "--keep",
     type=int,
     default=os.environ.get("DEEPFREEZE_KEEP", 6),
@@ -380,11 +372,4 @@ def deepfreeze(
 
 
 if __name__ == "__main__":
-    logger = logging.getLogger("deepfreeze")
-    formatter = logging.Formatter("%(levelname)s - %(message)s")
-    ch = logging.StreamHandler()
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-    load_dotenv()
-
     deepfreeze()
