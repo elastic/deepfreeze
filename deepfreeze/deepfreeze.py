@@ -5,30 +5,50 @@ import logging
 import re
 import sys
 import boto3
+import os
 from botocore.exceptions import ClientError
 from datetime import datetime
 from elasticsearch import Elasticsearch
-from config import Config
+
+logger = logging.getLogger(__name__)
 
 
-class Processor:
+class Deepfreeze:
     """
-    The Processor is responsible for managing the repository rotation given
+    The Deepfreeze is responsible for managing the repository rotation given
     a config file of user-managed options and settings.
     """
-    def __init__(self, args) -> None:
-        self.config = Config()
-        self.args = args
+    def __init__(self, year, month, verbose, elasticsearch, ca, username,
+                 password, repo_name_prefix, bucket_name_prefix, style,
+                 base_path, canned_acl, storage_class, keep) -> None:
+        self.year = year
+        self.month = month
+        self.elasticsearch = elasticsearch
+        self.ca = ca
+        self.username = username
+        self.password = password
+        self.repo_name_prefix = repo_name_prefix
+        self.bucket_name_prefix = bucket_name_prefix
+        self.style = style
+        self.base_path = base_path
+        self.canned_acl = canned_acl
+        self.storage_class = storage_class
+        self.keep = keep
 
-        self.elasticsearch = Elasticsearch(
-            self.config.elasticsearch,
-            ca_certs=self.config.ca,
-            basic_auth=(self.config.username, self.config.password)
+        if verbose:
+            logging.basicConfig(level=logging.INFO)
+        else:
+            logging.basicConfig(level=logging.WARNING)
+
+        self.es_client = Elasticsearch(
+            self.elasticsearch,
+            ca_certs=self.ca,
+            basic_auth=(self.username, self.password)
         )
 
         suffix = self.get_next_suffix()
-        self.new_repo_name = f"{self.config.repo_name_prefix}{suffix}"
-        self.new_bucket_name = f"{self.config.bucket_name_prefix}{suffix}"
+        self.new_repo_name = f"{self.repo_name_prefix}{suffix}"
+        self.new_bucket_name = f"{self.bucket_name_prefix}{suffix}"
 
         self.repo_list = self.get_repos()
         self.repo_list.sort()
@@ -38,9 +58,12 @@ class Processor:
             raise Exception(f"Requested repo name {self.new_repo_name} "
                             "already exists!")
 
-    def create_new_bucket(self):
+    def create_new_bucket(self) -> bool:
         """
-        Creates a new bucket.
+        Creates a new S3 bucket using the aws config in the environment.
+
+        :returns:   whether the bucket was created or not
+        :rtype:     bool
         """
         try:
             s3 = boto3.client('s3')
@@ -54,14 +77,14 @@ class Processor:
         """
         Creates a new repo using the previously-created bucket.
         """
-        self.elasticsearch.snapshot.create_repository(
+        self.es_client.snapshot.create_repository(
             name=self.new_repo_name,
             type="s3",
             settings={
                 "bucket": self.new_bucket_name,
-                "base_path": self.config.base_path,
-                "canned_acl": self.config.canned_acl,
-                "storage_class": self.config.storage_class
+                "base_path": self.base_path,
+                "canned_acl": self.canned_acl,
+                "storage_class": self.storage_class
             }
         )
 
@@ -71,12 +94,11 @@ class Processor:
         the latest_repo and update them to use the new repo instead.
         """
         if self.latest_repo == self.new_repo_name:
-            print("Already on the latest repo")
-            return
+            logging.warning("Already on the latest repo")
             sys.exit(0)
-        print(f"Attempting to switch from {self.latest_repo} to "
+        logging.info(f"Attempting to switch from {self.latest_repo} to "
               f"{self.new_repo_name}")
-        policies = self.elasticsearch.ilm.get_lifecycle()
+        policies = self.es_client.ilm.get_lifecycle()
         updated_policies = {}
         for policy in policies:
             # Go through these looking for any occurrences of self.latest_repo
@@ -92,13 +114,13 @@ class Processor:
                 updated_policies[policy] = policies[policy]['policy']
 
         # Now, submit the updated policies to _ilm/policy/<policyname>
-        if len(updated_policies.keys()) == 0:
-            print("No policies to update")
+        if not updated_policies:
+            logging.warning("No policies to update")
         else:
-            print(f"Updating {len(updated_policies.keys())} policies:")
-        for pol in updated_policies.keys():
-            print(f"\t{pol}")
-            self.elasticsearch.ilm.put_lifecycle(
+            logging.info(f"Updating {len(updated_policies.keys())} policies:")
+        for pol in updated_policies:
+            logging.info(f"\t{pol}")
+            self.es_client.ilm.put_lifecycle(
                 name=pol,
                 policy=updated_policies[pol]
             )
@@ -107,12 +129,12 @@ class Processor:
         """
         Gets the next suffix, depending on the naming style chosen.
         """
-        if self.config.style == "monthly":
-            year = self.args.year if self.args.year else datetime.now.year()
-            month = self.args.month if self.args.month else datetime.now.month()
+        if self.style == "monthly":
+            year = self.year if self.year else datetime.now.year()
+            month = self.month if self.month else datetime.now.month()
             return f"{year:04}.{month:02}"
-        elif self.config.style == "oneup":
-            pattern = re.compile(f"{self.config.repo_name_prefix}(.+)")
+        elif self.style == "oneup":
+            pattern = re.compile(f"{self.repo_name_prefix}(.+)")
             cur_suffix = pattern.search(self.latest_repo).group(1)
             return cur_suffix
 
@@ -121,10 +143,11 @@ class Processor:
         Take the oldest repos from the list and remove them, only retaining
         the number chosen in the config under "keep".
         """
-        s = slice(0, len(self.repo_list) - self.config.keep)
+        s = slice(0, len(self.repo_list) - self.keep)
         print(f"Repo list: {self.repo_list}")
         for repo in self.repo_list[s]:
             print(f"Removing repo {repo}")
+            self.es_client.snapshot.delete_repository(name=repo)
 
     def get_repos(self) -> list[object]:
         """
@@ -134,15 +157,11 @@ class Processor:
         :returns:   The repos.
         :rtype:     list[object]
         """
-        repos = self.elasticsearch.snapshot.get_repository()
-        pattern = re.compile(self.config.repo_name_prefix)
-        keepers = []
-        for repo in repos.keys():
-            if pattern.search(repo):
-                keepers.append(repo)
-        return keepers
+        repos = self.es_client.snapshot.get_repository()
+        pattern = re.compile(self.repo_name_prefix)
+        return [repo for repo in repos if pattern.search(repo)]
 
-    def process(self) -> None:
+    def rotate(self) -> None:
         """
         Perform our high-level steps in sequence.
         """
@@ -151,27 +170,99 @@ class Processor:
             self.update_ilm_policies()
             self.unmount_oldest_repos()
         else:
-            print(f"Could not create bucket {self.new_bucket_name}")
+            logging.warning(f"Could not create bucket {self.new_bucket_name}")
             sys.exit(1)
 
 
 @click.command()
-@click.argument('year', type=int, required=False)
-@click.argument('month', type=int, required=False)
-def main(year, month):
+@click.argument('year', type=int, required=False,
+                default=datetime.now().year)
+@click.argument('month', type=int, required=False,
+                default=datetime.now().month)
+@click.option('--verbose', '-v', is_flag=True,
+              help='Display extra debugging output during execution')
+@click.option('--elasticsearch', type=str,
+              default=os.environ.get('DEEPFREEZE_ELASTICSEARCH'),
+              required=True,
+              help='URL to use when connecting to elasticsearch (https://elasticsearch.local:9200)')
+@click.option('--ca', type=str,
+              default=os.environ.get('DEEPFREEZE_CA'),
+              required=True,
+              help='path to ca cert file')
+@click.option('--username', type=str,
+              default=os.environ.get('DEEPFREEZE_USERNAME'),
+              required=True,
+              help='username for elasticsearch connection')
+@click.password_option(hidden=True)
+@click.option('--repo_name_prefix', type=str,
+              default=os.environ.get('DEEPFREEZE_REPO_NAME_PREFIX'),
+              required=True,
+              help='prefix for naming rotating repositories')
+@click.option('--bucket_name_prefix', type=str,
+              default=os.environ.get('DEEPFREEZE_BUCKET_NAME_PREFIX'),
+              required=True,
+              help='prefix for naming buckets')
+@click.option('--style', type=click.Choice(['oneup', 'monthly']),
+              default=os.environ.get('DEEPFREEZE_STYLE'),
+              required=True,
+              help='suffix can be one-up like indices or date-based (YYYY.MM)')
+@click.option('--base_path', type=str,
+              default=os.environ.get('DEEPFREEZE_BASE_PATH'),
+              required=True,
+              help='base path in the bucket to use for searchable snapshots')
+@click.option('--canned_acl', type=click.Choice([
+                'private',
+                'public-read',
+                'public-read-write',
+                'authenticated-read',
+                'log-delivery-write',
+                'bucket-owner-read',
+                'bucket-owner-full-control'
+                ]),
+              default=os.environ.get('DEEPFREEZE_CANNED_ACL'),
+              required=True,
+              help='Canned ACL as defined by AWS')
+@click.option('--storage_class', type=click.Choice([
+                'standard',
+                'reduced_redundancy',
+                'standard_ia',
+                'intelligent_tiering',
+                'onezone_ia'
+                ]),
+              default=os.environ.get('DEEPFREEZE_STORAGE_CLASS'),
+              required=True,
+              help='Storage class as defined by AWS')
+@click.option('--keep', type=int,
+              default=os.environ.get('DEEPFREEZE_KEEP'),
+              required=True,
+              help='How many repositories should remain mounted?')
+@click.help_option('--help', '-?')
+@click.version_option()
+def deepfreeze(year, month, verbose, elasticsearch, ca, username, password,
+               repo_name_prefix, bucket_name_prefix, style, base_path,
+               canned_acl, storage_class, keep):
     """
     deepfreeze handles creating a new bucket, setting up a repository for
     that bucket, updating ILM policies to use the new bucket, and unmounting
     buckets we no longer wish to keep online.
 
     It uses a configuration stored in /etc/deepfreeze/config.yml. A template
-    is provided at /etc/deepfreeze/config.yml.template.
+    is provided at /etc/deepfreeze/deepfreeze.yml.reference.
 
     Optionally, a year and month can be provided. If not, the current year
-    and month will be used in naming the next bucket and repository.
+    and month will be used in naming the next bucket and repository. Default
+    values for all other parameters will be taken from environment variables
+    named "DEEPFREEZE_<paramter>", eg DEEPFREEZE_USERNAME. Any missing values
+    will result in an error.
+
+    Do not set DEEPFREEZE_PASSWORD as an environment variable. The only way to
+    securely provide the password for the elasticsearch username is on the
+    command line using secure entry, and so that's what we do.
     """
-    Processor(year, month).process()
+    Deepfreeze(year, month, verbose, elasticsearch, ca, username, password,
+               repo_name_prefix, bucket_name_prefix, style, base_path,
+               canned_acl, storage_class, keep).rotate()
 
 
 if __name__ == "__main__":
-    main()
+    deepfreeze()
