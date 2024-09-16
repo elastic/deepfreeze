@@ -255,7 +255,7 @@ class Deepfreeze:
     required=True,
     help="username for elasticsearch connection",
 )
-@click.password_option(hidden=True)
+@click.password_option(hidden=True, default=os.environ.get("DEEPFREEZE_PASSWORD")
 @click.option(
     "--repo_name_prefix",
     type=str,
