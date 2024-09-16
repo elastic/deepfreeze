@@ -1,4 +1,4 @@
-# Deep Freeze
++6# Deep Freeze
 A project to examine the idea of retaining searchable snapshots after an index is deleted by ILM so that it can later be remounted if needed.
 
 The idea is to use an ILM policy whose `delete` action only removes the index, not the searchable snapshot like this:
@@ -56,7 +56,7 @@ export DEEPFREEZE_CANNED_ACL=private
 export DEEPFREEZE_STORAGE_CLASS=intelligent_tiering
 ```
 
-Then, just source this file before running the command:
+Then, source this file before running the command:
 
 ```
 $ source my-deepfreeze-env.sh
@@ -64,7 +64,7 @@ $ source my-deepfreeze-env.sh
 
 ## Bootstrapping
 
-*Do we want to have a bootstrapping function, which sets up the initial deepfreeze repository & bucket? We'd need to know what current repo(s) it's replacing, but it could be done.*
+*Do we want a bootstrapping function, which sets up the initial deepfreeze repository & bucket? We'd need to know what current repo(s) it's replacing, but it could be done.*
 
 Currently, deepfreeze expects that at least one repo with the expected name pattern exists. You will need to have created this by hand.
 
@@ -97,7 +97,8 @@ Usage: deepfreeze [OPTIONS] [YEAR] [MONTH]
   named "DEEPFREEZE_<paramter>", eg DEEPFREEZE_USERNAME. Any missing values
   will result in an error.
 
-  Do not set DEEPFREEZE_PASSWORD as an environment variable. The only way
+  Even though we don't recommend it, you can set DEEPFREEZE_PASSWORD as an
+  environment variable if your security posture allows. The only way
   to securely provide the password for the elasticsearch username is on the
   command line using secure entry, and so that's what we do.
 
