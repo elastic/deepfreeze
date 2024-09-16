@@ -343,8 +343,9 @@ def deepfreeze(
     named "DEEPFREEZE_<paramter>", eg DEEPFREEZE_USERNAME. Any missing values
     will result in an error.
 
-    Do not set DEEPFREEZE_PASSWORD as an environment variable. The only way to
-    securely provide the password for the elasticsearch username is on the
+    Even though we don't recommend it, you can set DEEPFREEZE_PASSWORD as an
+    environment variable if your security posture allows. The only way
+    to securely provide the password for the elasticsearch username is on the
     command line using secure entry, and so that's what we do.
     """
     freezer = Deepfreeze(
