@@ -5,7 +5,6 @@ import logging
 import re
 import sys
 import boto3
-import os
 from botocore.exceptions import ClientError
 from datetime import datetime
 from elasticsearch import Elasticsearch
@@ -237,21 +236,20 @@ class Deepfreeze:
 @click.option(
     "--elasticsearch",
     type=str,
-    default=os.environ.get("DEEPFREEZE_ELASTICSEARCH"),
     required=True,
     help="URL to use when connecting to elasticsearch (https://elasticsearch.local:9200)",
 )
 @click.option(
     "--ca",
     type=str,
-    default=os.environ.get("DEEPFREEZE_CA", "/etc/elasticsearch/certs/http_ca.crt"),
+    default="/etc/elasticsearch/certs/http_ca.crt",
     required=True,
     help="path to ca cert file",
 )
 @click.option(
     "--username",
     type=str,
-    default=os.environ.get("DEEPFREEZE_USERNAME", "elastic"),
+    default="elastic",
     required=True,
     help="username for elasticsearch connection",
 )
@@ -259,28 +257,28 @@ class Deepfreeze:
 @click.option(
     "--repo_name_prefix",
     type=str,
-    default=os.environ.get("DEEPFREEZE_REPO_NAME_PREFIX", "deepfreeze-"),
+    default="deepfreeze-",
     required=True,
     help="prefix for naming rotating repositories",
 )
 @click.option(
     "--bucket_name_prefix",
     type=str,
-    default=os.environ.get("DEEPFREEZE_BUCKET_NAME_PREFIX", "deepfreeze-"),
+    default="deepfreeze-",
     required=True,
     help="prefix for naming buckets",
 )
 @click.option(
     "--style",
     type=click.Choice(["oneup", "monthly"]),
-    default=os.environ.get("DEEPFREEZE_STYLE", "monthly"),
+    default="monthly",
     required=True,
     help="suffix can be one-up like indices or date-based (YYYY.MM)",
 )
 @click.option(
     "--base_path",
     type=str,
-    default=os.environ.get("DEEPFREEZE_BASE_PATH", "snapshots"),
+    default="snapshots",
     required=True,
     help="base path in the bucket to use for searchable snapshots",
 )
@@ -297,14 +295,14 @@ class Deepfreeze:
             "bucket-owner-full-control",
         ]
     ),
-    default=os.environ.get("DEEPFREEZE_CANNED_ACL", "private"),
+    default="private",
     required=True,
     help="Canned ACL as defined by AWS",
 )
 @click.option(
     "--keep",
     type=int,
-    default=os.environ.get("DEEPFREEZE_KEEP", 6),
+    default=6,
     required=True,
     help="How many repositories should remain mounted?",
 )
@@ -373,4 +371,4 @@ def deepfreeze(
 
 
 if __name__ == "__main__":
-    deepfreeze()
+    deepfreeze(auto_envvar_prefix='DEEPFREEZE')
