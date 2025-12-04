@@ -3,15 +3,17 @@
 # pylint: disable=too-many-arguments,too-many-instance-attributes, raise-missing-from
 
 import logging
-from datetime import datetime
 
 from elasticsearch8 import Elasticsearch
 from rich.console import Console
-from rich.panel import Panel
 from rich.markup import escape
+from rich.panel import Panel
 
 from deepfreeze_core.constants import STATUS_INDEX, THAW_STATE_FROZEN
-from deepfreeze_core.exceptions import ActionError, MissingIndexError, MissingSettingsError
+from deepfreeze_core.exceptions import (
+    MissingIndexError,
+    MissingSettingsError,
+)
 from deepfreeze_core.helpers import Settings
 from deepfreeze_core.s3client import s3_client_factory
 from deepfreeze_core.utilities import (
@@ -151,7 +153,11 @@ class Rotate:
         return new_repo_name, new_bucket_name, base_path, next_suffix
 
     def _update_ilm_policies(
-        self, new_repo_name: str, old_suffix: str, new_suffix: str, dry_run: bool = False
+        self,
+        new_repo_name: str,
+        old_suffix: str,
+        new_suffix: str,
+        dry_run: bool = False,
     ) -> list:
         """
         Update ILM policies to use the new repository.

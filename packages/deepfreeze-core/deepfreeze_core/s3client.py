@@ -201,21 +201,25 @@ class AwsS3Client(S3Client):
             self.loggit.info("AWS S3 Client initialized successfully")
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            self.loggit.error("Failed to initialize AWS S3 Client: %s - %s", error_code, e)
+            self.loggit.error(
+                "Failed to initialize AWS S3 Client: %s - %s", error_code, e
+            )
             if error_code in ["InvalidAccessKeyId", "SignatureDoesNotMatch"]:
                 raise ActionError(
                     "AWS credentials are invalid or not configured. "
                     "Check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY."
-                )
+                ) from e
             elif error_code == "AccessDenied":
                 raise ActionError(
                     "AWS credentials do not have sufficient permissions. "
                     "Minimum required: s3:ListAllMyBuckets"
-                )
-            raise ActionError(f"Failed to initialize AWS S3 Client: {e}")
+                ) from e
+            raise ActionError(f"Failed to initialize AWS S3 Client: {e}") from e
         except Exception as e:
-            self.loggit.error("Failed to initialize AWS S3 Client: %s", e, exc_info=True)
-            raise ActionError(f"Failed to initialize AWS S3 Client: {e}")
+            self.loggit.error(
+                "Failed to initialize AWS S3 Client: %s", e, exc_info=True
+            )
+            raise ActionError(f"Failed to initialize AWS S3 Client: {e}") from e
 
     def test_connection(self) -> bool:
         """
@@ -244,19 +248,25 @@ class AwsS3Client(S3Client):
             self.loggit.debug(f"Creating bucket in region: {region}")
 
             # AWS requires LocationConstraint for all regions except us-east-1
-            if region and region != 'us-east-1':
+            if region and region != "us-east-1":
                 self.client.create_bucket(
                     Bucket=bucket_name,
-                    CreateBucketConfiguration={'LocationConstraint': region}
+                    CreateBucketConfiguration={"LocationConstraint": region},
                 )
-                self.loggit.info(f"Successfully created bucket {bucket_name} in region {region}")
+                self.loggit.info(
+                    f"Successfully created bucket {bucket_name} in region {region}"
+                )
             else:
                 self.client.create_bucket(Bucket=bucket_name)
-                self.loggit.info(f"Successfully created bucket {bucket_name} in us-east-1")
+                self.loggit.info(
+                    f"Successfully created bucket {bucket_name} in us-east-1"
+                )
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            self.loggit.error(f"Error creating bucket {bucket_name}: {error_code} - {e}")
-            raise ActionError(f"Error creating bucket {bucket_name}: {e}")
+            self.loggit.error(
+                f"Error creating bucket {bucket_name}: {error_code} - {e}"
+            )
+            raise ActionError(f"Error creating bucket {bucket_name}: {e}") from e
 
     def bucket_exists(self, bucket_name: str) -> bool:
         self.loggit.debug(f"Checking if bucket {bucket_name} exists")
@@ -269,8 +279,10 @@ class AwsS3Client(S3Client):
                 self.loggit.debug(f"Bucket {bucket_name} does not exist")
                 return False
             else:
-                self.loggit.error("Error checking bucket existence for %s: %s", bucket_name, e)
-                raise ActionError(e)
+                self.loggit.error(
+                    "Error checking bucket existence for %s: %s", bucket_name, e
+                )
+                raise ActionError(e) from e
 
     def thaw(
         self,
@@ -299,7 +311,7 @@ class AwsS3Client(S3Client):
             base_path,
             len(object_keys),
             restore_days,
-            retrieval_tier
+            retrieval_tier,
         )
 
         restored_count = 0
@@ -329,7 +341,7 @@ class AwsS3Client(S3Client):
                         len(object_keys),
                         key,
                         str(e),
-                        type(e).__name__
+                        type(e).__name__,
                     )
                     continue
 
@@ -340,7 +352,7 @@ class AwsS3Client(S3Client):
                         idx,
                         len(object_keys),
                         key,
-                        storage_class
+                        storage_class,
                     )
                     self.client.restore_object(
                         Bucket=bucket_name,
@@ -357,7 +369,7 @@ class AwsS3Client(S3Client):
                         idx,
                         len(object_keys),
                         key,
-                        storage_class
+                        storage_class,
                     )
                     skipped_count += 1
 
@@ -369,7 +381,7 @@ class AwsS3Client(S3Client):
                     len(object_keys),
                     key,
                     str(e),
-                    type(e).__name__
+                    type(e).__name__,
                 )
 
         # Log summary
@@ -378,7 +390,7 @@ class AwsS3Client(S3Client):
             restored_count,
             skipped_count,
             error_count,
-            len(object_keys)
+            len(object_keys),
         )
 
     def refreeze(
@@ -399,7 +411,7 @@ class AwsS3Client(S3Client):
             "Starting refreeze operation - bucket: %s, path: %s, target_storage_class: %s",
             bucket_name,
             path,
-            storage_class
+            storage_class,
         )
 
         refrozen_count = 0
@@ -411,7 +423,9 @@ class AwsS3Client(S3Client):
         for page_num, page in enumerate(pages, 1):
             if "Contents" in page:
                 page_objects = len(page["Contents"])
-                self.loggit.debug("Processing page %d with %d objects", page_num, page_objects)
+                self.loggit.debug(
+                    "Processing page %d with %d objects", page_num, page_objects
+                )
 
                 for obj_num, obj in enumerate(page["Contents"], 1):
                     key = obj["Key"]
@@ -426,7 +440,7 @@ class AwsS3Client(S3Client):
                             page_num,
                             key,
                             current_storage,
-                            storage_class
+                            storage_class,
                         )
                         self.client.copy_object(
                             Bucket=bucket_name,
@@ -443,14 +457,14 @@ class AwsS3Client(S3Client):
                             key,
                             str(e),
                             type(e).__name__,
-                            exc_info=True
+                            exc_info=True,
                         )
 
         # Log summary
         self.loggit.info(
             "Refreeze operation completed - refrozen: %d, errors: %d",
             refrozen_count,
-            error_count
+            error_count,
         )
 
     def list_objects(self, bucket_name: str, prefix: str) -> list[dict]:
@@ -496,26 +510,27 @@ class AwsS3Client(S3Client):
                 self.loggit.info(f"Emptying bucket {bucket_name} before deletion")
                 try:
                     # List and delete all objects
-                    paginator = self.client.get_paginator('list_objects_v2')
+                    paginator = self.client.get_paginator("list_objects_v2")
                     pages = paginator.paginate(Bucket=bucket_name)
 
                     for page in pages:
-                        if 'Contents' in page:
-                            objects = [{'Key': obj['Key']} for obj in page['Contents']]
+                        if "Contents" in page:
+                            objects = [{"Key": obj["Key"]} for obj in page["Contents"]]
                             if objects:
                                 self.client.delete_objects(
-                                    Bucket=bucket_name,
-                                    Delete={'Objects': objects}
+                                    Bucket=bucket_name, Delete={"Objects": objects}
                                 )
-                                self.loggit.debug(f"Deleted {len(objects)} objects from {bucket_name}")
+                                self.loggit.debug(
+                                    f"Deleted {len(objects)} objects from {bucket_name}"
+                                )
                 except ClientError as e:
-                    if e.response['Error']['Code'] != 'NoSuchBucket':
+                    if e.response["Error"]["Code"] != "NoSuchBucket":
                         self.loggit.warning(f"Error emptying bucket {bucket_name}: {e}")
 
             self.client.delete_bucket(Bucket=bucket_name)
         except ClientError as e:
             self.loggit.error(e)
-            raise ActionError(e)
+            raise ActionError(e) from e
 
     def put_object(self, bucket_name: str, key: str, body: str = "") -> None:
         """
@@ -534,7 +549,7 @@ class AwsS3Client(S3Client):
             self.client.put_object(Bucket=bucket_name, Key=key, Body=body)
         except ClientError as e:
             self.loggit.error(e)
-            raise ActionError(e)
+            raise ActionError(e) from e
 
     def list_buckets(self, prefix: str = None) -> list[str]:
         """
@@ -555,7 +570,7 @@ class AwsS3Client(S3Client):
             return bucket_names
         except ClientError as e:
             self.loggit.error(e)
-            raise ActionError(e)
+            raise ActionError(e) from e
 
     def head_object(self, bucket_name: str, key: str) -> dict:
         """
@@ -574,7 +589,7 @@ class AwsS3Client(S3Client):
             return response
         except ClientError as e:
             self.loggit.error(f"Error getting metadata for {key}: {e}")
-            raise ActionError(f"Error getting metadata for {key}: {e}")
+            raise ActionError(f"Error getting metadata for {key}: {e}") from e
 
     def copy_object(
         self,
@@ -605,7 +620,7 @@ class AwsS3Client(S3Client):
             )
         except ClientError as e:
             self.loggit.error(e)
-            raise ActionError(e)
+            raise ActionError(e) from e
 
 
 def s3_client_factory(provider: str) -> S3Client:

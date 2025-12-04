@@ -8,14 +8,33 @@ This package is shared between the standalone deepfreeze CLI and curator.
 __version__ = "1.0.0"
 
 # Export constants
+# Export actions
+from deepfreeze_core.actions import (
+    Cleanup,
+    Refreeze,
+    RepairMetadata,
+    Rotate,
+    Setup,
+    Status,
+    Thaw,
+)
 from deepfreeze_core.constants import (
     PROVIDERS,
     SETTINGS_ID,
     STATUS_INDEX,
-    THAW_STATE_FROZEN,
-    THAW_STATE_THAWING,
-    THAW_STATE_THAWED,
     THAW_STATE_EXPIRED,
+    THAW_STATE_FROZEN,
+    THAW_STATE_THAWED,
+    THAW_STATE_THAWING,
+)
+
+# Export ES client utilities
+from deepfreeze_core.esclient import (
+    ESClientWrapper,
+    create_es_client,
+    create_es_client_from_config,
+    load_config_from_yaml,
+    validate_connection,
 )
 
 # Export exceptions
@@ -41,26 +60,6 @@ from deepfreeze_core.s3client import (
     AwsS3Client,
     S3Client,
     s3_client_factory,
-)
-
-# Export ES client utilities
-from deepfreeze_core.esclient import (
-    ESClientWrapper,
-    create_es_client,
-    create_es_client_from_config,
-    load_config_from_yaml,
-    validate_connection,
-)
-
-# Export actions
-from deepfreeze_core.actions import (
-    Cleanup,
-    Refreeze,
-    RepairMetadata,
-    Rotate,
-    Setup,
-    Status,
-    Thaw,
 )
 
 # Export commonly used utilities

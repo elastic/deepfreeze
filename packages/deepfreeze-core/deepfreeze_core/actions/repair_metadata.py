@@ -6,9 +6,9 @@ import logging
 
 from elasticsearch8 import Elasticsearch
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
-from rich.markup import escape
 
 from deepfreeze_core.constants import (
     STATUS_INDEX,
@@ -130,7 +130,10 @@ class RepairMetadata:
                     try:
                         metadata = self.s3.head_object(bucket, obj["Key"])
                         restore_header = metadata.get("Restore")
-                        if restore_header and 'ongoing-request="true"' in restore_header:
+                        if (
+                            restore_header
+                            and 'ongoing-request="true"' in restore_header
+                        ):
                             result["restoring"] += 1
                         else:
                             result["glacier"] += 1
@@ -300,16 +303,16 @@ class RepairMetadata:
             self._load_settings()
 
             if not self.porcelain:
-                self.console.print("[bold]Scanning repositories for discrepancies...[/bold]")
+                self.console.print(
+                    "[bold]Scanning repositories for discrepancies...[/bold]"
+                )
 
             discrepancies = self._scan_repositories()
 
             if self.porcelain:
                 for d in discrepancies:
                     if d.get("error"):
-                        print(
-                            f"ERROR\t{d['repo']}\t{d.get('error')}"
-                        )
+                        print(f"ERROR\t{d['repo']}\t{d.get('error')}")
                     else:
                         print(
                             f"DISCREPANCY\t{d['repo']}\t{d['recorded_state']}\t"
@@ -395,7 +398,9 @@ class RepairMetadata:
             self._load_settings()
 
             if not self.porcelain:
-                self.console.print("[bold]Scanning repositories for discrepancies...[/bold]")
+                self.console.print(
+                    "[bold]Scanning repositories for discrepancies...[/bold]"
+                )
 
             discrepancies = self._scan_repositories()
 
@@ -429,9 +434,7 @@ class RepairMetadata:
             if self.porcelain:
                 for r in results:
                     status = "SUCCESS" if r["success"] else "FAILED"
-                    print(
-                        f"{status}\t{r['repo']}\t{r['old_state']}\t{r['new_state']}"
-                    )
+                    print(f"{status}\t{r['repo']}\t{r['old_state']}\t{r['new_state']}")
                 success_count = sum(1 for r in results if r["success"])
                 fail_count = sum(1 for r in results if not r["success"])
                 print(f"COMPLETE\t{success_count} repaired\t{fail_count} failed")

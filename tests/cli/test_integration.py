@@ -9,20 +9,16 @@ These tests verify:
 5. Backward compatibility with existing deepfreeze-status index format
 """
 
-import pytest
-from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from deepfreeze.actions import (
-    Setup,
-    Status,
-    Rotate,
-    Thaw,
     Refreeze,
-    Cleanup,
+    Rotate,
+    Setup,
+    Thaw,
 )
-from deepfreeze.helpers import Settings, Repository
-from deepfreeze.constants import STATUS_INDEX, THAW_STATUS_COMPLETED
+from deepfreeze.constants import THAW_STATUS_COMPLETED
+from deepfreeze.helpers import Repository, Settings
 
 
 class MockElasticsearchClient:
@@ -37,7 +33,9 @@ class MockElasticsearchClient:
         self.indices = MagicMock()
         self.indices.exists = MagicMock(side_effect=self._indices_exists)
         self.indices.create = MagicMock(side_effect=self._indices_create)
-        self.indices.get_index_template = MagicMock(return_value={"index_templates": []})
+        self.indices.get_index_template = MagicMock(
+            return_value={"index_templates": []}
+        )
 
         self.snapshot = MagicMock()
         self.snapshot.get_repository = MagicMock(return_value={})
@@ -71,6 +69,7 @@ class MockElasticsearchClient:
         key = f"{index}:{id}"
         if key not in self._documents:
             from elasticsearch8 import NotFoundError
+
             raise NotFoundError(404, "not_found", "not found")
         return {"_source": self._documents[key]}
 
@@ -100,10 +99,12 @@ class MockElasticsearchClient:
             idx, doc_id = key.split(":", 1)
             if index and idx != index:
                 continue
-            hits.append({
-                "_id": doc_id,
-                "_source": doc,
-            })
+            hits.append(
+                {
+                    "_id": doc_id,
+                    "_source": doc,
+                }
+            )
         return {"hits": {"hits": hits, "total": {"value": len(hits)}}}
 
 
@@ -135,7 +136,14 @@ class MockS3Client:
             buckets = [b for b in buckets if b.startswith(prefix)]
         return buckets
 
-    def thaw(self, bucket_name, base_path, object_keys, restore_days=7, retrieval_tier="Standard"):
+    def thaw(
+        self,
+        bucket_name,
+        base_path,
+        object_keys,
+        restore_days=7,
+        retrieval_tier="Standard",
+    ):
         pass
 
     def refreeze(self, bucket_name, path, storage_class="GLACIER"):
@@ -168,11 +176,21 @@ class TestSetupStatusWorkflow:
             with patch("deepfreeze.actions.setup.ensure_settings_index"):
                 with patch("deepfreeze.actions.setup.save_settings"):
                     with patch("deepfreeze.actions.setup.create_repo"):
-                        with patch("deepfreeze.actions.setup.create_or_update_ilm_policy") as mock_ilm:
-                            mock_ilm.return_value = {"action": "created", "policy_body": {}}
+                        with patch(
+                            "deepfreeze.actions.setup.create_or_update_ilm_policy"
+                        ) as mock_ilm:
+                            mock_ilm.return_value = {
+                                "action": "created",
+                                "policy_body": {},
+                            }
 
-                            with patch("deepfreeze.actions.setup.update_index_template_ilm_policy") as mock_tmpl:
-                                mock_tmpl.return_value = {"action": "updated", "template_type": "composable"}
+                            with patch(
+                                "deepfreeze.actions.setup.update_index_template_ilm_policy"
+                            ) as mock_tmpl:
+                                mock_tmpl.return_value = {
+                                    "action": "updated",
+                                    "template_type": "composable",
+                                }
 
                                 setup = Setup(
                                     client=mock_es,
@@ -213,11 +231,21 @@ class TestSetupRotateWorkflow:
             with patch("deepfreeze.actions.setup.ensure_settings_index"):
                 with patch("deepfreeze.actions.setup.save_settings"):
                     with patch("deepfreeze.actions.setup.create_repo"):
-                        with patch("deepfreeze.actions.setup.create_or_update_ilm_policy") as mock_ilm:
-                            mock_ilm.return_value = {"action": "created", "policy_body": {}}
+                        with patch(
+                            "deepfreeze.actions.setup.create_or_update_ilm_policy"
+                        ) as mock_ilm:
+                            mock_ilm.return_value = {
+                                "action": "created",
+                                "policy_body": {},
+                            }
 
-                            with patch("deepfreeze.actions.setup.update_index_template_ilm_policy") as mock_tmpl:
-                                mock_tmpl.return_value = {"action": "updated", "template_type": "composable"}
+                            with patch(
+                                "deepfreeze.actions.setup.update_index_template_ilm_policy"
+                            ) as mock_tmpl:
+                                mock_tmpl.return_value = {
+                                    "action": "updated",
+                                    "template_type": "composable",
+                                }
 
                                 setup = Setup(
                                     client=mock_es,
@@ -249,7 +277,9 @@ class TestSetupRotateWorkflow:
                     last_suffix="000001",
                 )
 
-                with patch("deepfreeze.actions.rotate.get_matching_repos") as mock_repos:
+                with patch(
+                    "deepfreeze.actions.rotate.get_matching_repos"
+                ) as mock_repos:
                     mock_repos.return_value = [
                         Repository(
                             name="rotate-test-000001",
@@ -259,9 +289,13 @@ class TestSetupRotateWorkflow:
                         )
                     ]
 
-                    with patch("deepfreeze.actions.rotate.create_repo") as mock_create_repo:
+                    with patch(
+                        "deepfreeze.actions.rotate.create_repo"
+                    ) as mock_create_repo:
                         with patch("deepfreeze.actions.rotate.save_settings"):
-                            with patch("deepfreeze.actions.rotate.create_versioned_ilm_policy"):
+                            with patch(
+                                "deepfreeze.actions.rotate.create_versioned_ilm_policy"
+                            ):
                                 rotate = Rotate(
                                     client=mock_es,
                                     keep=2,
@@ -372,6 +406,7 @@ class TestBackwardCompatibility:
 
         # Verify we can read the settings
         from deepfreeze.utilities import get_settings
+
         settings = get_settings(mock_es)
 
         assert settings.repo_name_prefix == "legacy-repo"
@@ -406,6 +441,7 @@ class TestBackwardCompatibility:
 
         # Verify we can read the repository
         from deepfreeze.utilities import get_repository
+
         repo = get_repository(mock_es, "legacy-repo-000001")
 
         assert repo.name == "legacy-repo-000001"
@@ -433,6 +469,7 @@ class TestBackwardCompatibility:
 
         # Verify we can read the thaw request
         from deepfreeze.utilities import get_thaw_request
+
         request = get_thaw_request(mock_es, "thaw-legacy-001")
 
         assert request["request_id"] == "thaw-legacy-001"

@@ -17,10 +17,10 @@ from elasticsearch8 import Elasticsearch
 from deepfreeze_core.constants import (
     STATUS_INDEX,
     THAW_STATE_ACTIVE,
-    THAW_STATE_FROZEN,
-    THAW_STATE_THAWING,
-    THAW_STATE_THAWED,
     THAW_STATE_EXPIRED,
+    THAW_STATE_FROZEN,
+    THAW_STATE_THAWED,
+    THAW_STATE_THAWING,
 )
 
 
@@ -111,7 +111,7 @@ class Repository:
     @classmethod
     def from_elasticsearch(
         cls, client: Elasticsearch, name: str, index: str = STATUS_INDEX
-    ) -> Optional['Repository']:
+    ) -> Optional["Repository"]:
         """
         Fetch a document from Elasticsearch by name and create a Repository instance.
 
@@ -133,13 +133,13 @@ class Repository:
             )
 
             # Check if we got any hits
-            hits = response['hits']['hits']
+            hits = response["hits"]["hits"]
             if not hits:
                 return None
 
             # Extract the document source
-            doc = hits[0]['_source']
-            doc_id = hits[0]['_id']
+            doc = hits[0]["_source"]
+            doc_id = hits[0]["_id"]
 
             logging.debug("Document fetched: %s", doc)
 

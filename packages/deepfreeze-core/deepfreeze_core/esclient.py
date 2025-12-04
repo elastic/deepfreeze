@@ -6,12 +6,11 @@ with support for all authentication methods. It does NOT depend on es_client.bui
 """
 
 import logging
-import ssl
-from typing import Optional
 
 import yaml
 from elasticsearch8 import Elasticsearch
-from elasticsearch8.exceptions import AuthenticationException, ConnectionError as ESConnectionError
+from elasticsearch8.exceptions import AuthenticationException
+from elasticsearch8.exceptions import ConnectionError as ESConnectionError
 
 from deepfreeze_core.exceptions import ActionError
 
@@ -116,15 +115,15 @@ def create_es_client(
         loggit.error("Authentication failed: %s", e)
         raise ActionError(
             f"Elasticsearch authentication failed. Check your credentials. Error: {e}"
-        )
+        ) from e
     except ESConnectionError as e:
         loggit.error("Connection failed: %s", e)
         raise ActionError(
             f"Could not connect to Elasticsearch. Check your host configuration. Error: {e}"
-        )
+        ) from e
     except Exception as e:
         loggit.error("Failed to create Elasticsearch client: %s", e, exc_info=True)
-        raise ActionError(f"Failed to create Elasticsearch client: {e}")
+        raise ActionError(f"Failed to create Elasticsearch client: {e}") from e
 
 
 def load_config_from_yaml(config_path: str) -> dict:
@@ -170,7 +169,7 @@ def load_config_from_yaml(config_path: str) -> dict:
     loggit.debug("Loading configuration from: %s", config_path)
 
     try:
-        with open(config_path, 'r') as f:
+        with open(config_path) as f:
             config = yaml.safe_load(f)
 
         if not config:
@@ -178,12 +177,12 @@ def load_config_from_yaml(config_path: str) -> dict:
 
         return config
 
-    except FileNotFoundError:
-        raise ActionError(f"Configuration file not found: {config_path}")
+    except FileNotFoundError as e:
+        raise ActionError(f"Configuration file not found: {config_path}") from e
     except yaml.YAMLError as e:
-        raise ActionError(f"Invalid YAML in configuration file: {e}")
+        raise ActionError(f"Invalid YAML in configuration file: {e}") from e
     except Exception as e:
-        raise ActionError(f"Error reading configuration file: {e}")
+        raise ActionError(f"Error reading configuration file: {e}") from e
 
 
 def create_es_client_from_config(config_path: str) -> Elasticsearch:
@@ -258,8 +257,10 @@ def create_es_client_from_config(config_path: str) -> Elasticsearch:
     if "timeout" in client_config:
         client_params["request_timeout"] = client_config["timeout"]
 
-    loggit.debug("Client parameters extracted from config: %s",
-                 {k: v for k, v in client_params.items() if k not in ["password", "api_key"]})
+    loggit.debug(
+        "Client parameters extracted from config: %s",
+        {k: v for k, v in client_params.items() if k not in ["password", "api_key"]},
+    )
 
     return create_es_client(**client_params)
 
@@ -309,7 +310,7 @@ def validate_connection(client: Elasticsearch) -> dict:
 
     except Exception as e:
         loggit.error("Connection validation failed: %s", e)
-        raise ActionError(f"Elasticsearch connection validation failed: {e}")
+        raise ActionError(f"Elasticsearch connection validation failed: {e}") from e
 
 
 class ESClientWrapper:
@@ -368,9 +369,18 @@ class ESClientWrapper:
         params = {}
 
         # Direct mappings
-        for key in ["hosts", "username", "password", "api_key", "cloud_id",
-                    "ca_certs", "client_cert", "client_key", "verify_certs",
-                    "request_timeout"]:
+        for key in [
+            "hosts",
+            "username",
+            "password",
+            "api_key",
+            "cloud_id",
+            "ca_certs",
+            "client_cert",
+            "client_key",
+            "verify_certs",
+            "request_timeout",
+        ]:
             if key in config:
                 params[key] = config[key]
 

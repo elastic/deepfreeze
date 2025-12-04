@@ -18,8 +18,8 @@ from datetime import datetime, timezone
 import botocore
 from elasticsearch8 import Elasticsearch, NotFoundError
 
-from deepfreeze_core.exceptions import ActionError, MissingIndexError
 from deepfreeze_core.constants import SETTINGS_ID, STATUS_INDEX
+from deepfreeze_core.exceptions import ActionError, MissingIndexError
 from deepfreeze_core.helpers import Repository, Settings
 from deepfreeze_core.s3client import S3Client
 
@@ -39,9 +39,9 @@ def push_to_glacier(s3: S3Client, repo: Repository) -> bool:
     """
     try:
         # Normalize base_path: remove leading/trailing slashes, ensure it ends with /
-        base_path = repo.base_path.strip('/')
+        base_path = repo.base_path.strip("/")
         if base_path:
-            base_path += '/'
+            base_path += "/"
 
         # Initialize variables for pagination
         success = True
@@ -52,27 +52,31 @@ def push_to_glacier(s3: S3Client, repo: Repository) -> bool:
 
         # Process each object
         for obj in objects:
-            key = obj['Key']
-            current_storage_class = obj.get('StorageClass', 'STANDARD')
+            key = obj["Key"]
+            current_storage_class = obj.get("StorageClass", "STANDARD")
 
             # Log the object being processed
             logging.info(
                 "Processing object: s3://%s/%s (Current: %s)",
-                repo.bucket, key, current_storage_class
+                repo.bucket,
+                key,
+                current_storage_class,
             )
 
             try:
                 # Copy object to itself with new storage class
-                copy_source = {'Bucket': repo.bucket, 'Key': key}
+                copy_source = {"Bucket": repo.bucket, "Key": key}
                 s3.copy_object(
                     Bucket=repo.bucket,
                     Key=key,
                     CopySource=copy_source,
-                    StorageClass='GLACIER',
+                    StorageClass="GLACIER",
                 )
 
                 # Log success
-                logging.info("Successfully moved s3://%s/%s to GLACIER", repo.bucket, key)
+                logging.info(
+                    "Successfully moved s3://%s/%s to GLACIER", repo.bucket, key
+                )
                 object_count += 1
 
             except botocore.exceptions.ClientError as e:
@@ -118,9 +122,7 @@ def get_all_indices_in_repo(client: Elasticsearch, repository: str) -> list:
     return list(indices)
 
 
-def get_timestamp_range(
-    client: Elasticsearch, indices: list
-) -> tuple:
+def get_timestamp_range(client: Elasticsearch, indices: list) -> tuple:
     """
     Retrieve the earliest and latest @timestamp values from the given indices.
 
@@ -204,7 +206,10 @@ def ensure_settings_index(
                     "mappings": {
                         "properties": {
                             "doctype": {"type": "keyword"},
-                            "name": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
+                            "name": {
+                                "type": "text",
+                                "fields": {"keyword": {"type": "keyword"}},
+                            },
                             "bucket": {"type": "keyword"},
                             "base_path": {"type": "keyword"},
                             "start": {"type": "date"},
@@ -232,12 +237,14 @@ def ensure_settings_index(
                             "last_suffix": {"type": "keyword"},
                             "ilm_policy_name": {"type": "keyword"},
                             "index_template_name": {"type": "keyword"},
-                            "thaw_request_retention_days_completed": {"type": "integer"},
+                            "thaw_request_retention_days_completed": {
+                                "type": "integer"
+                            },
                             "thaw_request_retention_days_failed": {"type": "integer"},
                             "thaw_request_retention_days_refrozen": {"type": "integer"},
                         }
-                    }
-                }
+                    },
+                },
             )
             loggit.info("Index %s created successfully", STATUS_INDEX)
     else:
@@ -271,7 +278,7 @@ def get_settings(client: Elasticsearch) -> Settings:
         loggit.info("Settings document found")
         # Filter out doctype as it's not accepted by Settings constructor
         source_data = doc["_source"].copy()
-        source_data.pop('doctype', None)
+        source_data.pop("doctype", None)
         return Settings(**source_data)
     except NotFoundError:
         loggit.info("Settings document not found")
@@ -351,7 +358,7 @@ def create_repo(
         )
     except Exception as e:
         loggit.error(e)
-        raise ActionError(e)
+        raise ActionError(e) from e
 
     # Get and save a repository object for this repo
     loggit.debug("Saving repo %s to status index", repo_name)
@@ -626,7 +633,7 @@ def create_ilm_policy(
         client.ilm.put_lifecycle(name=policy_name, body=policy_body)
     except Exception as e:
         loggit.error(e)
-        raise ActionError(e)
+        raise ActionError(e) from e
 
 
 def get_ilm_policy(client: Elasticsearch, policy_name: str) -> dict:
@@ -905,7 +912,7 @@ def update_index_template_ilm_policy(
         }
     except Exception as e:
         loggit.error("Error updating legacy template %s: %s", template_name, e)
-        raise ActionError(f"Failed to update template {template_name}: {e}")
+        raise ActionError(f"Failed to update template {template_name}: {e}") from e
 
 
 def create_thawed_ilm_policy(client: Elasticsearch, repo_name: str) -> str:
@@ -960,7 +967,9 @@ def create_thawed_ilm_policy(client: Elasticsearch, repo_name: str) -> str:
 
     except Exception as e:
         loggit.error("Failed to create thawed ILM policy %s: %s", policy_name, e)
-        raise ActionError(f"Failed to create thawed ILM policy {policy_name}: {e}")
+        raise ActionError(
+            f"Failed to create thawed ILM policy {policy_name}: {e}"
+        ) from e
 
 
 def update_repository_date_range(client: Elasticsearch, repo: Repository) -> bool:
@@ -1318,7 +1327,7 @@ def mount_repo(client: Elasticsearch, repo: Repository) -> None:
 
     except Exception as e:
         loggit.error("Failed to mount repository %s: %s", repo.name, e)
-        raise ActionError(f"Failed to mount repository {repo.name}: {e}")
+        raise ActionError(f"Failed to mount repository {repo.name}: {e}") from e
 
 
 def save_thaw_request(
@@ -1371,7 +1380,7 @@ def save_thaw_request(
         loggit.info("Thaw request %s saved successfully", request_id)
     except Exception as e:
         loggit.error("Failed to save thaw request %s: %s", request_id, e)
-        raise ActionError(f"Failed to save thaw request {request_id}: {e}")
+        raise ActionError(f"Failed to save thaw request {request_id}: {e}") from e
 
 
 def get_thaw_request(client: Elasticsearch, request_id: str) -> dict:
@@ -1394,12 +1403,12 @@ def get_thaw_request(client: Elasticsearch, request_id: str) -> dict:
     try:
         response = client.get(index=STATUS_INDEX, id=request_id)
         return response["_source"]
-    except NotFoundError:
+    except NotFoundError as e:
         loggit.error("Thaw request %s not found", request_id)
-        raise ActionError(f"Thaw request {request_id} not found")
+        raise ActionError(f"Thaw request {request_id} not found") from e
     except Exception as e:
         loggit.error("Failed to retrieve thaw request %s: %s", request_id, e)
-        raise ActionError(f"Failed to retrieve thaw request {request_id}: {e}")
+        raise ActionError(f"Failed to retrieve thaw request {request_id}: {e}") from e
 
 
 def list_thaw_requests(client: Elasticsearch) -> list:
@@ -1429,7 +1438,7 @@ def list_thaw_requests(client: Elasticsearch) -> list:
         return []
     except Exception as e:
         loggit.error("Failed to list thaw requests: %s", e)
-        raise ActionError(f"Failed to list thaw requests: {e}")
+        raise ActionError(f"Failed to list thaw requests: {e}") from e
 
 
 def update_thaw_request(
@@ -1465,12 +1474,10 @@ def update_thaw_request(
         loggit.info("Thaw request %s updated successfully", request_id)
     except Exception as e:
         loggit.error("Failed to update thaw request %s: %s", request_id, e)
-        raise ActionError(f"Failed to update thaw request {request_id}: {e}")
+        raise ActionError(f"Failed to update thaw request {request_id}: {e}") from e
 
 
-def get_repositories_by_names(
-    client: Elasticsearch, repo_names: list
-) -> list:
+def get_repositories_by_names(client: Elasticsearch, repo_names: list) -> list:
     """
     Get Repository objects by a list of repository names.
 
@@ -1512,7 +1519,7 @@ def get_repositories_by_names(
         return []
     except Exception as e:
         loggit.error("Failed to get repositories: %s", e)
-        raise ActionError(f"Failed to get repositories: {e}")
+        raise ActionError(f"Failed to get repositories: {e}") from e
 
 
 def get_index_templates(client: Elasticsearch) -> dict:
@@ -1533,7 +1540,7 @@ def get_index_templates(client: Elasticsearch) -> dict:
         return client.indices.get_template()
     except Exception as e:
         loggit.error("Failed to get legacy index templates: %s", e)
-        raise ActionError(f"Failed to get legacy index templates: {e}")
+        raise ActionError(f"Failed to get legacy index templates: {e}") from e
 
 
 def get_composable_templates(client: Elasticsearch) -> dict:
@@ -1554,7 +1561,7 @@ def get_composable_templates(client: Elasticsearch) -> dict:
         return client.indices.get_index_template()
     except Exception as e:
         loggit.error("Failed to get composable index templates: %s", e)
-        raise ActionError(f"Failed to get composable index templates: {e}")
+        raise ActionError(f"Failed to get composable index templates: {e}") from e
 
 
 def update_template_ilm_policy(
@@ -1665,7 +1672,7 @@ def update_template_ilm_policy(
         return False
     except Exception as e:
         loggit.error("Failed to update template %s: %s", template_name, e)
-        raise ActionError(f"Failed to update template {template_name}: {e}")
+        raise ActionError(f"Failed to update template {template_name}: {e}") from e
 
 
 def create_versioned_ilm_policy(
@@ -1727,7 +1734,7 @@ def create_versioned_ilm_policy(
         return new_policy_name
     except Exception as e:
         loggit.error("Failed to create policy %s: %s", new_policy_name, e)
-        raise ActionError(f"Failed to create policy {new_policy_name}: {e}")
+        raise ActionError(f"Failed to create policy {new_policy_name}: {e}") from e
 
 
 def get_policies_for_repo(client: Elasticsearch, repo_name: str) -> dict:
@@ -1752,7 +1759,7 @@ def get_policies_for_repo(client: Elasticsearch, repo_name: str) -> dict:
         policy_body = policy_data.get("policy", {})
         phases = policy_body.get("phases", {})
 
-        for phase_name, phase_config in phases.items():
+        for _phase_name, phase_config in phases.items():
             actions = phase_config.get("actions", {})
             if "searchable_snapshot" in actions:
                 snapshot_repo = actions["searchable_snapshot"].get(

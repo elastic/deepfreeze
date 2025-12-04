@@ -9,20 +9,22 @@ from datetime import datetime, timedelta, timezone
 
 from elasticsearch8 import Elasticsearch
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
-from rich.markup import escape
 
 from deepfreeze_core.constants import (
     STATUS_INDEX,
-    THAW_STATE_THAWING,
     THAW_STATUS_COMPLETED,
     THAW_STATUS_FAILED,
     THAW_STATUS_IN_PROGRESS,
 )
-from deepfreeze_core.exceptions import ActionError, MissingIndexError, MissingSettingsError
-from deepfreeze_core.helpers import Repository
+from deepfreeze_core.exceptions import (
+    ActionError,
+    MissingIndexError,
+    MissingSettingsError,
+)
 from deepfreeze_core.s3client import s3_client_factory
 from deepfreeze_core.utilities import (
     check_restore_status,
@@ -130,8 +132,7 @@ class Thaw:
         # Filter out completed/refrozen requests unless include_completed is True
         if not self.include_completed:
             requests = [
-                r for r in requests
-                if r.get("status") not in ("completed", "refrozen")
+                r for r in requests if r.get("status") not in ("completed", "refrozen")
             ]
 
         if self.porcelain:
@@ -219,13 +220,10 @@ class Thaw:
         repo_objs = get_repositories_by_names(self.client, repos)
 
         all_complete = True
-        any_failed = False
         restore_statuses = []
 
         for repo in repo_objs:
-            restore_status = check_restore_status(
-                self.s3, repo.bucket, repo.base_path
-            )
+            restore_status = check_restore_status(self.s3, repo.bucket, repo.base_path)
             restore_statuses.append(
                 {
                     "repo": repo.name,
@@ -253,19 +251,20 @@ class Thaw:
                 start_date = decode_date(request.get("start_date"))
                 end_date = decode_date(request.get("end_date"))
 
-                mount_result = find_and_mount_indices_in_date_range(
+                find_and_mount_indices_in_date_range(
                     self.client, repo_objs, start_date, end_date
                 )
 
                 # Update request status
-                update_thaw_request(self.client, request_id, status=THAW_STATUS_COMPLETED)
+                update_thaw_request(
+                    self.client, request_id, status=THAW_STATUS_COMPLETED
+                )
                 request["status"] = THAW_STATUS_COMPLETED
 
             except Exception as e:
                 self.loggit.error("Failed to complete thaw: %s", e)
                 update_thaw_request(self.client, request_id, status=THAW_STATUS_FAILED)
                 request["status"] = THAW_STATUS_FAILED
-                any_failed = True
 
         request["restore_statuses"] = restore_statuses
         return request
@@ -396,7 +395,9 @@ class Thaw:
                     f"DRY_RUN\tthaw\t{request_id}\t{start.isoformat()}\t{end.isoformat()}"
                 )
                 for repo in repos:
-                    print(f"DRY_RUN\trepo\t{repo.name}\t{repo.bucket}\t{repo.base_path}")
+                    print(
+                        f"DRY_RUN\trepo\t{repo.name}\t{repo.bucket}\t{repo.base_path}"
+                    )
             else:
                 repo_list = "\n".join(
                     [f"  - [cyan]{r.name}[/cyan] ({r.bucket})" for r in repos]

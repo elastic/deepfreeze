@@ -9,10 +9,11 @@ These tests verify that:
 5. YAML configuration loading works
 """
 
-import pytest
-import tempfile
 import os
-from unittest.mock import MagicMock, patch, PropertyMock
+import tempfile
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestCreateEsClient:
@@ -136,7 +137,7 @@ class TestConnectionValidation:
         }
         mock_es_class.return_value = mock_client
 
-        client = create_es_client(
+        create_es_client(
             hosts=["https://localhost:9200"],
             username="elastic",
             password="changeme",
@@ -155,7 +156,6 @@ class TestConnectionValidation:
         mock_auth_exception.__str__ = MagicMock(return_value="Authentication failed")
 
         # Create the actual exception class behavior
-        from elasticsearch8.exceptions import AuthenticationException
 
         # Create a mock that properly simulates the exception
         mock_client = MagicMock()
@@ -214,7 +214,7 @@ elasticsearch:
 logging:
   loglevel: INFO
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             f.write(yaml_content)
             config_path = f.name
 
@@ -224,7 +224,10 @@ logging:
             assert "elasticsearch" in config
             assert "client" in config["elasticsearch"]
             assert config["elasticsearch"]["client"]["username"] == "elastic"
-            assert config["elasticsearch"]["client"]["hosts"][0] == "https://localhost:9200"
+            assert (
+                config["elasticsearch"]["client"]["hosts"][0]
+                == "https://localhost:9200"
+            )
         finally:
             os.unlink(config_path)
 
@@ -243,7 +246,7 @@ logging:
         from deepfreeze.esclient import load_config_from_yaml
         from deepfreeze.exceptions import ActionError
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             f.write("invalid: yaml: content: [")
             config_path = f.name
 
@@ -275,7 +278,7 @@ elasticsearch:
     username: config-user
     password: config-pass
 """
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             f.write(yaml_content)
             config_path = f.name
 
@@ -373,4 +376,6 @@ class TestESClientWrapper:
         with pytest.raises(ValueError) as exc_info:
             ESClientWrapper()
 
-        assert "config_path" in str(exc_info.value) or "parameters" in str(exc_info.value)
+        assert "config_path" in str(exc_info.value) or "parameters" in str(
+            exc_info.value
+        )

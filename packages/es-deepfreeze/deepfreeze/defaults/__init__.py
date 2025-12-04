@@ -15,19 +15,22 @@ def Boolean():
     Validate boolean-like string values.
     Accepts 'true', 'false', '1', '0', 'yes', 'no' (case-insensitive).
     """
+
     def validator(value):
         if isinstance(value, bool):
             return value
         if isinstance(value, str):
-            if value.lower() in ('true', '1', 'yes'):
+            if value.lower() in ("true", "1", "yes"):
                 return True
-            if value.lower() in ('false', '0', 'no'):
+            if value.lower() in ("false", "0", "no"):
                 return False
         raise ValueError(f"Invalid boolean value: {value}")
+
     return validator
 
 
 # Setup options
+
 
 def ilm_policy_name():
     """
@@ -143,6 +146,7 @@ def style():
 
 # Rotate options
 
+
 def keep():
     """
     Number of repositories to keep mounted.
@@ -151,6 +155,7 @@ def keep():
 
 
 # Cleanup options
+
 
 def refrozen_retention_days():
     """
@@ -164,6 +169,7 @@ def refrozen_retention_days():
 
 
 # Thaw options
+
 
 def start_date():
     """
@@ -233,6 +239,7 @@ def include_completed():
 
 # Status options
 
+
 def limit():
     """
     Number of most recent repositories to display in status.
@@ -283,6 +290,7 @@ def show_config():
 
 # Common options
 
+
 def porcelain():
     """
     Output plain text without formatting (suitable for scripting).
@@ -291,6 +299,7 @@ def porcelain():
 
 
 # Refreeze options
+
 
 def repo_id():
     """

@@ -9,12 +9,11 @@ from voluptuous import Schema
 
 from deepfreeze import defaults
 
-
 # Deepfreeze action option schemas
 # Each schema lists the option defaults that apply to that action
 
 DEEPFREEZE_OPTIONS = {
-    'setup': [
+    "setup": [
         defaults.year(),
         defaults.month(),
         defaults.repo_name_prefix(),
@@ -29,17 +28,17 @@ DEEPFREEZE_OPTIONS = {
         defaults.index_template_name(),
         defaults.porcelain(),
     ],
-    'rotate': [
+    "rotate": [
         defaults.keep(),
         defaults.year(),
         defaults.month(),
         defaults.porcelain(),
     ],
-    'cleanup': [
+    "cleanup": [
         defaults.refrozen_retention_days(),
         defaults.porcelain(),
     ],
-    'status': [
+    "status": [
         defaults.limit(),
         defaults.show_repos(),
         defaults.show_thawed(),
@@ -48,7 +47,7 @@ DEEPFREEZE_OPTIONS = {
         defaults.show_config(),
         defaults.porcelain(),
     ],
-    'thaw': [
+    "thaw": [
         defaults.start_date(),
         defaults.end_date(),
         defaults.sync(),
@@ -59,11 +58,11 @@ DEEPFREEZE_OPTIONS = {
         defaults.include_completed(),
         defaults.porcelain(),
     ],
-    'refreeze': [
+    "refreeze": [
         defaults.thaw_request_id(),
         defaults.porcelain(),
     ],
-    'repair_metadata': [
+    "repair_metadata": [
         defaults.porcelain(),
     ],
 }
@@ -89,24 +88,24 @@ def _build_schema(option_list: list) -> Schema:
 
 
 # Pre-built schemas for each action
-SETUP_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS['setup'])
-ROTATE_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS['rotate'])
-CLEANUP_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS['cleanup'])
-STATUS_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS['status'])
-THAW_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS['thaw'])
-REFREEZE_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS['refreeze'])
-REPAIR_METADATA_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS['repair_metadata'])
+SETUP_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS["setup"])
+ROTATE_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS["rotate"])
+CLEANUP_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS["cleanup"])
+STATUS_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS["status"])
+THAW_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS["thaw"])
+REFREEZE_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS["refreeze"])
+REPAIR_METADATA_SCHEMA = _build_schema(DEEPFREEZE_OPTIONS["repair_metadata"])
 
 
 # Map action names to their schemas
 ACTION_SCHEMAS = {
-    'setup': SETUP_SCHEMA,
-    'rotate': ROTATE_SCHEMA,
-    'cleanup': CLEANUP_SCHEMA,
-    'status': STATUS_SCHEMA,
-    'thaw': THAW_SCHEMA,
-    'refreeze': REFREEZE_SCHEMA,
-    'repair_metadata': REPAIR_METADATA_SCHEMA,
+    "setup": SETUP_SCHEMA,
+    "rotate": ROTATE_SCHEMA,
+    "cleanup": CLEANUP_SCHEMA,
+    "status": STATUS_SCHEMA,
+    "thaw": THAW_SCHEMA,
+    "refreeze": REFREEZE_SCHEMA,
+    "repair_metadata": REPAIR_METADATA_SCHEMA,
 }
 
 
@@ -129,7 +128,9 @@ def validate_options(action: str, options: dict) -> dict:
         KeyError: If the action is not recognized
     """
     if action not in ACTION_SCHEMAS:
-        raise KeyError(f"Unknown action: {action}. Valid actions are: {list(ACTION_SCHEMAS.keys())}")
+        raise KeyError(
+            f"Unknown action: {action}. Valid actions are: {list(ACTION_SCHEMAS.keys())}"
+        )
 
     schema = ACTION_SCHEMAS[action]
     return schema(options)
@@ -149,7 +150,9 @@ def get_schema(action: str) -> Schema:
         KeyError: If the action is not recognized
     """
     if action not in ACTION_SCHEMAS:
-        raise KeyError(f"Unknown action: {action}. Valid actions are: {list(ACTION_SCHEMAS.keys())}")
+        raise KeyError(
+            f"Unknown action: {action}. Valid actions are: {list(ACTION_SCHEMAS.keys())}"
+        )
     return ACTION_SCHEMAS[action]
 
 

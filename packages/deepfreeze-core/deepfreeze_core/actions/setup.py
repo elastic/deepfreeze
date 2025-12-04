@@ -6,13 +6,13 @@ import logging
 
 from elasticsearch8 import Elasticsearch
 from rich.console import Console
-from rich.panel import Panel
 from rich.markup import escape
+from rich.panel import Panel
 
-from deepfreeze_core.s3client import s3_client_factory
 from deepfreeze_core.constants import STATUS_INDEX
 from deepfreeze_core.exceptions import PreconditionError
 from deepfreeze_core.helpers import Settings
+from deepfreeze_core.s3client import s3_client_factory
 from deepfreeze_core.utilities import (
     create_or_update_ilm_policy,
     create_repo,
@@ -309,14 +309,14 @@ class Setup:
                 for error in errors:
                     # Extract clean text from rich markup
                     issue_text = (
-                        error['issue']
-                        .replace('[cyan]', '')
-                        .replace('[/cyan]', '')
-                        .replace('[yellow]', '')
-                        .replace('[/yellow]', '')
-                        .replace('[bold]', '')
-                        .replace('[/bold]', '')
-                        .replace('\n', ' ')
+                        error["issue"]
+                        .replace("[cyan]", "")
+                        .replace("[/cyan]", "")
+                        .replace("[yellow]", "")
+                        .replace("[/yellow]", "")
+                        .replace("[bold]", "")
+                        .replace("[/bold]", "")
+                        .replace("\n", " ")
                     )
                     print(f"ERROR\tprecondition\t{issue_text}")
             else:

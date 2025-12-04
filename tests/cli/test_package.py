@@ -8,8 +8,6 @@ These tests verify that the deepfreeze package:
 """
 
 import ast
-import importlib
-import sys
 from pathlib import Path
 
 
@@ -24,10 +22,10 @@ def test_package_imports_successfully():
 
 def test_submodules_import_successfully():
     """Test that all submodules can be imported"""
-    import deepfreeze.exceptions
-    import deepfreeze.constants
-    import deepfreeze.cli
     import deepfreeze.actions
+    import deepfreeze.cli
+    import deepfreeze.constants
+    import deepfreeze.exceptions
 
     assert deepfreeze.exceptions is not None
     assert deepfreeze.constants is not None
@@ -39,13 +37,14 @@ def test_no_curator_imports_in_package():
     """Test that no curator imports are present in the package"""
     # Get the package directory
     import deepfreeze
+
     package_dir = Path(deepfreeze.__file__).parent
 
     # Check all Python files in the package
     curator_imports_found = []
 
     for py_file in package_dir.rglob("*.py"):
-        with open(py_file, "r") as f:
+        with open(py_file) as f:
             try:
                 tree = ast.parse(f.read())
             except SyntaxError:
@@ -64,16 +63,17 @@ def test_no_curator_imports_in_package():
                             f"{py_file.relative_to(package_dir)}: from {node.module} import ..."
                         )
 
-    assert len(curator_imports_found) == 0, (
-        f"Found curator imports in deepfreeze package:\n"
-        + "\n".join(curator_imports_found)
+    assert (
+        len(curator_imports_found) == 0
+    ), "Found curator imports in deepfreeze package:\n" + "\n".join(
+        curator_imports_found
     )
 
 
 def test_entry_point_registration():
     """Test that the CLI entry point is properly configured"""
-    from deepfreeze.cli.main import cli
     import click
+    from deepfreeze.cli.main import cli
 
     assert cli is not None
     assert isinstance(cli, click.core.Group)

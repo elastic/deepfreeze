@@ -14,13 +14,13 @@ from pathlib import Path
 def test_exception_classes_importable():
     """Test that all exception classes can be imported from deepfreeze.exceptions"""
     from deepfreeze.exceptions import (
+        ActionError,
+        ActionException,
         DeepfreezeException,
         MissingIndexError,
         MissingSettingsError,
-        ActionException,
         PreconditionError,
         RepositoryException,
-        ActionError,
     )
 
     # Verify all are exception classes
@@ -36,13 +36,9 @@ def test_exception_classes_importable():
 def test_exception_instantiation():
     """Test that exception classes can be instantiated with messages"""
     from deepfreeze.exceptions import (
+        ActionError,
         DeepfreezeException,
         MissingIndexError,
-        MissingSettingsError,
-        ActionException,
-        PreconditionError,
-        RepositoryException,
-        ActionError,
     )
 
     # Test instantiation with messages
@@ -65,20 +61,20 @@ def test_exception_instantiation():
 def test_constants_importable():
     """Test that all constants can be imported from deepfreeze.constants"""
     from deepfreeze.constants import (
-        STATUS_INDEX,
-        SETTINGS_ID,
         PROVIDERS,
+        SETTINGS_ID,
+        STATUS_INDEX,
+        THAW_REQUEST_STATUSES,
         THAW_STATE_ACTIVE,
-        THAW_STATE_FROZEN,
-        THAW_STATE_THAWING,
-        THAW_STATE_THAWED,
         THAW_STATE_EXPIRED,
+        THAW_STATE_FROZEN,
+        THAW_STATE_THAWED,
+        THAW_STATE_THAWING,
         THAW_STATES,
-        THAW_STATUS_IN_PROGRESS,
         THAW_STATUS_COMPLETED,
         THAW_STATUS_FAILED,
+        THAW_STATUS_IN_PROGRESS,
         THAW_STATUS_REFROZEN,
-        THAW_REQUEST_STATUSES,
     )
 
     # Verify values
@@ -105,40 +101,42 @@ def test_constants_importable():
 def test_no_curator_imports_in_exceptions_module():
     """Test that no curator imports exist in exceptions.py"""
     import deepfreeze
+
     exceptions_file = Path(deepfreeze.__file__).parent / "exceptions.py"
 
-    with open(exceptions_file, "r") as f:
+    with open(exceptions_file) as f:
         tree = ast.parse(f.read())
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                assert not alias.name.startswith("curator"), (
-                    f"Found curator import in exceptions.py: import {alias.name}"
-                )
+                assert not alias.name.startswith(
+                    "curator"
+                ), f"Found curator import in exceptions.py: import {alias.name}"
         elif isinstance(node, ast.ImportFrom):
             if node.module:
-                assert not node.module.startswith("curator"), (
-                    f"Found curator import in exceptions.py: from {node.module} import ..."
-                )
+                assert not node.module.startswith(
+                    "curator"
+                ), f"Found curator import in exceptions.py: from {node.module} import ..."
 
 
 def test_no_curator_imports_in_constants_module():
     """Test that no curator imports exist in constants.py"""
     import deepfreeze
+
     constants_file = Path(deepfreeze.__file__).parent / "constants.py"
 
-    with open(constants_file, "r") as f:
+    with open(constants_file) as f:
         tree = ast.parse(f.read())
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                assert not alias.name.startswith("curator"), (
-                    f"Found curator import in constants.py: import {alias.name}"
-                )
+                assert not alias.name.startswith(
+                    "curator"
+                ), f"Found curator import in constants.py: import {alias.name}"
         elif isinstance(node, ast.ImportFrom):
             if node.module:
-                assert not node.module.startswith("curator"), (
-                    f"Found curator import in constants.py: from {node.module} import ..."
-                )
+                assert not node.module.startswith(
+                    "curator"
+                ), f"Found curator import in constants.py: from {node.module} import ..."

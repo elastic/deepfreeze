@@ -16,8 +16,9 @@ Task Group 17 additions:
 10. Error handling
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, call
 
 
 class TestAwsS3ClientInstantiation:
@@ -43,16 +44,18 @@ class TestAwsS3ClientInstantiation:
     @patch("deepfreeze.s3client.boto3")
     def test_client_instantiation_invalid_credentials(self, mock_boto3):
         """Test that AwsS3Client raises ActionError for invalid credentials"""
-        from deepfreeze.s3client import AwsS3Client
-        from deepfreeze.exceptions import ActionError
         from botocore.exceptions import ClientError
+        from deepfreeze.exceptions import ActionError
+        from deepfreeze.s3client import AwsS3Client
 
         # Mock failed list_buckets call
         mock_client = MagicMock()
         error_response = {
             "Error": {"Code": "InvalidAccessKeyId", "Message": "Invalid key"}
         }
-        mock_client.list_buckets.side_effect = ClientError(error_response, "ListBuckets")
+        mock_client.list_buckets.side_effect = ClientError(
+            error_response, "ListBuckets"
+        )
         mock_boto3.client.return_value = mock_client
 
         with pytest.raises(ActionError) as exc_info:
@@ -83,8 +86,8 @@ class TestBucketExists:
     @patch("deepfreeze.s3client.boto3")
     def test_bucket_exists_false(self, mock_boto3):
         """Test bucket_exists returns False when bucket does not exist"""
-        from deepfreeze.s3client import AwsS3Client
         from botocore.exceptions import ClientError
+        from deepfreeze.s3client import AwsS3Client
 
         mock_client = MagicMock()
         mock_client.list_buckets.return_value = {"Buckets": []}
@@ -152,7 +155,7 @@ class TestS3ClientFactory:
     @patch("deepfreeze.s3client.boto3")
     def test_factory_returns_aws_client(self, mock_boto3):
         """Test factory returns AwsS3Client for 'aws' provider"""
-        from deepfreeze.s3client import s3_client_factory, AwsS3Client
+        from deepfreeze.s3client import AwsS3Client, s3_client_factory
 
         mock_client = MagicMock()
         mock_client.list_buckets.return_value = {"Buckets": []}
@@ -210,8 +213,8 @@ class TestS3ClientOperations:
     @patch("deepfreeze.s3client.boto3")
     def test_test_connection_failure(self, mock_boto3):
         """Test test_connection returns False when connection fails"""
-        from deepfreeze.s3client import AwsS3Client
         from botocore.exceptions import ClientError
+        from deepfreeze.s3client import AwsS3Client
 
         mock_client = MagicMock()
         # First call succeeds (for init)
@@ -242,12 +245,15 @@ class TestBucketOperations:
 
         mock_client = MagicMock()
         mock_client.list_buckets.return_value = {"Buckets": []}
-        mock_client.head_bucket.side_effect = Exception("not found")  # bucket doesn't exist
+        mock_client.head_bucket.side_effect = Exception(
+            "not found"
+        )  # bucket doesn't exist
         mock_client.meta.region_name = "us-east-1"
         mock_boto3.client.return_value = mock_client
 
         # Simulate bucket doesn't exist check
         from botocore.exceptions import ClientError
+
         mock_client.head_bucket.side_effect = ClientError(
             {"Error": {"Code": "404"}}, "HeadBucket"
         )
@@ -260,8 +266,8 @@ class TestBucketOperations:
     @patch("deepfreeze.s3client.boto3")
     def test_create_bucket_already_exists(self, mock_boto3):
         """Test create_bucket raises error when bucket exists"""
-        from deepfreeze.s3client import AwsS3Client
         from deepfreeze.exceptions import ActionError
+        from deepfreeze.s3client import AwsS3Client
 
         mock_client = MagicMock()
         mock_client.list_buckets.return_value = {"Buckets": []}
@@ -421,7 +427,13 @@ class TestThawRefreezeOperations:
             {"Key": "path/file3.txt", "StorageClass": "STANDARD"},  # Should skip
         ]
 
-        client.thaw("test-bucket", "path/", object_keys, restore_days=7, retrieval_tier="Standard")
+        client.thaw(
+            "test-bucket",
+            "path/",
+            object_keys,
+            restore_days=7,
+            retrieval_tier="Standard",
+        )
 
         # Should have called restore_object twice (only for GLACIER and DEEP_ARCHIVE)
         assert mock_client.restore_object.call_count == 2
@@ -442,7 +454,13 @@ class TestThawRefreezeOperations:
             {"Key": "other/file2.txt", "StorageClass": "GLACIER"},  # Should skip
         ]
 
-        client.thaw("test-bucket", "path/", object_keys, restore_days=7, retrieval_tier="Standard")
+        client.thaw(
+            "test-bucket",
+            "path/",
+            object_keys,
+            restore_days=7,
+            retrieval_tier="Standard",
+        )
 
         # Should have called restore_object only once
         assert mock_client.restore_object.call_count == 1
@@ -480,15 +498,14 @@ class TestS3ClientErrorHandling:
     @patch("deepfreeze.s3client.boto3")
     def test_head_object_raises_action_error(self, mock_boto3):
         """Test head_object raises ActionError on failure"""
-        from deepfreeze.s3client import AwsS3Client
-        from deepfreeze.exceptions import ActionError
         from botocore.exceptions import ClientError
+        from deepfreeze.exceptions import ActionError
+        from deepfreeze.s3client import AwsS3Client
 
         mock_client = MagicMock()
         mock_client.list_buckets.return_value = {"Buckets": []}
         mock_client.head_object.side_effect = ClientError(
-            {"Error": {"Code": "NoSuchKey", "Message": "Key not found"}},
-            "HeadObject"
+            {"Error": {"Code": "NoSuchKey", "Message": "Key not found"}}, "HeadObject"
         )
         mock_boto3.client.return_value = mock_client
 
@@ -502,16 +519,16 @@ class TestS3ClientErrorHandling:
     @patch("deepfreeze.s3client.boto3")
     def test_bucket_exists_raises_on_unexpected_error(self, mock_boto3):
         """Test bucket_exists raises ActionError on unexpected errors"""
-        from deepfreeze.s3client import AwsS3Client
-        from deepfreeze.exceptions import ActionError
         from botocore.exceptions import ClientError
+        from deepfreeze.exceptions import ActionError
+        from deepfreeze.s3client import AwsS3Client
 
         mock_client = MagicMock()
         mock_client.list_buckets.return_value = {"Buckets": []}
         # Non-404 error should raise
         mock_client.head_bucket.side_effect = ClientError(
             {"Error": {"Code": "AccessDenied", "Message": "Access denied"}},
-            "HeadBucket"
+            "HeadBucket",
         )
         mock_boto3.client.return_value = mock_client
 

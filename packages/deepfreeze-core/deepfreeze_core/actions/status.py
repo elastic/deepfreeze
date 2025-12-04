@@ -11,7 +11,11 @@ from rich.panel import Panel
 from rich.table import Table
 
 from deepfreeze_core.constants import STATUS_INDEX
-from deepfreeze_core.exceptions import ActionError, MissingIndexError, MissingSettingsError
+from deepfreeze_core.exceptions import (
+    ActionError,
+    MissingIndexError,
+    MissingSettingsError,
+)
 from deepfreeze_core.s3client import s3_client_factory
 from deepfreeze_core.utilities import (
     get_all_repos,
@@ -62,7 +66,9 @@ class Status:
         self.limit = limit
 
         # Section flags - if none specified, show all
-        any_section_specified = show_repos or show_thawed or show_buckets or show_ilm or show_config
+        any_section_specified = (
+            show_repos or show_thawed or show_buckets or show_ilm or show_config
+        )
         self.show_config = show_config or not any_section_specified
         self.show_repos = show_repos or not any_section_specified
         self.show_thawed = show_thawed or not any_section_specified
@@ -111,12 +117,12 @@ class Status:
                         "end": repo.end.isoformat() if repo.end else None,
                         "is_mounted": is_mounted_in_es,
                         "thaw_state": repo.thaw_state,
-                        "thawed_at": repo.thawed_at.isoformat()
-                        if repo.thawed_at
-                        else None,
-                        "expires_at": repo.expires_at.isoformat()
-                        if repo.expires_at
-                        else None,
+                        "thawed_at": (
+                            repo.thawed_at.isoformat() if repo.thawed_at else None
+                        ),
+                        "expires_at": (
+                            repo.expires_at.isoformat() if repo.expires_at else None
+                        ),
                     }
                 )
         except Exception as e:
@@ -136,9 +142,7 @@ class Status:
         """Get info about S3 buckets."""
         buckets = []
         try:
-            bucket_names = self.s3.list_buckets(
-                prefix=self.settings.bucket_name_prefix
-            )
+            bucket_names = self.s3.list_buckets(prefix=self.settings.bucket_name_prefix)
             for bucket_name in bucket_names:
                 # Count objects in bucket
                 try:
@@ -176,9 +180,7 @@ class Status:
                         if (
                             snapshot_repo
                             and self.settings.repo_name_prefix
-                            and snapshot_repo.startswith(
-                                self.settings.repo_name_prefix
-                            )
+                            and snapshot_repo.startswith(self.settings.repo_name_prefix)
                         ):
                             in_use_by = policy_data.get("in_use_by", {})
                             policies.append(
@@ -186,9 +188,7 @@ class Status:
                                     "name": policy_name,
                                     "phase": phase_name,
                                     "repository": snapshot_repo,
-                                    "indices_count": len(
-                                        in_use_by.get("indices", [])
-                                    ),
+                                    "indices_count": len(in_use_by.get("indices", [])),
                                     "data_streams_count": len(
                                         in_use_by.get("data_streams", [])
                                     ),
@@ -247,7 +247,9 @@ class Status:
                 # Apply limit if specified
                 display_repos = repos
                 if self.limit:
-                    display_repos = sorted(repos, key=lambda x: x["name"])[-self.limit:]
+                    display_repos = sorted(repos, key=lambda x: x["name"])[
+                        -self.limit :
+                    ]
 
                 table = Table(title="Repositories")
                 table.add_column("Name", style="cyan")
@@ -312,7 +314,9 @@ class Status:
 
                     date_range = ""
                     if req.get("start_date") and req.get("end_date"):
-                        date_range = f"{req['start_date'][:10]} - {req['end_date'][:10]}"
+                        date_range = (
+                            f"{req['start_date'][:10]} - {req['end_date'][:10]}"
+                        )
 
                     repos_str = ", ".join(req.get("repos", [])[:3])
                     if len(req.get("repos", [])) > 3:
@@ -424,7 +428,14 @@ class Status:
 
         except MissingIndexError:
             if self.porcelain:
-                print(json.dumps({"error": "status_index_missing", "message": f"Status index {STATUS_INDEX} does not exist. Run 'deepfreeze setup' first."}))
+                print(
+                    json.dumps(
+                        {
+                            "error": "status_index_missing",
+                            "message": f"Status index {STATUS_INDEX} does not exist. Run 'deepfreeze setup' first.",
+                        }
+                    )
+                )
             else:
                 self.console.print(
                     Panel(
@@ -440,7 +451,14 @@ class Status:
 
         except MissingSettingsError:
             if self.porcelain:
-                print(json.dumps({"error": "settings_missing", "message": "Settings document not found in status index."}))
+                print(
+                    json.dumps(
+                        {
+                            "error": "settings_missing",
+                            "message": "Settings document not found in status index.",
+                        }
+                    )
+                )
             else:
                 self.console.print(
                     Panel(

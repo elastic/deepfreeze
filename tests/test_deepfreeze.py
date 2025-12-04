@@ -22,8 +22,8 @@ def test_config():
 
     assert freezer.year == "2024"
     assert freezer.month == "13"
-    assert freezer.debug == False
-    assert freezer.verbose == False
+    assert freezer.debug is False
+    assert freezer.verbose is False
     assert freezer.elasticsearch == "https://192.168.1.151:9200"
     assert freezer.ca == "/etc/elasticsearch/certs/http_ca.crt"
     assert freezer.username == "elastic"

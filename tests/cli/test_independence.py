@@ -10,8 +10,6 @@ These tests verify:
 """
 
 import ast
-import sys
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -28,7 +26,7 @@ class TestNoCuratorImports:
         curator_imports = []
 
         for py_file in package_dir.rglob("*.py"):
-            with open(py_file, "r") as f:
+            with open(py_file) as f:
                 try:
                     tree = ast.parse(f.read())
                 except SyntaxError:
@@ -47,21 +45,15 @@ class TestNoCuratorImports:
                                 f"{py_file.relative_to(package_dir)}: from {node.module} import ..."
                             )
 
-        assert len(curator_imports) == 0, (
-            f"Found curator imports in deepfreeze package:\n"
-            + "\n".join(curator_imports)
-        )
+        assert (
+            len(curator_imports) == 0
+        ), "Found curator imports in deepfreeze package:\n" + "\n".join(curator_imports)
 
     def test_no_curator_in_dependencies(self):
         """Verify curator is not a runtime dependency"""
         # Check that deepfreeze can work without curator being imported
-        import sys
 
         # Verify deepfreeze modules don't try to import curator
-        import deepfreeze
-        import deepfreeze.exceptions
-        import deepfreeze.constants
-        import deepfreeze.helpers
 
         # If we get here without ImportError mentioning curator, we're good
         assert True
@@ -80,13 +72,8 @@ class TestPackageImportsStandalone:
     def test_import_deepfreeze_exceptions(self):
         """Test that deepfreeze.exceptions imports correctly"""
         from deepfreeze.exceptions import (
-            DeepfreezeException,
-            MissingIndexError,
-            MissingSettingsError,
-            ActionException,
-            PreconditionError,
-            RepositoryException,
             ActionError,
+            DeepfreezeException,
         )
 
         assert DeepfreezeException is not None
@@ -95,11 +82,9 @@ class TestPackageImportsStandalone:
     def test_import_deepfreeze_constants(self):
         """Test that deepfreeze.constants imports correctly"""
         from deepfreeze.constants import (
-            STATUS_INDEX,
-            SETTINGS_ID,
             PROVIDERS,
-            THAW_STATES,
-            THAW_REQUEST_STATUSES,
+            SETTINGS_ID,
+            STATUS_INDEX,
         )
 
         assert STATUS_INDEX == "deepfreeze-status"
@@ -121,13 +106,13 @@ class TestPackageImportsStandalone:
     def test_import_deepfreeze_actions(self):
         """Test that deepfreeze.actions imports correctly"""
         from deepfreeze.actions import (
+            Cleanup,
+            Refreeze,
+            RepairMetadata,
+            Rotate,
             Setup,
             Status,
-            Rotate,
             Thaw,
-            Refreeze,
-            Cleanup,
-            RepairMetadata,
         )
 
         assert Setup is not None
@@ -140,9 +125,8 @@ class TestPackageImportsStandalone:
 
     def test_import_deepfreeze_cli(self):
         """Test that deepfreeze.cli imports correctly"""
-        from deepfreeze.cli.main import cli
-
         import click
+        from deepfreeze.cli.main import cli
 
         assert cli is not None
         assert isinstance(cli, click.core.Group)
@@ -151,8 +135,8 @@ class TestPackageImportsStandalone:
         """Test that deepfreeze.validators imports correctly"""
         from deepfreeze.validators import (
             ACTION_SCHEMAS,
-            validate_options,
             get_schema,
+            validate_options,
         )
 
         assert ACTION_SCHEMAS is not None
@@ -162,9 +146,9 @@ class TestPackageImportsStandalone:
     def test_import_deepfreeze_config(self):
         """Test that deepfreeze.config imports correctly"""
         from deepfreeze.config import (
-            load_config,
             get_elasticsearch_config,
             get_logging_config,
+            load_config,
         )
 
         assert load_config is not None
@@ -340,6 +324,7 @@ class TestBinaryBuildConfiguration:
     def test_pyproject_has_entry_point(self):
         """Verify pyproject.toml has CLI entry point defined"""
         from pathlib import Path
+
         import deepfreeze
 
         # Find the deepfreeze package's pyproject.toml (in the parent of package dir)
@@ -350,18 +335,19 @@ class TestBinaryBuildConfiguration:
         pyproject_path = package_dir / "pyproject.toml"
 
         if pyproject_path.exists():
-            with open(pyproject_path, "r") as f:
+            with open(pyproject_path) as f:
                 content = f.read()
                 # Check for entry point definition
-                assert "[project.scripts]" in content, (
-                    "No CLI entry point section in pyproject.toml"
-                )
-                assert "deepfreeze" in content, (
-                    "deepfreeze CLI entry point not found in pyproject.toml"
-                )
+                assert (
+                    "[project.scripts]" in content
+                ), "No CLI entry point section in pyproject.toml"
+                assert (
+                    "deepfreeze" in content
+                ), "deepfreeze CLI entry point not found in pyproject.toml"
         else:
             # If pyproject.toml not at expected location, just verify CLI works
             from deepfreeze.cli.main import cli
+
             assert cli is not None
 
     def test_package_has_version(self):
@@ -384,7 +370,7 @@ class TestVerificationScript:
         curator_imports = []
 
         for py_file in package_dir.rglob("*.py"):
-            with open(py_file, "r") as f:
+            with open(py_file) as f:
                 try:
                     tree = ast.parse(f.read())
                 except SyntaxError:
@@ -403,9 +389,7 @@ class TestVerificationScript:
                                 f"{py_file.name}: from {node.module}"
                             )
 
-        assert len(curator_imports) == 0, (
-            f"Found curator imports: {curator_imports}"
-        )
+        assert len(curator_imports) == 0, f"Found curator imports: {curator_imports}"
 
     def test_no_es_client_builder_dependency_in_imports(self):
         """Verify no actual import statements use es_client.builder"""
@@ -415,7 +399,7 @@ class TestVerificationScript:
         es_client_imports = []
 
         for py_file in package_dir.rglob("*.py"):
-            with open(py_file, "r") as f:
+            with open(py_file) as f:
                 try:
                     tree = ast.parse(f.read())
                 except SyntaxError:
@@ -434,6 +418,6 @@ class TestVerificationScript:
                                 f"{py_file.name}: from {node.module}"
                             )
 
-        assert len(es_client_imports) == 0, (
-            f"Found es_client imports: {es_client_imports}"
-        )
+        assert (
+            len(es_client_imports) == 0
+        ), f"Found es_client imports: {es_client_imports}"

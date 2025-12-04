@@ -3,13 +3,13 @@
 # pylint: disable=too-many-arguments,too-many-instance-attributes, raise-missing-from
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from elasticsearch8 import Elasticsearch, NotFoundError
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
-from rich.markup import escape
 
 from deepfreeze_core.constants import (
     STATUS_INDEX,
@@ -18,7 +18,10 @@ from deepfreeze_core.constants import (
     THAW_STATUS_FAILED,
     THAW_STATUS_REFROZEN,
 )
-from deepfreeze_core.exceptions import ActionError, MissingIndexError, MissingSettingsError
+from deepfreeze_core.exceptions import (
+    MissingIndexError,
+    MissingSettingsError,
+)
 from deepfreeze_core.s3client import s3_client_factory
 from deepfreeze_core.utilities import (
     get_matching_repos,
@@ -185,7 +188,7 @@ class Cleanup:
                 policy_body = policy_data.get("policy", {})
                 phases = policy_body.get("phases", {})
 
-                for phase_name, phase_config in phases.items():
+                for _phase_name, phase_config in phases.items():
                     actions = phase_config.get("actions", {})
                     if "searchable_snapshot" in actions:
                         snapshot_repo = actions["searchable_snapshot"].get(
@@ -365,7 +368,9 @@ class Cleanup:
                     table.add_column("Thaw State", style="red")
 
                     for repo in expired_repos:
-                        expires = repo.expires_at.isoformat() if repo.expires_at else "N/A"
+                        expires = (
+                            repo.expires_at.isoformat() if repo.expires_at else "N/A"
+                        )
                         table.add_row(repo.name, expires, repo.thaw_state)
 
                     self.console.print(table)
@@ -413,7 +418,9 @@ class Cleanup:
                     self.console.print(table)
                     self.console.print()
                 else:
-                    self.console.print("[dim]No orphaned ILM policies to clean up[/dim]")
+                    self.console.print(
+                        "[dim]No orphaned ILM policies to clean up[/dim]"
+                    )
                     self.console.print()
 
                 # Summary
@@ -510,7 +517,7 @@ class Cleanup:
                     )
                 else:
                     summary_lines = [
-                        f"[bold]Cleanup completed[/bold]\n",
+                        "[bold]Cleanup completed[/bold]\n",
                         f"Expired repositories: {repo_success} cleaned"
                         + (f" ({repo_failed} failed)" if repo_failed else ""),
                         f"Old thaw requests: {request_success} deleted"
@@ -536,7 +543,9 @@ class Cleanup:
                         failures = []
                         for r in repo_results:
                             if not r["success"]:
-                                failures.append(f"  - Repo {r['repo']}: {r.get('error')}")
+                                failures.append(
+                                    f"  - Repo {r['repo']}: {r.get('error')}"
+                                )
                         for r in request_results:
                             if not r["success"]:
                                 failures.append(

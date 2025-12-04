@@ -6,17 +6,18 @@ It mirrors the interface of `curator_cli deepfreeze` exactly.
 """
 
 import logging
-import sys
 from datetime import datetime
 from pathlib import Path
 
 import click
+from deepfreeze_core import ActionError, DeepfreezeException, create_es_client
 
 from deepfreeze import __version__
-from deepfreeze.config import configure_logging, get_elasticsearch_config, load_config, validate_config
-from deepfreeze.validators import validate_options
-from deepfreeze_core import create_es_client, ActionError, DeepfreezeException
-
+from deepfreeze.config import (
+    configure_logging,
+    get_elasticsearch_config,
+    load_config,
+)
 
 today = datetime.today()
 
@@ -112,7 +113,9 @@ def cli(ctx, config_path, dry_run):
 
         # Now log the config path (after logging is configured)
         if using_default_config:
-            logging.getLogger("deepfreeze.cli").info("Using default config: %s", config_path)
+            logging.getLogger("deepfreeze.cli").info(
+                "Using default config: %s", config_path
+            )
 
         # Client will be created lazily when needed
         ctx.obj["client"] = None
@@ -743,14 +746,14 @@ def thaw(
     if modes_active == 0:
         click.echo(
             "Error: Must specify one of: --start-date/--end-date (-s/-e), --check-status (-k), or --list (-l)",
-            err=True
+            err=True,
         )
         ctx.exit(1)
 
     if modes_active > 1:
         click.echo(
             "Error: Cannot use --start-date/--end-date with --check-status (-k) or --list (-l)",
-            err=True
+            err=True,
         )
         ctx.exit(1)
 
@@ -758,7 +761,7 @@ def thaw(
     if (start_date or end_date) and not (start_date and end_date):
         click.echo(
             "Error: Both --start-date and --end-date are required for creating a new thaw request",
-            err=True
+            err=True,
         )
         ctx.exit(1)
 

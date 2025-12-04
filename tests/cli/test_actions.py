@@ -1,25 +1,17 @@
 """Tests for deepfreeze action classes (Task Groups 7-13 + Task Group 18 additions)"""
 
-import pytest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
+import pytest
 from deepfreeze.actions import (
+    Cleanup,
+    Refreeze,
+    RepairMetadata,
+    Rotate,
     Setup,
     Status,
-    Rotate,
     Thaw,
-    Refreeze,
-    Cleanup,
-    RepairMetadata,
-)
-from deepfreeze.constants import (
-    STATUS_INDEX,
-    THAW_STATE_ACTIVE,
-    THAW_STATE_FROZEN,
-    THAW_STATE_THAWED,
-    THAW_STATUS_COMPLETED,
-    THAW_STATUS_IN_PROGRESS,
 )
 from deepfreeze.exceptions import (
     MissingIndexError,
@@ -132,10 +124,20 @@ class TestSetupAction:
             with patch("deepfreeze.actions.setup.ensure_settings_index"):
                 with patch("deepfreeze.actions.setup.save_settings"):
                     with patch("deepfreeze.actions.setup.create_repo"):
-                        with patch("deepfreeze.actions.setup.create_or_update_ilm_policy") as mock_ilm:
-                            mock_ilm.return_value = {"action": "created", "policy_body": {}}
-                            with patch("deepfreeze.actions.setup.update_index_template_ilm_policy") as mock_template:
-                                mock_template.return_value = {"action": "updated", "template_type": "composable"}
+                        with patch(
+                            "deepfreeze.actions.setup.create_or_update_ilm_policy"
+                        ) as mock_ilm:
+                            mock_ilm.return_value = {
+                                "action": "created",
+                                "policy_body": {},
+                            }
+                            with patch(
+                                "deepfreeze.actions.setup.update_index_template_ilm_policy"
+                            ) as mock_template:
+                                mock_template.return_value = {
+                                    "action": "updated",
+                                    "template_type": "composable",
+                                }
 
                                 setup = Setup(
                                     client=mock_client,
@@ -260,14 +262,18 @@ class TestRotateAction:
                 mock_s3 = MagicMock()
                 mock_factory.return_value = mock_s3
 
-                with patch("deepfreeze.actions.rotate.get_matching_repos") as mock_repos:
+                with patch(
+                    "deepfreeze.actions.rotate.get_matching_repos"
+                ) as mock_repos:
                     mock_repos.return_value = []
 
                     rotate = Rotate(client=mock_client, porcelain=True)
                     rotate._load_settings()
 
                     # Test the _create_new_repository method
-                    new_repo, new_bucket, base_path, new_suffix = rotate._create_new_repository(dry_run=True)
+                    new_repo, new_bucket, base_path, new_suffix = (
+                        rotate._create_new_repository(dry_run=True)
+                    )
 
                     assert new_suffix == "000006"
                     assert new_repo == "deepfreeze-000006"
@@ -349,7 +355,9 @@ class TestThawAction:
                 mock_s3 = MagicMock()
                 mock_factory.return_value = mock_s3
 
-                with patch("deepfreeze.actions.thaw.find_repos_by_date_range") as mock_find:
+                with patch(
+                    "deepfreeze.actions.thaw.find_repos_by_date_range"
+                ) as mock_find:
                     mock_find.return_value = []  # No repos found
 
                     thaw = Thaw(
@@ -396,9 +404,7 @@ class TestRefreezeAction:
         with patch("deepfreeze.actions.refreeze.get_settings") as mock_get:
             mock_get.return_value = mock_settings
 
-            with patch(
-                "deepfreeze.actions.refreeze.s3_client_factory"
-            ) as mock_factory:
+            with patch("deepfreeze.actions.refreeze.s3_client_factory") as mock_factory:
                 mock_s3 = MagicMock()
                 mock_factory.return_value = mock_s3
 
@@ -486,10 +492,14 @@ class TestCleanupAction:
                 mock_s3 = MagicMock()
                 mock_factory.return_value = mock_s3
 
-                with patch("deepfreeze.actions.cleanup.get_matching_repos") as mock_repos:
+                with patch(
+                    "deepfreeze.actions.cleanup.get_matching_repos"
+                ) as mock_repos:
                     mock_repos.return_value = []
 
-                    with patch("deepfreeze.actions.cleanup.list_thaw_requests") as mock_list:
+                    with patch(
+                        "deepfreeze.actions.cleanup.list_thaw_requests"
+                    ) as mock_list:
                         mock_list.return_value = [
                             {
                                 "request_id": "old-request",
@@ -563,7 +573,7 @@ class TestActionInterfaceConsistency:
     def test_action_has_do_action_method(self, action_class):
         """Test all action classes have do_action method"""
         assert hasattr(action_class, "do_action")
-        assert callable(getattr(action_class, "do_action"))
+        assert callable(action_class.do_action)
 
     @pytest.mark.parametrize(
         "action_class",
@@ -572,7 +582,7 @@ class TestActionInterfaceConsistency:
     def test_action_has_do_dry_run_method(self, action_class):
         """Test all action classes have do_dry_run method"""
         assert hasattr(action_class, "do_dry_run")
-        assert callable(getattr(action_class, "do_dry_run"))
+        assert callable(action_class.do_dry_run)
 
 
 class TestNoCuratorImports:
@@ -674,7 +684,9 @@ class TestStatusActionAdditional:
                 with patch("deepfreeze.actions.status.get_all_repos") as mock_repos:
                     mock_repos.return_value = []
 
-                    with patch("deepfreeze.actions.status.list_thaw_requests") as mock_thaw:
+                    with patch(
+                        "deepfreeze.actions.status.list_thaw_requests"
+                    ) as mock_thaw:
                         mock_thaw.return_value = []
 
                         status = Status(client=mock_client, porcelain=True)
@@ -703,7 +715,9 @@ class TestStatusActionAdditional:
                 with patch("deepfreeze.actions.status.get_all_repos") as mock_repos:
                     mock_repos.return_value = []
 
-                    with patch("deepfreeze.actions.status.list_thaw_requests") as mock_thaw:
+                    with patch(
+                        "deepfreeze.actions.status.list_thaw_requests"
+                    ) as mock_thaw:
                         mock_thaw.return_value = []
 
                         status = Status(client=mock_client, porcelain=False)
@@ -825,7 +839,9 @@ class TestCleanupActionAdditional:
                 mock_s3 = MagicMock()
                 mock_factory.return_value = mock_s3
 
-                with patch("deepfreeze.actions.cleanup.get_matching_repos") as mock_repos:
+                with patch(
+                    "deepfreeze.actions.cleanup.get_matching_repos"
+                ) as mock_repos:
                     # Expired repository
                     expired_repo = Repository(
                         name="deepfreeze-old",
@@ -834,7 +850,9 @@ class TestCleanupActionAdditional:
                     )
                     mock_repos.return_value = [expired_repo]
 
-                    with patch("deepfreeze.actions.cleanup.list_thaw_requests") as mock_list:
+                    with patch(
+                        "deepfreeze.actions.cleanup.list_thaw_requests"
+                    ) as mock_list:
                         mock_list.return_value = [
                             {
                                 "request_id": "old-request",
@@ -863,11 +881,15 @@ class TestRepairMetadataActionAdditional:
         with patch("deepfreeze.actions.repair_metadata.get_settings") as mock_get:
             mock_get.return_value = mock_settings
 
-            with patch("deepfreeze.actions.repair_metadata.s3_client_factory") as mock_factory:
+            with patch(
+                "deepfreeze.actions.repair_metadata.s3_client_factory"
+            ) as mock_factory:
                 mock_s3 = MagicMock()
                 mock_factory.return_value = mock_s3
 
-                with patch("deepfreeze.actions.repair_metadata.get_all_repos") as mock_repos:
+                with patch(
+                    "deepfreeze.actions.repair_metadata.get_all_repos"
+                ) as mock_repos:
                     mock_repos.return_value = []
 
                     repair = RepairMetadata(client=mock_client, porcelain=True)

@@ -10,9 +10,8 @@ These tests verify that:
 """
 
 import json
-import pytest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 class TestRepositorySerialization:
@@ -96,8 +95,8 @@ class TestRepositoryStateTransitions:
 
     def test_start_thawing_transition(self):
         """Test Repository.start_thawing() sets correct state"""
-        from deepfreeze.helpers import Repository
         from deepfreeze.constants import THAW_STATE_THAWING
+        from deepfreeze.helpers import Repository
 
         repo = Repository(name="thaw-test", thaw_state="frozen")
         expires_at = datetime(2024, 1, 15, tzinfo=timezone.utc)
@@ -110,8 +109,8 @@ class TestRepositoryStateTransitions:
 
     def test_mark_thawed_transition(self):
         """Test Repository.mark_thawed() sets correct state"""
-        from deepfreeze.helpers import Repository
         from deepfreeze.constants import THAW_STATE_THAWED
+        from deepfreeze.helpers import Repository
 
         repo = Repository(name="mark-thawed-test", thaw_state="thawing")
 
@@ -125,8 +124,8 @@ class TestRepositoryStateTransitions:
 
     def test_mark_expired_transition(self):
         """Test Repository.mark_expired() sets correct state"""
-        from deepfreeze.helpers import Repository
         from deepfreeze.constants import THAW_STATE_EXPIRED
+        from deepfreeze.helpers import Repository
 
         repo = Repository(name="expire-test", thaw_state="thawed")
         repo.thawed_at = datetime(2023, 12, 1, tzinfo=timezone.utc)
@@ -139,8 +138,8 @@ class TestRepositoryStateTransitions:
 
     def test_reset_to_frozen_transition(self):
         """Test Repository.reset_to_frozen() clears all thaw state"""
-        from deepfreeze.helpers import Repository
         from deepfreeze.constants import THAW_STATE_FROZEN
+        from deepfreeze.helpers import Repository
 
         repo = Repository(
             name="reset-test",

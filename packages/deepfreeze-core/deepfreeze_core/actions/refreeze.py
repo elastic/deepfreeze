@@ -6,17 +6,20 @@ import logging
 
 from elasticsearch8 import Elasticsearch
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
-from rich.markup import escape
 
 from deepfreeze_core.constants import (
     STATUS_INDEX,
-    THAW_STATE_THAWED,
     THAW_STATUS_COMPLETED,
     THAW_STATUS_REFROZEN,
 )
-from deepfreeze_core.exceptions import ActionError, MissingIndexError, MissingSettingsError
+from deepfreeze_core.exceptions import (
+    ActionError,
+    MissingIndexError,
+    MissingSettingsError,
+)
 from deepfreeze_core.helpers import Repository
 from deepfreeze_core.s3client import s3_client_factory
 from deepfreeze_core.utilities import (
@@ -109,7 +112,11 @@ class Refreeze:
 
             for index_name in indices:
                 # Check if index exists (might be mounted with different name patterns)
-                for pattern in [index_name, f"partial-{index_name}", f"restored-{index_name}"]:
+                for pattern in [
+                    index_name,
+                    f"partial-{index_name}",
+                    f"restored-{index_name}",
+                ]:
                     if self.client.indices.exists(index=pattern):
                         self.loggit.info("Deleting mounted index %s", pattern)
                         try:
@@ -182,7 +189,7 @@ class Refreeze:
         """
         try:
             request = get_thaw_request(self.client, request_id)
-        except ActionError as e:
+        except ActionError:
             return {"error": f"Request not found: {request_id}", "results": []}
 
         status = request.get("status")
@@ -210,7 +217,9 @@ class Refreeze:
         if not dry_run:
             all_success = all(r["success"] for r in results)
             if all_success:
-                update_thaw_request(self.client, request_id, status=THAW_STATUS_REFROZEN)
+                update_thaw_request(
+                    self.client, request_id, status=THAW_STATUS_REFROZEN
+                )
 
         return {"request_id": request_id, "results": results}
 
@@ -267,7 +276,9 @@ class Refreeze:
                     if self.porcelain:
                         print("INFO\tno_completed_requests")
                     else:
-                        self.console.print("[dim]No completed thaw requests to refreeze[/dim]")
+                        self.console.print(
+                            "[dim]No completed thaw requests to refreeze[/dim]"
+                        )
                     return
 
                 if self.porcelain:
@@ -282,7 +293,9 @@ class Refreeze:
                     for req in completed:
                         date_range = ""
                         if req.get("start_date") and req.get("end_date"):
-                            date_range = f"{req['start_date'][:10]} - {req['end_date'][:10]}"
+                            date_range = (
+                                f"{req['start_date'][:10]} - {req['end_date'][:10]}"
+                            )
 
                         repos_str = ", ".join(req.get("repos", [])[:3])
                         if len(req.get("repos", [])) > 3:
@@ -352,12 +365,16 @@ class Refreeze:
                 if self.porcelain:
                     for r in results:
                         status = "SUCCESS" if r["success"] else "FAILED"
-                        print(f"{status}\t{r['repo']}\t{len(r.get('deleted_indices', []))} indices")
+                        print(
+                            f"{status}\t{r['repo']}\t{len(r.get('deleted_indices', []))} indices"
+                        )
                 else:
                     if successful:
                         success_list = "\n".join(
-                            [f"  - [green]{r['repo']}[/green] ({len(r.get('deleted_indices', []))} indices deleted)"
-                             for r in successful]
+                            [
+                                f"  - [green]{r['repo']}[/green] ({len(r.get('deleted_indices', []))} indices deleted)"
+                                for r in successful
+                            ]
                         )
                         self.console.print(
                             Panel(
@@ -370,8 +387,10 @@ class Refreeze:
 
                     if failed:
                         fail_list = "\n".join(
-                            [f"  - [red]{r['repo']}[/red]: {r.get('error', 'Unknown error')}"
-                             for r in failed]
+                            [
+                                f"  - [red]{r['repo']}[/red]: {r.get('error', 'Unknown error')}"
+                                for r in failed
+                            ]
                         )
                         self.console.print(
                             Panel(
@@ -401,7 +420,9 @@ class Refreeze:
                     if self.porcelain:
                         print(f"PROCESSING\t{req_id}")
                     else:
-                        self.console.print(f"Processing request [cyan]{req_id}[/cyan]...")
+                        self.console.print(
+                            f"Processing request [cyan]{req_id}[/cyan]..."
+                        )
 
                     result = self._refreeze_request(req_id)
                     all_results.append(result)
@@ -414,7 +435,9 @@ class Refreeze:
                 )
 
                 if self.porcelain:
-                    print(f"COMPLETE\t{len(completed)} requests\t{successful_repos}/{total_repos} repos")
+                    print(
+                        f"COMPLETE\t{len(completed)} requests\t{successful_repos}/{total_repos} repos"
+                    )
                 else:
                     self.console.print(
                         Panel(
