@@ -25,12 +25,12 @@ jobs:
       run: |
         pip install hatch
         pip install -e packages/deepfreeze-core[dev]
-        pip install -e packages/es-deepfreeze[dev]
+        pip install -e packages/deepfreeze-cli[dev]
 
     - name: Run linting
       run: |
         cd packages/deepfreeze-core && ruff check deepfreeze_core/
-        cd ../es-deepfreeze && ruff check deepfreeze/
+        cd ../deepfreeze-cli && ruff check deepfreeze/
 
     - name: Run tests
       run: |

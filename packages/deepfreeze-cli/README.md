@@ -21,7 +21,7 @@ Deepfreeze provides cost-effective S3 Glacier archival and lifecycle management 
 ### From PyPI (when published)
 
 ```bash
-pip install es-deepfreeze
+pip install deepfreeze-cli
 ```
 
 ### From Source

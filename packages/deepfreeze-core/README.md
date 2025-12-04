@@ -5,7 +5,7 @@ Core library for Elasticsearch S3 Glacier archival operations.
 ## Overview
 
 This package provides the shared functionality for deepfreeze operations, used by both:
-- **es-deepfreeze**: Standalone CLI tool
+- **deepfreeze-cli**: Standalone CLI tool
 - **elasticsearch-curator**: Full Curator with deepfreeze support
 
 ## Installation

@@ -19,7 +19,7 @@ jobs:
     - name: Validate version sync
       run: |
         CORE_VERSION=$(grep -Po '(?<=__version__ = ")[^"]*' packages/deepfreeze-core/deepfreeze_core/__init__.py)
-        CLI_VERSION=$(grep -Po '(?<=__version__ = ")[^"]*' packages/es-deepfreeze/deepfreeze/__init__.py)
+        CLI_VERSION=$(grep -Po '(?<=__version__ = ")[^"]*' packages/deepfreeze-cli/deepfreeze/__init__.py)
         TAG_VERSION=${GITHUB_REF#refs/tags/v}
 
         echo "Core version: $CORE_VERSION"
@@ -29,7 +29,7 @@ jobs:
         if [ "$CORE_VERSION" != "$CLI_VERSION" ]; then
           echo "ERROR: Version mismatch between packages!"
           echo "  deepfreeze-core: $CORE_VERSION"
-          echo "  es-deepfreeze: $CLI_VERSION"
+          echo "  deepfreeze-cli: $CLI_VERSION"
           exit 1
         fi
 

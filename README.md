@@ -18,15 +18,15 @@ pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/
 
 [View deepfreeze-core documentation](packages/deepfreeze-core/README.md)
 
-### es-deepfreeze
+### deepfreeze-cli
 
 Standalone CLI tool for managing Elasticsearch S3 Glacier archives.
 
 ```bash
-pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/es-deepfreeze
+pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/deepfreeze-cli
 ```
 
-[View es-deepfreeze documentation](packages/es-deepfreeze/README.md)
+[View deepfreeze-cli documentation](packages/deepfreeze-cli/README.md)
 
 ## Features
 
@@ -42,7 +42,7 @@ pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/
 
 1. Install the CLI:
    ```bash
-   pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/es-deepfreeze
+   pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/deepfreeze-cli
    ```
 
 2. Create a configuration file (`config.yml`):
@@ -85,7 +85,7 @@ cd deepfreeze
 
 # Install both packages in development mode
 pip install -e packages/deepfreeze-core[dev]
-pip install -e packages/es-deepfreeze[dev]
+pip install -e packages/deepfreeze-cli[dev]
 
 # Run tests
 pytest tests/
@@ -98,7 +98,7 @@ deepfreeze/
 ├── packages/
 │   ├── deepfreeze-core/     # Core library
 │   │   └── deepfreeze_core/
-│   └── es-deepfreeze/       # Standalone CLI
+│   └── deepfreeze-cli/      # Standalone CLI
 │       └── deepfreeze/
 ├── tests/
 │   ├── core/                # Core library tests

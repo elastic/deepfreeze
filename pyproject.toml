@@ -13,13 +13,13 @@ requires-python = ">=3.8"
 [tool.hatch.envs.default]
 dependencies = [
     "packages/deepfreeze-core",
-    "packages/es-deepfreeze",
+    "packages/deepfreeze-cli",
 ]
 
 [tool.hatch.envs.test]
 dependencies = [
     "packages/deepfreeze-core",
-    "packages/es-deepfreeze",
+    "packages/deepfreeze-cli",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "moto[s3]>=4.0.0",

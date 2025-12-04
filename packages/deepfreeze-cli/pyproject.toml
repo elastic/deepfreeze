@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "es-deepfreeze"
+name = "deepfreeze-cli"
 version = "1.0.0"
 description = "Standalone Elasticsearch S3 Glacier archival and lifecycle management tool"
 readme = "README.md"
@@ -57,7 +57,7 @@ deepfreeze = "deepfreeze.cli.main:cli"
 
 [project.urls]
 Homepage = "https://github.com/elastic/deepfreeze"
-Documentation = "https://github.com/elastic/deepfreeze/tree/main/packages/es-deepfreeze"
+Documentation = "https://github.com/elastic/deepfreeze/tree/main/packages/deepfreeze-cli"
 Repository = "https://github.com/elastic/deepfreeze"
 
 [tool.hatch.build.targets.wheel]
