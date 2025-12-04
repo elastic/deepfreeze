@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  validate-versions:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Validate version sync
+      run: |
+        CORE_VERSION=$(grep -Po '(?<=__version__ = ")[^"]*' packages/deepfreeze-core/deepfreeze_core/__init__.py)
+        CLI_VERSION=$(grep -Po '(?<=__version__ = ")[^"]*' packages/es-deepfreeze/deepfreeze/__init__.py)
+        TAG_VERSION=${GITHUB_REF#refs/tags/v}
+
+        echo "Core version: $CORE_VERSION"
+        echo "CLI version: $CLI_VERSION"
+        echo "Tag version: $TAG_VERSION"
+
+        if [ "$CORE_VERSION" != "$CLI_VERSION" ]; then
+          echo "ERROR: Version mismatch between packages!"
+          echo "  deepfreeze-core: $CORE_VERSION"
+          echo "  es-deepfreeze: $CLI_VERSION"
+          exit 1
+        fi
+
+        if [ "$CORE_VERSION" != "$TAG_VERSION" ]; then
+          echo "ERROR: Version doesn't match git tag!"
+          echo "  Code version: $CORE_VERSION"
+          echo "  Tag version: $TAG_VERSION"
+          exit 1
+        fi
+
+        echo "All versions match: $CORE_VERSION"
+
+  release:
+    needs: validate-versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        generate_release_notes: true
