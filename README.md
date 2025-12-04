@@ -16,6 +16,8 @@ Core library providing the business logic for deepfreeze operations. Used by bot
 pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/deepfreeze-core
 ```
 
+[View deepfreeze-core documentation](packages/deepfreeze-core/README.md)
+
 ### es-deepfreeze
 
 Standalone CLI tool for managing Elasticsearch S3 Glacier archives.
@@ -23,6 +25,8 @@ Standalone CLI tool for managing Elasticsearch S3 Glacier archives.
 ```bash
 pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/es-deepfreeze
 ```
+
+[View es-deepfreeze documentation](packages/es-deepfreeze/README.md)
 
 ## Features
 
