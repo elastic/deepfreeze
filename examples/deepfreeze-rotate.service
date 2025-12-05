@@ -15,7 +15,7 @@
 
 [Unit]
 Description=Deepfreeze Repository Rotation
-Documentation=https://github.com/your-org/deepfreeze
+Documentation=https://github.com/elastic/deepfreeze
 After=network-online.target
 Wants=network-online.target
 

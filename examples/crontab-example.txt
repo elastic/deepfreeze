@@ -1,7 +1,7 @@
 # Deepfreeze Rotation Crontab Example
 #
 # This file provides example crontab entries for running deepfreeze rotation
-# every 30 days.
+# on a monthly schedule.
 #
 # Installation:
 #   Option 1: Add to user crontab
@@ -11,13 +11,10 @@
 #   Option 2: Add to system crontab
 #     sudo vi /etc/cron.d/deepfreeze-rotate
 #     # Paste the desired line below (include username field)
-#
-# Note: Cron doesn't have a native "every 30 days" option, so we use
-# workarounds below.
 
 # -----------------------------------------------------------------------------
-# OPTION 1: Run on the 1st of every month at 2:00 AM
-# This is the simplest approach and runs approximately every 30 days.
+# OPTION 1: Run on the 1st of every month at 2:00 AM (RECOMMENDED)
+# Simple and predictable monthly rotation schedule.
 # -----------------------------------------------------------------------------
 0 2 1 * * /usr/local/bin/deepfreeze --config /etc/deepfreeze/config.yml rotate --keep 6
 

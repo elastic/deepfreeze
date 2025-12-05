@@ -17,7 +17,7 @@
 
 [Unit]
 Description=Run Deepfreeze Rotation Every 30 Days
-Documentation=https://github.com/your-org/deepfreeze
+Documentation=https://github.com/elastic/deepfreeze
 
 [Timer]
 # Run every 30 days
