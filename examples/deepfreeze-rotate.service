@@ -1,0 +1,46 @@
+# Deepfreeze Rotate Service
+# This systemd service performs the deepfreeze rotation operation.
+#
+# Installation:
+#   1. Copy this file to /etc/systemd/system/deepfreeze-rotate.service
+#   2. Copy deepfreeze-rotate.timer to /etc/systemd/system/deepfreeze-rotate.timer
+#   3. Adjust User, config path, and other settings as needed
+#   4. Enable and start the timer:
+#      sudo systemctl daemon-reload
+#      sudo systemctl enable deepfreeze-rotate.timer
+#      sudo systemctl start deepfreeze-rotate.timer
+#
+# To run manually:
+#   sudo systemctl start deepfreeze-rotate.service
+
+[Unit]
+Description=Deepfreeze Repository Rotation
+Documentation=https://github.com/your-org/deepfreeze
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=elasticsearch
+Group=elasticsearch
+
+# Adjust the path to your deepfreeze installation
+ExecStart=/usr/local/bin/deepfreeze --config /etc/deepfreeze/config.yml rotate --keep 6
+
+# Environment variables (if needed for AWS credentials)
+# Environment=AWS_PROFILE=default
+# EnvironmentFile=/etc/deepfreeze/env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=deepfreeze-rotate
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

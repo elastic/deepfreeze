@@ -1,0 +1,53 @@
+# Deepfreeze Rotation Crontab Example
+#
+# This file provides example crontab entries for running deepfreeze rotation
+# every 30 days.
+#
+# Installation:
+#   Option 1: Add to user crontab
+#     crontab -e
+#     # Paste the desired line below
+#
+#   Option 2: Add to system crontab
+#     sudo vi /etc/cron.d/deepfreeze-rotate
+#     # Paste the desired line below (include username field)
+#
+# Note: Cron doesn't have a native "every 30 days" option, so we use
+# workarounds below.
+
+# -----------------------------------------------------------------------------
+# OPTION 1: Run on the 1st of every month at 2:00 AM
+# This is the simplest approach and runs approximately every 30 days.
+# -----------------------------------------------------------------------------
+0 2 1 * * /usr/local/bin/deepfreeze --config /etc/deepfreeze/config.yml rotate --keep 6
+
+# -----------------------------------------------------------------------------
+# OPTION 2: Run on the 1st and 15th of every month (approximately every 15 days)
+# Use this if you want more frequent rotation.
+# -----------------------------------------------------------------------------
+# 0 2 1,15 * * /usr/local/bin/deepfreeze --config /etc/deepfreeze/config.yml rotate --keep 6
+
+# -----------------------------------------------------------------------------
+# OPTION 3: Run every 30 days using day-of-year calculation
+# This script-based approach gives true 30-day intervals.
+# -----------------------------------------------------------------------------
+# 0 2 * * * [ $(( $(date +\%j) \% 30 )) -eq 0 ] && /usr/local/bin/deepfreeze --config /etc/deepfreeze/config.yml rotate --keep 6
+
+# -----------------------------------------------------------------------------
+# SYSTEM CRONTAB FORMAT (for /etc/cron.d/deepfreeze-rotate)
+# Includes username field between schedule and command.
+# -----------------------------------------------------------------------------
+# 0 2 1 * * elasticsearch /usr/local/bin/deepfreeze --config /etc/deepfreeze/config.yml rotate --keep 6
+
+# -----------------------------------------------------------------------------
+# WITH LOGGING
+# Append output to a log file for debugging.
+# -----------------------------------------------------------------------------
+# 0 2 1 * * /usr/local/bin/deepfreeze --config /etc/deepfreeze/config.yml rotate --keep 6 >> /var/log/deepfreeze/rotate.log 2>&1
+
+# -----------------------------------------------------------------------------
+# WITH ENVIRONMENT VARIABLES
+# Set AWS credentials or other environment variables.
+# -----------------------------------------------------------------------------
+# AWS_PROFILE=default
+# 0 2 1 * * /usr/local/bin/deepfreeze --config /etc/deepfreeze/config.yml rotate --keep 6
