@@ -5,7 +5,7 @@ Core library for Elasticsearch S3 Glacier archival operations.
 This package is shared between the standalone deepfreeze CLI and curator.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 # Export constants
 # Export actions

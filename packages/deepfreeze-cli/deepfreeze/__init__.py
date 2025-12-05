@@ -8,7 +8,7 @@ Core functionality is provided by the deepfreeze-core package.
 This package adds the CLI and configuration management.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 # Re-export everything from deepfreeze-core for backward compatibility
 from deepfreeze_core import (
