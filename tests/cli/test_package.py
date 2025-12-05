@@ -22,15 +22,19 @@ def test_package_imports_successfully():
 
 def test_submodules_import_successfully():
     """Test that all submodules can be imported"""
-    import deepfreeze.actions
     import deepfreeze.cli
-    import deepfreeze.constants
-    import deepfreeze.exceptions
+    import deepfreeze.config
+    import deepfreeze.validators
+    import deepfreeze_core.actions
+    import deepfreeze_core.constants
+    import deepfreeze_core.exceptions
 
-    assert deepfreeze.exceptions is not None
-    assert deepfreeze.constants is not None
+    assert deepfreeze_core.exceptions is not None
+    assert deepfreeze_core.constants is not None
     assert deepfreeze.cli is not None
-    assert deepfreeze.actions is not None
+    assert deepfreeze_core.actions is not None
+    assert deepfreeze.config is not None
+    assert deepfreeze.validators is not None
 
 
 def test_no_curator_imports_in_package():

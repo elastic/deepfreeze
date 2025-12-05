@@ -22,7 +22,7 @@ class TestSettingsOperations:
 
     def test_ensure_settings_index_creates_when_missing(self):
         """Test ensure_settings_index creates index when missing and flag is True"""
-        from deepfreeze.utilities import ensure_settings_index
+        from deepfreeze_core import ensure_settings_index
 
         mock_client = MagicMock()
         mock_client.indices.exists.return_value = False
@@ -37,8 +37,8 @@ class TestSettingsOperations:
 
     def test_ensure_settings_index_raises_when_missing_no_create(self):
         """Test ensure_settings_index raises MissingIndexError when missing and flag is False"""
-        from deepfreeze.exceptions import MissingIndexError
-        from deepfreeze.utilities import ensure_settings_index
+        from deepfreeze import MissingIndexError
+        from deepfreeze_core import ensure_settings_index
 
         mock_client = MagicMock()
         mock_client.indices.exists.return_value = False
@@ -48,7 +48,7 @@ class TestSettingsOperations:
 
     def test_ensure_settings_index_does_nothing_when_exists(self):
         """Test ensure_settings_index does nothing when index exists"""
-        from deepfreeze.utilities import ensure_settings_index
+        from deepfreeze_core import ensure_settings_index
 
         mock_client = MagicMock()
         mock_client.indices.exists.return_value = True
@@ -59,8 +59,8 @@ class TestSettingsOperations:
 
     def test_get_settings_returns_settings_object(self):
         """Test get_settings returns a Settings object when found"""
-        from deepfreeze.helpers import Settings
-        from deepfreeze.utilities import get_settings
+        from deepfreeze import Settings
+        from deepfreeze_core import get_settings
 
         mock_client = MagicMock()
         mock_client.indices.exists.return_value = True
@@ -80,7 +80,7 @@ class TestSettingsOperations:
 
     def test_get_settings_returns_none_when_not_found(self):
         """Test get_settings returns None when settings not found"""
-        from deepfreeze.utilities import get_settings
+        from deepfreeze_core import get_settings
         from elasticsearch8 import NotFoundError
 
         mock_client = MagicMock()
@@ -93,8 +93,8 @@ class TestSettingsOperations:
 
     def test_save_settings_creates_new(self):
         """Test save_settings creates new document when not exists"""
-        from deepfreeze.helpers import Settings
-        from deepfreeze.utilities import save_settings
+        from deepfreeze import Settings
+        from deepfreeze_core import save_settings
         from elasticsearch8 import NotFoundError
 
         mock_client = MagicMock()
@@ -108,8 +108,8 @@ class TestSettingsOperations:
 
     def test_save_settings_updates_existing(self):
         """Test save_settings updates document when exists"""
-        from deepfreeze.helpers import Settings
-        from deepfreeze.utilities import save_settings
+        from deepfreeze import Settings
+        from deepfreeze_core import save_settings
 
         mock_client = MagicMock()
         mock_client.get.return_value = {"_source": {}}
@@ -126,8 +126,8 @@ class TestRepositoryOperations:
 
     def test_get_repository_returns_repository_when_found(self):
         """Test get_repository returns Repository when found in status index"""
-        from deepfreeze.helpers import Repository
-        from deepfreeze.utilities import get_repository
+        from deepfreeze import Repository
+        from deepfreeze_core.utilities import get_repository
 
         mock_client = MagicMock()
         mock_client.search.return_value = {
@@ -155,8 +155,8 @@ class TestRepositoryOperations:
 
     def test_get_repository_returns_empty_when_not_found(self):
         """Test get_repository returns new Repository when not found"""
-        from deepfreeze.helpers import Repository
-        from deepfreeze.utilities import get_repository
+        from deepfreeze import Repository
+        from deepfreeze_core.utilities import get_repository
 
         mock_client = MagicMock()
         mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
@@ -169,8 +169,8 @@ class TestRepositoryOperations:
 
     def test_get_all_repos_returns_list(self):
         """Test get_all_repos returns list of Repository objects"""
-        from deepfreeze.helpers import Repository
-        from deepfreeze.utilities import get_all_repos
+        from deepfreeze import Repository
+        from deepfreeze_core import get_all_repos
 
         mock_client = MagicMock()
         mock_client.search.return_value = {
@@ -205,7 +205,7 @@ class TestRepositoryOperations:
 
     def test_get_matching_repos_filters_by_prefix(self):
         """Test get_matching_repos filters repositories by prefix"""
-        from deepfreeze.utilities import get_matching_repos
+        from deepfreeze_core import get_matching_repos
 
         mock_client = MagicMock()
         mock_client.search.return_value = {
@@ -242,7 +242,7 @@ class TestDateOperations:
 
     def test_decode_date_from_string(self):
         """Test decode_date converts ISO string to datetime"""
-        from deepfreeze.utilities import decode_date
+        from deepfreeze_core import decode_date
 
         result = decode_date("2023-06-15T10:30:00+00:00")
 
@@ -253,7 +253,7 @@ class TestDateOperations:
 
     def test_decode_date_from_datetime(self):
         """Test decode_date handles datetime input"""
-        from deepfreeze.utilities import decode_date
+        from deepfreeze_core import decode_date
 
         input_dt = datetime(2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc)
 
@@ -263,7 +263,7 @@ class TestDateOperations:
 
     def test_decode_date_adds_utc_if_naive(self):
         """Test decode_date adds UTC timezone to naive datetime"""
-        from deepfreeze.utilities import decode_date
+        from deepfreeze_core import decode_date
 
         result = decode_date("2023-06-15T10:30:00")
 
@@ -271,14 +271,14 @@ class TestDateOperations:
 
     def test_decode_date_invalid_raises(self):
         """Test decode_date raises ValueError for invalid input"""
-        from deepfreeze.utilities import decode_date
+        from deepfreeze_core import decode_date
 
         with pytest.raises(ValueError):
             decode_date(12345)  # Neither string nor datetime
 
     def test_get_next_suffix_oneup(self):
         """Test get_next_suffix with oneup style"""
-        from deepfreeze.utilities import get_next_suffix
+        from deepfreeze_core import get_next_suffix
 
         result = get_next_suffix("oneup", "000041", None, None)
 
@@ -286,7 +286,7 @@ class TestDateOperations:
 
     def test_get_next_suffix_date(self):
         """Test get_next_suffix with date style"""
-        from deepfreeze.utilities import get_next_suffix
+        from deepfreeze_core import get_next_suffix
 
         result = get_next_suffix("date", "000001", 2024, 3)
 
@@ -294,15 +294,15 @@ class TestDateOperations:
 
     def test_get_next_suffix_invalid_raises(self):
         """Test get_next_suffix raises for invalid style"""
-        from deepfreeze.utilities import get_next_suffix
+        from deepfreeze_core import get_next_suffix
 
         with pytest.raises(ValueError):
             get_next_suffix("invalid_style", "000001", None, None)
 
     def test_find_repos_by_date_range(self):
         """Test find_repos_by_date_range queries with correct date filters"""
-        from deepfreeze.helpers import Repository
-        from deepfreeze.utilities import find_repos_by_date_range
+        from deepfreeze import Repository
+        from deepfreeze_core import find_repos_by_date_range
 
         mock_client = MagicMock()
         mock_client.search.return_value = {
@@ -336,8 +336,8 @@ class TestThawRequestOperations:
 
     def test_save_thaw_request_creates_document(self):
         """Test save_thaw_request creates a thaw request document"""
-        from deepfreeze.helpers import Repository
-        from deepfreeze.utilities import save_thaw_request
+        from deepfreeze import Repository
+        from deepfreeze_core import save_thaw_request
 
         mock_client = MagicMock()
         repos = [Repository(name="repo-1"), Repository(name="repo-2")]
@@ -357,7 +357,7 @@ class TestThawRequestOperations:
 
     def test_get_thaw_request_returns_document(self):
         """Test get_thaw_request retrieves thaw request"""
-        from deepfreeze.utilities import get_thaw_request
+        from deepfreeze_core import get_thaw_request
 
         mock_client = MagicMock()
         mock_client.get.return_value = {
@@ -375,7 +375,7 @@ class TestThawRequestOperations:
 
     def test_list_thaw_requests_returns_all(self):
         """Test list_thaw_requests returns all thaw requests"""
-        from deepfreeze.utilities import list_thaw_requests
+        from deepfreeze_core import list_thaw_requests
 
         mock_client = MagicMock()
         mock_client.search.return_value = {
@@ -409,7 +409,7 @@ class TestThawRequestOperations:
 
     def test_update_thaw_request(self):
         """Test update_thaw_request updates status"""
-        from deepfreeze.utilities import update_thaw_request
+        from deepfreeze_core.utilities import update_thaw_request
 
         mock_client = MagicMock()
 
@@ -428,7 +428,7 @@ class TestNoCuratorImports:
         """Test that utilities.py has no curator imports (actual import statements, not docstrings)"""
         import inspect
 
-        import deepfreeze.utilities as util_module
+        import deepfreeze_core.utilities as util_module
 
         source = inspect.getsource(util_module)
 
@@ -441,9 +441,9 @@ class TestNoCuratorImports:
 
     def test_module_uses_local_exceptions(self):
         """Test that utilities uses deepfreeze.exceptions"""
-        from deepfreeze.exceptions import ActionError as DFActionError
-        from deepfreeze.exceptions import MissingIndexError as DFMissingIndexError
-        from deepfreeze.utilities import ActionError, MissingIndexError
+        from deepfreeze import ActionError as DFActionError
+        from deepfreeze import MissingIndexError as DFMissingIndexError
+        from deepfreeze_core import ActionError, MissingIndexError
 
         # Verify they are the same classes
         assert ActionError is DFActionError
@@ -455,7 +455,7 @@ class TestAllUtilityFunctionsAccessible:
 
     def test_repository_functions_exist(self):
         """Test repository operation functions are importable"""
-        from deepfreeze.utilities import (
+        from deepfreeze_core.utilities import (
             create_repo,
             get_all_repos,
             get_matching_repo_names,
@@ -475,7 +475,7 @@ class TestAllUtilityFunctionsAccessible:
 
     def test_settings_functions_exist(self):
         """Test settings operation functions are importable"""
-        from deepfreeze.utilities import (
+        from deepfreeze_core import (
             ensure_settings_index,
             get_settings,
             save_settings,
@@ -487,7 +487,7 @@ class TestAllUtilityFunctionsAccessible:
 
     def test_date_functions_exist(self):
         """Test date operation functions are importable"""
-        from deepfreeze.utilities import (
+        from deepfreeze_core import (
             decode_date,
             find_repos_by_date_range,
             get_timestamp_range,
@@ -499,7 +499,7 @@ class TestAllUtilityFunctionsAccessible:
 
     def test_ilm_functions_exist(self):
         """Test ILM operation functions are importable"""
-        from deepfreeze.utilities import (
+        from deepfreeze_core.utilities import (
             create_ilm_policy,
             create_or_update_ilm_policy,
             create_thawed_ilm_policy,
@@ -513,7 +513,7 @@ class TestAllUtilityFunctionsAccessible:
 
     def test_thaw_functions_exist(self):
         """Test thaw operation functions are importable"""
-        from deepfreeze.utilities import (
+        from deepfreeze_core.utilities import (
             get_thaw_request,
             list_thaw_requests,
             save_thaw_request,
@@ -527,7 +527,7 @@ class TestAllUtilityFunctionsAccessible:
 
     def test_s3_functions_exist(self):
         """Test S3 operation functions are importable"""
-        from deepfreeze.utilities import (
+        from deepfreeze_core import (
             check_restore_status,
             push_to_glacier,
         )
@@ -537,7 +537,7 @@ class TestAllUtilityFunctionsAccessible:
 
     def test_index_functions_exist(self):
         """Test index operation functions are importable"""
-        from deepfreeze.utilities import (
+        from deepfreeze_core.utilities import (
             find_and_mount_indices_in_date_range,
             find_snapshots_for_index,
             get_all_indices_in_repo,

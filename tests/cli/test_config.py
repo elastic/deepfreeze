@@ -5,13 +5,13 @@ import tempfile
 from unittest.mock import patch
 
 import pytest
+from deepfreeze import ActionError
 from deepfreeze.config import (
     get_elasticsearch_config,
     get_logging_config,
     load_config,
     validate_config,
 )
-from deepfreeze.exceptions import ActionError
 
 
 class TestLoadConfig:

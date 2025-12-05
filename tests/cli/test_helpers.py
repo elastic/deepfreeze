@@ -19,7 +19,7 @@ class TestRepositorySerialization:
 
     def test_repository_to_dict(self):
         """Test Repository.to_dict() converts all fields correctly"""
-        from deepfreeze.helpers import Repository
+        from deepfreeze import Repository
 
         start_dt = datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         end_dt = datetime(2023, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
@@ -47,7 +47,7 @@ class TestRepositorySerialization:
 
     def test_repository_to_json(self):
         """Test Repository.to_json() returns valid JSON"""
-        from deepfreeze.helpers import Repository
+        from deepfreeze import Repository
 
         repo = Repository(
             name="json-test-repo",
@@ -64,7 +64,7 @@ class TestRepositorySerialization:
 
     def test_repository_from_dict_with_string_dates(self):
         """Test Repository __post_init__ converts string dates to datetime"""
-        from deepfreeze.helpers import Repository
+        from deepfreeze import Repository
 
         repo = Repository(
             name="string-date-repo",
@@ -79,7 +79,7 @@ class TestRepositorySerialization:
 
     def test_repository_comparison(self):
         """Test Repository.__lt__() for sorting"""
-        from deepfreeze.helpers import Repository
+        from deepfreeze import Repository
 
         repo_a = Repository(name="deepfreeze-000001")
         repo_b = Repository(name="deepfreeze-000002")
@@ -95,8 +95,8 @@ class TestRepositoryStateTransitions:
 
     def test_start_thawing_transition(self):
         """Test Repository.start_thawing() sets correct state"""
-        from deepfreeze.constants import THAW_STATE_THAWING
-        from deepfreeze.helpers import Repository
+        from deepfreeze import Repository
+        from deepfreeze_core.constants import THAW_STATE_THAWING
 
         repo = Repository(name="thaw-test", thaw_state="frozen")
         expires_at = datetime(2024, 1, 15, tzinfo=timezone.utc)
@@ -109,8 +109,8 @@ class TestRepositoryStateTransitions:
 
     def test_mark_thawed_transition(self):
         """Test Repository.mark_thawed() sets correct state"""
-        from deepfreeze.constants import THAW_STATE_THAWED
-        from deepfreeze.helpers import Repository
+        from deepfreeze import Repository
+        from deepfreeze_core.constants import THAW_STATE_THAWED
 
         repo = Repository(name="mark-thawed-test", thaw_state="thawing")
 
@@ -124,8 +124,8 @@ class TestRepositoryStateTransitions:
 
     def test_mark_expired_transition(self):
         """Test Repository.mark_expired() sets correct state"""
-        from deepfreeze.constants import THAW_STATE_EXPIRED
-        from deepfreeze.helpers import Repository
+        from deepfreeze import Repository
+        from deepfreeze_core.constants import THAW_STATE_EXPIRED
 
         repo = Repository(name="expire-test", thaw_state="thawed")
         repo.thawed_at = datetime(2023, 12, 1, tzinfo=timezone.utc)
@@ -138,8 +138,8 @@ class TestRepositoryStateTransitions:
 
     def test_reset_to_frozen_transition(self):
         """Test Repository.reset_to_frozen() clears all thaw state"""
-        from deepfreeze.constants import THAW_STATE_FROZEN
-        from deepfreeze.helpers import Repository
+        from deepfreeze import Repository
+        from deepfreeze_core.constants import THAW_STATE_FROZEN
 
         repo = Repository(
             name="reset-test",
@@ -160,7 +160,7 @@ class TestRepositoryStateTransitions:
 
     def test_unmount(self):
         """Test Repository.unmount() sets is_mounted to False"""
-        from deepfreeze.helpers import Repository
+        from deepfreeze import Repository
 
         repo = Repository(name="unmount-test", is_mounted=True)
 
@@ -174,7 +174,7 @@ class TestSettingsInitialization:
 
     def test_settings_default_values(self):
         """Test Settings initializes with correct defaults"""
-        from deepfreeze.helpers import Settings
+        from deepfreeze import Settings
 
         settings = Settings()
 
@@ -193,7 +193,7 @@ class TestSettingsInitialization:
 
     def test_settings_custom_values(self):
         """Test Settings accepts custom initialization values"""
-        from deepfreeze.helpers import Settings
+        from deepfreeze import Settings
 
         settings = Settings(
             repo_name_prefix="custom-repo",
@@ -211,7 +211,7 @@ class TestSettingsInitialization:
 
     def test_settings_from_hash(self):
         """Test Settings initializes from settings_hash dict"""
-        from deepfreeze.helpers import Settings
+        from deepfreeze import Settings
 
         settings_hash = {
             "repo_name_prefix": "hash-repo",
@@ -227,7 +227,7 @@ class TestSettingsInitialization:
 
     def test_settings_to_dict(self):
         """Test Settings.to_dict() returns all fields"""
-        from deepfreeze.helpers import Settings
+        from deepfreeze import Settings
 
         settings = Settings(ilm_policy_name="test-policy")
         result = settings.to_dict()
@@ -240,7 +240,7 @@ class TestSettingsInitialization:
 
     def test_settings_to_json(self):
         """Test Settings.to_json() returns valid JSON"""
-        from deepfreeze.helpers import Settings
+        from deepfreeze import Settings
 
         settings = Settings()
         result = settings.to_json()
@@ -255,7 +255,7 @@ class TestRepositoryElasticsearchInteraction:
 
     def test_from_elasticsearch_success(self):
         """Test Repository.from_elasticsearch() fetches and creates instance"""
-        from deepfreeze.helpers import Repository
+        from deepfreeze import Repository
 
         # Mock ES client
         mock_client = MagicMock()
@@ -287,7 +287,7 @@ class TestRepositoryElasticsearchInteraction:
 
     def test_from_elasticsearch_not_found(self):
         """Test Repository.from_elasticsearch() returns None when not found"""
-        from deepfreeze.helpers import Repository
+        from deepfreeze import Repository
 
         mock_client = MagicMock()
         mock_client.search.return_value = {"hits": {"hits": []}}
@@ -298,7 +298,7 @@ class TestRepositoryElasticsearchInteraction:
 
     def test_persist_calls_es_update(self):
         """Test Repository.persist() calls ES update correctly"""
-        from deepfreeze.helpers import Repository
+        from deepfreeze import Repository
 
         mock_client = MagicMock()
         repo = Repository(
@@ -321,7 +321,7 @@ class TestDeepfreezeClass:
 
     def test_deepfreeze_class_exists(self):
         """Test Deepfreeze class can be instantiated"""
-        from deepfreeze.helpers import Deepfreeze
+        from deepfreeze import Deepfreeze
 
         df = Deepfreeze()
         assert df is not None

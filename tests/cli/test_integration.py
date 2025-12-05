@@ -11,14 +11,15 @@ These tests verify:
 
 from unittest.mock import MagicMock, patch
 
-from deepfreeze.actions import (
+from deepfreeze import (
     Refreeze,
+    Repository,
     Rotate,
+    Settings,
     Setup,
     Thaw,
 )
-from deepfreeze.constants import THAW_STATUS_COMPLETED
-from deepfreeze.helpers import Repository, Settings
+from deepfreeze_core.constants import THAW_STATUS_COMPLETED
 
 
 class MockElasticsearchClient:
@@ -170,14 +171,14 @@ class TestSetupStatusWorkflow:
         mock_es.info.return_value = {"version": {"number": "8.10.0"}}
 
         # Run setup with all necessary patches
-        with patch("deepfreeze.actions.setup.s3_client_factory") as mock_factory:
+        with patch("deepfreeze_core.actions.setup.s3_client_factory") as mock_factory:
             mock_factory.return_value = mock_s3
 
-            with patch("deepfreeze.actions.setup.ensure_settings_index"):
-                with patch("deepfreeze.actions.setup.save_settings"):
-                    with patch("deepfreeze.actions.setup.create_repo"):
+            with patch("deepfreeze_core.actions.setup.ensure_settings_index"):
+                with patch("deepfreeze_core.actions.setup.save_settings"):
+                    with patch("deepfreeze_core.actions.setup.create_repo"):
                         with patch(
-                            "deepfreeze.actions.setup.create_or_update_ilm_policy"
+                            "deepfreeze_core.actions.setup.create_or_update_ilm_policy"
                         ) as mock_ilm:
                             mock_ilm.return_value = {
                                 "action": "created",
@@ -185,7 +186,7 @@ class TestSetupStatusWorkflow:
                             }
 
                             with patch(
-                                "deepfreeze.actions.setup.update_index_template_ilm_policy"
+                                "deepfreeze_core.actions.setup.update_index_template_ilm_policy"
                             ) as mock_tmpl:
                                 mock_tmpl.return_value = {
                                     "action": "updated",
@@ -225,14 +226,14 @@ class TestSetupRotateWorkflow:
         mock_es.info.return_value = {"version": {"number": "8.10.0"}}
 
         # Setup phase
-        with patch("deepfreeze.actions.setup.s3_client_factory") as mock_factory:
+        with patch("deepfreeze_core.actions.setup.s3_client_factory") as mock_factory:
             mock_factory.return_value = mock_s3
 
-            with patch("deepfreeze.actions.setup.ensure_settings_index"):
-                with patch("deepfreeze.actions.setup.save_settings"):
-                    with patch("deepfreeze.actions.setup.create_repo"):
+            with patch("deepfreeze_core.actions.setup.ensure_settings_index"):
+                with patch("deepfreeze_core.actions.setup.save_settings"):
+                    with patch("deepfreeze_core.actions.setup.create_repo"):
                         with patch(
-                            "deepfreeze.actions.setup.create_or_update_ilm_policy"
+                            "deepfreeze_core.actions.setup.create_or_update_ilm_policy"
                         ) as mock_ilm:
                             mock_ilm.return_value = {
                                 "action": "created",
@@ -240,7 +241,7 @@ class TestSetupRotateWorkflow:
                             }
 
                             with patch(
-                                "deepfreeze.actions.setup.update_index_template_ilm_policy"
+                                "deepfreeze_core.actions.setup.update_index_template_ilm_policy"
                             ) as mock_tmpl:
                                 mock_tmpl.return_value = {
                                     "action": "updated",
@@ -266,10 +267,10 @@ class TestSetupRotateWorkflow:
 
         # Rotate phase - the rotate action creates a new repository with new base_path
         # in the SAME bucket (rotate-bucket), not a new bucket
-        with patch("deepfreeze.actions.rotate.s3_client_factory") as mock_factory:
+        with patch("deepfreeze_core.actions.rotate.s3_client_factory") as mock_factory:
             mock_factory.return_value = mock_s3
 
-            with patch("deepfreeze.actions.rotate.get_settings") as mock_get:
+            with patch("deepfreeze_core.actions.rotate.get_settings") as mock_get:
                 mock_get.return_value = Settings(
                     repo_name_prefix="rotate-test",
                     bucket_name_prefix="rotate-bucket",
@@ -278,7 +279,7 @@ class TestSetupRotateWorkflow:
                 )
 
                 with patch(
-                    "deepfreeze.actions.rotate.get_matching_repos"
+                    "deepfreeze_core.actions.rotate.get_matching_repos"
                 ) as mock_repos:
                     mock_repos.return_value = [
                         Repository(
@@ -290,11 +291,11 @@ class TestSetupRotateWorkflow:
                     ]
 
                     with patch(
-                        "deepfreeze.actions.rotate.create_repo"
+                        "deepfreeze_core.actions.rotate.create_repo"
                     ) as mock_create_repo:
-                        with patch("deepfreeze.actions.rotate.save_settings"):
+                        with patch("deepfreeze_core.actions.rotate.save_settings"):
                             with patch(
-                                "deepfreeze.actions.rotate.create_versioned_ilm_policy"
+                                "deepfreeze_core.actions.rotate.create_versioned_ilm_policy"
                             ):
                                 rotate = Rotate(
                                     client=mock_es,
@@ -319,13 +320,15 @@ class TestThawRequestLifecycle:
         mock_s3 = MockS3Client()
 
         # List mode
-        with patch("deepfreeze.actions.thaw.s3_client_factory") as mock_factory:
+        with patch("deepfreeze_core.actions.thaw.s3_client_factory") as mock_factory:
             mock_factory.return_value = mock_s3
 
-            with patch("deepfreeze.actions.thaw.get_settings") as mock_get:
+            with patch("deepfreeze_core.actions.thaw.get_settings") as mock_get:
                 mock_get.return_value = Settings()
 
-                with patch("deepfreeze.actions.thaw.list_thaw_requests") as mock_list:
+                with patch(
+                    "deepfreeze_core.actions.thaw.list_thaw_requests"
+                ) as mock_list:
                     mock_list.return_value = [
                         {
                             "id": "thaw-001",
@@ -348,20 +351,24 @@ class TestThawRequestLifecycle:
         mock_s3 = MockS3Client()
 
         # Refreeze the completed request
-        with patch("deepfreeze.actions.refreeze.s3_client_factory") as mock_factory:
+        with patch(
+            "deepfreeze_core.actions.refreeze.s3_client_factory"
+        ) as mock_factory:
             mock_factory.return_value = mock_s3
 
-            with patch("deepfreeze.actions.refreeze.get_settings") as mock_get:
+            with patch("deepfreeze_core.actions.refreeze.get_settings") as mock_get:
                 mock_get.return_value = Settings()
 
-                with patch("deepfreeze.actions.refreeze.get_thaw_request") as mock_req:
+                with patch(
+                    "deepfreeze_core.actions.refreeze.get_thaw_request"
+                ) as mock_req:
                     mock_req.return_value = {
                         "request_id": "thaw-completed",
                         "status": THAW_STATUS_COMPLETED,
                         "repos": ["lifecycle-repo-000001"],
                     }
 
-                    with patch("deepfreeze.utilities.get_repository") as mock_repo:
+                    with patch("deepfreeze_core.utilities.get_repository") as mock_repo:
                         mock_repo.return_value = Repository(
                             name="lifecycle-repo-000001",
                             bucket="lifecycle-bucket",
@@ -370,8 +377,10 @@ class TestThawRequestLifecycle:
                             is_mounted=True,
                         )
 
-                        with patch("deepfreeze.actions.refreeze.update_thaw_request"):
-                            with patch("deepfreeze.actions.refreeze.unmount_repo"):
+                        with patch(
+                            "deepfreeze_core.actions.refreeze.update_thaw_request"
+                        ):
+                            with patch("deepfreeze_core.actions.refreeze.unmount_repo"):
                                 refreeze = Refreeze(
                                     client=mock_es,
                                     request_id="thaw-completed",
@@ -405,7 +414,7 @@ class TestBackwardCompatibility:
         }
 
         # Verify we can read the settings
-        from deepfreeze.utilities import get_settings
+        from deepfreeze_core.utilities import get_settings
 
         settings = get_settings(mock_es)
 
@@ -440,7 +449,7 @@ class TestBackwardCompatibility:
         }
 
         # Verify we can read the repository
-        from deepfreeze.utilities import get_repository
+        from deepfreeze_core.utilities import get_repository
 
         repo = get_repository(mock_es, "legacy-repo-000001")
 
@@ -468,7 +477,7 @@ class TestBackwardCompatibility:
         }
 
         # Verify we can read the thaw request
-        from deepfreeze.utilities import get_thaw_request
+        from deepfreeze_core.utilities import get_thaw_request
 
         request = get_thaw_request(mock_es, "thaw-legacy-001")
 

@@ -70,8 +70,8 @@ class TestPackageImportsStandalone:
         assert hasattr(deepfreeze, "__version__")
 
     def test_import_deepfreeze_exceptions(self):
-        """Test that deepfreeze.exceptions imports correctly"""
-        from deepfreeze.exceptions import (
+        """Test that exception classes can be imported from deepfreeze"""
+        from deepfreeze import (
             ActionError,
             DeepfreezeException,
         )
@@ -80,8 +80,8 @@ class TestPackageImportsStandalone:
         assert issubclass(ActionError, DeepfreezeException)
 
     def test_import_deepfreeze_constants(self):
-        """Test that deepfreeze.constants imports correctly"""
-        from deepfreeze.constants import (
+        """Test that constants can be imported from deepfreeze_core.constants"""
+        from deepfreeze_core.constants import (
             PROVIDERS,
             SETTINGS_ID,
             STATUS_INDEX,
@@ -92,8 +92,8 @@ class TestPackageImportsStandalone:
         assert "aws" in PROVIDERS
 
     def test_import_deepfreeze_helpers(self):
-        """Test that deepfreeze.helpers imports correctly"""
-        from deepfreeze.helpers import (
+        """Test that helper classes can be imported from deepfreeze"""
+        from deepfreeze import (
             Deepfreeze,
             Repository,
             Settings,
@@ -104,8 +104,8 @@ class TestPackageImportsStandalone:
         assert Settings is not None
 
     def test_import_deepfreeze_actions(self):
-        """Test that deepfreeze.actions imports correctly"""
-        from deepfreeze.actions import (
+        """Test that action classes can be imported from deepfreeze"""
+        from deepfreeze import (
             Cleanup,
             Refreeze,
             RepairMetadata,
@@ -288,25 +288,26 @@ class TestModuleIndependence:
         "module_name",
         [
             "deepfreeze",
-            "deepfreeze.exceptions",
-            "deepfreeze.constants",
-            "deepfreeze.helpers",
-            "deepfreeze.s3client",
-            "deepfreeze.esclient",
-            "deepfreeze.utilities",
             "deepfreeze.config",
             "deepfreeze.cli",
             "deepfreeze.cli.main",
-            "deepfreeze.actions",
-            "deepfreeze.actions.setup",
-            "deepfreeze.actions.status",
-            "deepfreeze.actions.rotate",
-            "deepfreeze.actions.thaw",
-            "deepfreeze.actions.refreeze",
-            "deepfreeze.actions.cleanup",
-            "deepfreeze.actions.repair_metadata",
             "deepfreeze.validators",
             "deepfreeze.defaults",
+            "deepfreeze_core",
+            "deepfreeze_core.exceptions",
+            "deepfreeze_core.constants",
+            "deepfreeze_core.helpers",
+            "deepfreeze_core.s3client",
+            "deepfreeze_core.esclient",
+            "deepfreeze_core.utilities",
+            "deepfreeze_core.actions",
+            "deepfreeze_core.actions.setup",
+            "deepfreeze_core.actions.status",
+            "deepfreeze_core.actions.rotate",
+            "deepfreeze_core.actions.thaw",
+            "deepfreeze_core.actions.refreeze",
+            "deepfreeze_core.actions.cleanup",
+            "deepfreeze_core.actions.repair_metadata",
         ],
     )
     def test_module_imports_independently(self, module_name):

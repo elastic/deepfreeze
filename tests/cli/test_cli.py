@@ -143,7 +143,7 @@ class TestCLIWithMockedClient:
         # We need to mock the entire chain to avoid errors
         mock_client.indices.exists.return_value = False
 
-        with patch("deepfreeze.actions.Setup") as mock_setup_class:
+        with patch("deepfreeze_core.actions.setup.Setup") as mock_setup_class:
             mock_setup = MagicMock()
             mock_setup_class.return_value = mock_setup
 
