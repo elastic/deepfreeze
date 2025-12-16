@@ -97,3 +97,4 @@ Thumbs.db
 *.local
 .env.local
 deepfreeze-blog-post.md
+examples/config.yml
