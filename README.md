@@ -4,6 +4,8 @@ Elasticsearch S3 Glacier archival and lifecycle management.
 
 Deepfreeze enables you to archive Elasticsearch searchable snapshots to S3 Glacier storage and restore them on demand, providing significant cost savings for long-term data retention.
 
+See Elastic Search Labs blog post at https://www.elastic.co/search-labs/blog/s3-glacier-archiving-elasticsearch-deepfreeze
+
 ## Packages
 
 This repository contains two packages:
