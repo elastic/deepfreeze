@@ -205,8 +205,9 @@ def s3_client_factory(provider: str) -> S3Client:
 
         return AzureBlobClient()
     elif provider == "gcp":
-        # Placeholder for GCP S3Client implementation
-        raise NotImplementedError("GCP S3Client is not implemented yet")
+        from deepfreeze_core.gcp_client import GcpStorageClient
+
+        return GcpStorageClient()
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 

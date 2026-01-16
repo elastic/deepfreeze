@@ -68,6 +68,12 @@ try:
 except ImportError:
     AzureBlobClient = None  # type: ignore[misc,assignment]
 
+# Conditional GCP export (google-cloud-storage is optional)
+try:
+    from deepfreeze_core.gcp_client import GcpStorageClient
+except ImportError:
+    GcpStorageClient = None  # type: ignore[misc,assignment]
+
 # Export commonly used utilities
 from deepfreeze_core.utilities import (
     check_restore_status,
@@ -119,6 +125,7 @@ __all__ = [
     # S3 Client
     "AwsS3Client",
     "AzureBlobClient",
+    "GcpStorageClient",
     "S3Client",
     "s3_client_factory",
     # ES Client
