@@ -26,36 +26,57 @@ from deepfreeze_core.s3client import S3Client
 class AzureBlobClient(S3Client):
     """
     Azure Blob Storage client implementing the S3Client interface.
+
+    Credentials can be provided via constructor arguments or environment variables.
+    Constructor arguments take precedence over environment variables.
+
+    Args:
+        connection_string: Azure Storage connection string
+        account_name: Azure Storage account name (used with account_key)
+        account_key: Azure Storage account key (used with account_name)
+
+    Environment variables (fallback):
+        AZURE_STORAGE_CONNECTION_STRING: Connection string
+        AZURE_STORAGE_ACCOUNT: Account name
+        AZURE_STORAGE_KEY: Account key
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        connection_string: str = None,
+        account_name: str = None,
+        account_key: str = None,
+    ) -> None:
         self.loggit = logging.getLogger("deepfreeze.azure_client")
         try:
-            # Azure SDK uses connection string from environment variable
-            # AZURE_STORAGE_CONNECTION_STRING or account name + key
-            connection_string = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
-            if connection_string:
-                self.service_client = BlobServiceClient.from_connection_string(
-                    connection_string
+            # Priority: constructor args > environment variables
+            conn_str = connection_string or os.environ.get(
+                "AZURE_STORAGE_CONNECTION_STRING"
+            )
+            acct_name = account_name or os.environ.get("AZURE_STORAGE_ACCOUNT")
+            acct_key = account_key or os.environ.get("AZURE_STORAGE_KEY")
+
+            if conn_str:
+                self.service_client = BlobServiceClient.from_connection_string(conn_str)
+                self.loggit.debug(
+                    "Using connection string for auth (source: %s)",
+                    "config" if connection_string else "environment",
                 )
-                self.loggit.debug("Using AZURE_STORAGE_CONNECTION_STRING for auth")
+            elif acct_name and acct_key:
+                account_url = f"https://{acct_name}.blob.core.windows.net"
+                self.service_client = BlobServiceClient(
+                    account_url=account_url, credential=acct_key
+                )
+                self.loggit.debug(
+                    "Using account name + key for auth (source: %s)",
+                    "config" if account_name else "environment",
+                )
             else:
-                # Alternative: account name + key
-                account_name = os.environ.get("AZURE_STORAGE_ACCOUNT")
-                account_key = os.environ.get("AZURE_STORAGE_KEY")
-                if account_name and account_key:
-                    account_url = f"https://{account_name}.blob.core.windows.net"
-                    self.service_client = BlobServiceClient(
-                        account_url=account_url, credential=account_key
-                    )
-                    self.loggit.debug(
-                        "Using AZURE_STORAGE_ACCOUNT + AZURE_STORAGE_KEY for auth"
-                    )
-                else:
-                    raise ActionError(
-                        "Azure credentials not configured. Set AZURE_STORAGE_CONNECTION_STRING "
-                        "or both AZURE_STORAGE_ACCOUNT and AZURE_STORAGE_KEY."
-                    )
+                raise ActionError(
+                    "Azure credentials not configured. Provide connection_string or "
+                    "account_name + account_key in config, or set environment variables "
+                    "AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT + AZURE_STORAGE_KEY."
+                )
 
             # Validate credentials
             self.loggit.debug("Validating Azure credentials")

@@ -16,12 +16,57 @@ from deepfreeze_core.s3client import S3Client
 class AwsS3Client(S3Client):
     """
     An S3 client object for use with AWS.
+
+    Credentials can be provided via constructor arguments or environment variables.
+    Constructor arguments take precedence over environment variables.
+
+    Args:
+        region: AWS region (e.g., 'us-east-1')
+        profile: AWS profile name from ~/.aws/credentials
+        access_key_id: AWS access key ID
+        secret_access_key: AWS secret access key
+
+    Environment variables (fallback):
+        AWS_DEFAULT_REGION: Region
+        AWS_PROFILE: Profile name
+        AWS_ACCESS_KEY_ID: Access key ID
+        AWS_SECRET_ACCESS_KEY: Secret access key
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        region: str = None,
+        profile: str = None,
+        access_key_id: str = None,
+        secret_access_key: str = None,
+    ) -> None:
         self.loggit = logging.getLogger("deepfreeze.s3client")
         try:
-            self.client = boto3.client("s3")
+            # Build session/client kwargs based on provided credentials
+            session_kwargs = {}
+            client_kwargs = {}
+
+            if profile:
+                session_kwargs["profile_name"] = profile
+                self.loggit.debug("Using AWS profile: %s (source: config)", profile)
+
+            if region:
+                session_kwargs["region_name"] = region
+                self.loggit.debug("Using AWS region: %s (source: config)", region)
+
+            if access_key_id and secret_access_key:
+                session_kwargs["aws_access_key_id"] = access_key_id
+                session_kwargs["aws_secret_access_key"] = secret_access_key
+                self.loggit.debug("Using explicit AWS credentials (source: config)")
+
+            # Create session and client
+            if session_kwargs:
+                session = boto3.Session(**session_kwargs)
+                self.client = session.client("s3", **client_kwargs)
+            else:
+                self.client = boto3.client("s3", **client_kwargs)
+                self.loggit.debug("Using default AWS credentials (environment/instance)")
+
             # Validate credentials by attempting a simple operation
             self.loggit.debug("Validating AWS credentials")
             self.client.list_buckets()

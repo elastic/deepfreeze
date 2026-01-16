@@ -33,7 +33,9 @@ from deepfreeze_core.esclient import (
     ESClientWrapper,
     create_es_client,
     create_es_client_from_config,
+    get_storage_credentials,
     load_config_from_yaml,
+    load_storage_config,
     validate_connection,
 )
 
@@ -132,7 +134,9 @@ __all__ = [
     "ESClientWrapper",
     "create_es_client",
     "create_es_client_from_config",
+    "get_storage_credentials",
     "load_config_from_yaml",
+    "load_storage_config",
     "validate_connection",
     # Actions
     "Cleanup",

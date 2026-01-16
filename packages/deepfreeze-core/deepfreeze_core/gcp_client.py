@@ -22,21 +22,59 @@ from deepfreeze_core.s3client import S3Client
 class GcpStorageClient(S3Client):
     """
     Google Cloud Storage client implementing the S3Client interface.
+
+    Credentials can be provided via constructor arguments or environment variables.
+    Constructor arguments take precedence over environment variables.
+
+    Args:
+        project: GCP project ID
+        credentials_file: Path to service account JSON credentials file
+        location: Default location for bucket creation (default: US)
+
+    Environment variables (fallback):
+        GOOGLE_CLOUD_PROJECT: Project ID
+        GOOGLE_APPLICATION_CREDENTIALS: Path to credentials file
+        GOOGLE_CLOUD_LOCATION: Default location for buckets
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        project: str = None,
+        credentials_file: str = None,
+        location: str = None,
+    ) -> None:
         self.loggit = logging.getLogger("deepfreeze.gcp_client")
+        self.default_location = location or os.environ.get("GOOGLE_CLOUD_LOCATION", "US")
+
         try:
-            # GCP SDK uses Application Default Credentials (ADC)
-            # Set GOOGLE_APPLICATION_CREDENTIALS env var to service account JSON path
-            # or use gcloud auth application-default login
-            project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
-            if project_id:
+            # Priority: constructor args > environment variables
+            project_id = project or os.environ.get("GOOGLE_CLOUD_PROJECT")
+            creds_file = credentials_file or os.environ.get(
+                "GOOGLE_APPLICATION_CREDENTIALS"
+            )
+
+            if creds_file:
+                # Use explicit credentials file
+                self.client = storage.Client.from_service_account_json(
+                    creds_file, project=project_id
+                )
+                self.loggit.debug(
+                    "Using credentials file: %s (source: %s)",
+                    creds_file,
+                    "config" if credentials_file else "environment",
+                )
+            elif project_id:
+                # Use ADC with explicit project
                 self.client = storage.Client(project=project_id)
-                self.loggit.debug("Using GOOGLE_CLOUD_PROJECT: %s", project_id)
+                self.loggit.debug(
+                    "Using project %s with ADC (source: %s)",
+                    project_id,
+                    "config" if project else "environment",
+                )
             else:
+                # Use default ADC
                 self.client = storage.Client()
-                self.loggit.debug("Using default project from credentials")
+                self.loggit.debug("Using default Application Default Credentials")
 
             # Validate credentials by listing buckets (limited to 1)
             self.loggit.debug("Validating GCP credentials")
@@ -79,11 +117,9 @@ class GcpStorageClient(S3Client):
             raise ActionError(f"Bucket {bucket_name} already exists")
         try:
             bucket = self.client.bucket(bucket_name)
-            # Use default location, can be customized via GOOGLE_CLOUD_LOCATION env var
-            location = os.environ.get("GOOGLE_CLOUD_LOCATION", "US")
-            self.client.create_bucket(bucket, location=location)
+            self.client.create_bucket(bucket, location=self.default_location)
             self.loggit.info(
-                f"Successfully created bucket {bucket_name} in location {location}"
+                f"Successfully created bucket {bucket_name} in location {self.default_location}"
             )
         except Conflict as e:
             raise ActionError(f"Bucket {bucket_name} already exists") from e

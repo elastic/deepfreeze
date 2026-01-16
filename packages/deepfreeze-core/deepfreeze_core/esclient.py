@@ -185,6 +185,102 @@ def load_config_from_yaml(config_path: str) -> dict:
         raise ActionError(f"Error reading configuration file: {e}") from e
 
 
+def load_storage_config(config_path: str) -> dict:
+    """
+    Load storage provider configuration from a YAML file.
+
+    The YAML file should include a 'storage' section with provider credentials:
+
+    ```yaml
+    storage:
+      # AWS S3 configuration
+      aws:
+        region: us-east-1
+        profile: my-profile  # Optional: use named profile
+        # Or explicit credentials:
+        # access_key_id: AKIA...
+        # secret_access_key: ...
+
+      # Azure Blob Storage configuration
+      azure:
+        connection_string: "DefaultEndpointsProtocol=https;AccountName=..."
+        # Or account name + key:
+        # account_name: mystorageaccount
+        # account_key: ...
+
+      # Google Cloud Storage configuration
+      gcp:
+        project: my-gcp-project
+        credentials_file: /path/to/service-account.json
+        location: US
+    ```
+
+    Args:
+        config_path: Path to the YAML configuration file
+
+    Returns:
+        dict: Storage configuration with provider-specific credentials.
+              Returns empty dict if no storage section exists.
+
+    Example return value:
+        {
+            'aws': {'region': 'us-east-1', 'profile': 'my-profile'},
+            'azure': {'connection_string': '...'},
+            'gcp': {'project': 'my-project', 'credentials_file': '/path/to/creds.json'}
+        }
+    """
+    loggit = logging.getLogger("deepfreeze.esclient")
+    loggit.debug("Loading storage configuration from: %s", config_path)
+
+    config = load_config_from_yaml(config_path)
+    storage_config = config.get("storage", {})
+
+    if storage_config:
+        loggit.debug(
+            "Found storage configuration for providers: %s",
+            list(storage_config.keys()),
+        )
+    else:
+        loggit.debug("No storage configuration found in config file")
+
+    return storage_config
+
+
+def get_storage_credentials(config_path: str, provider: str) -> dict:
+    """
+    Get storage credentials for a specific provider from the config file.
+
+    This is a convenience function that loads the storage config and returns
+    only the credentials for the specified provider.
+
+    Args:
+        config_path: Path to the YAML configuration file
+        provider: The storage provider ('aws', 'azure', or 'gcp')
+
+    Returns:
+        dict: Provider-specific credentials ready to pass to s3_client_factory.
+              Returns empty dict if no credentials found for the provider.
+
+    Example:
+        >>> creds = get_storage_credentials('/path/to/config.yaml', 'azure')
+        >>> client = s3_client_factory('azure', **creds)
+    """
+    loggit = logging.getLogger("deepfreeze.esclient")
+
+    storage_config = load_storage_config(config_path)
+    provider_config = storage_config.get(provider, {})
+
+    if provider_config:
+        loggit.debug("Found credentials for provider: %s", provider)
+    else:
+        loggit.debug(
+            "No credentials found for provider %s, will use environment variables",
+            provider,
+        )
+
+    return provider_config
+
+
 def create_es_client_from_config(config_path: str) -> Elasticsearch:
     """
     Create an Elasticsearch client from a YAML configuration file.

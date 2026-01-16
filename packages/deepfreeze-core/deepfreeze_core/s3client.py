@@ -180,7 +180,7 @@ class S3Client(metaclass=abc.ABCMeta):
         return
 
 
-def s3_client_factory(provider: str) -> S3Client:
+def s3_client_factory(provider: str, **kwargs) -> S3Client:
     """
     s3_client_factory method, returns an S3Client object implemented specific to
     the value of the provider argument.
@@ -188,6 +188,23 @@ def s3_client_factory(provider: str) -> S3Client:
     Args:
         provider (str): The provider to use for the S3Client object. Should
                         reference an implemented provider (aws, azure, gcp, etc)
+        **kwargs: Provider-specific configuration options:
+
+            AWS options:
+                region (str): AWS region (e.g., 'us-east-1')
+                profile (str): AWS profile name from ~/.aws/credentials
+                access_key_id (str): AWS access key ID
+                secret_access_key (str): AWS secret access key
+
+            Azure options:
+                connection_string (str): Azure Storage connection string
+                account_name (str): Azure Storage account name
+                account_key (str): Azure Storage account key
+
+            GCP options:
+                project (str): GCP project ID
+                credentials_file (str): Path to service account JSON file
+                location (str): Default location for bucket creation
 
     Raises:
         NotImplementedError: raised if the provider is not implemented
@@ -199,15 +216,15 @@ def s3_client_factory(provider: str) -> S3Client:
     if provider == "aws":
         from deepfreeze_core.aws_client import AwsS3Client
 
-        return AwsS3Client()
+        return AwsS3Client(**kwargs)
     elif provider == "azure":
         from deepfreeze_core.azure_client import AzureBlobClient
 
-        return AzureBlobClient()
+        return AzureBlobClient(**kwargs)
     elif provider == "gcp":
         from deepfreeze_core.gcp_client import GcpStorageClient
 
-        return GcpStorageClient()
+        return GcpStorageClient(**kwargs)
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
