@@ -62,6 +62,12 @@ from deepfreeze_core.s3client import (
     s3_client_factory,
 )
 
+# Conditional Azure export (azure-storage-blob is optional)
+try:
+    from deepfreeze_core.azure_client import AzureBlobClient
+except ImportError:
+    AzureBlobClient = None  # type: ignore[misc,assignment]
+
 # Export commonly used utilities
 from deepfreeze_core.utilities import (
     check_restore_status,
@@ -112,6 +118,7 @@ __all__ = [
     "Settings",
     # S3 Client
     "AwsS3Client",
+    "AzureBlobClient",
     "S3Client",
     "s3_client_factory",
     # ES Client

@@ -9,7 +9,7 @@ STATUS_INDEX = "deepfreeze-status"
 SETTINGS_ID = "1"
 
 # Supported cloud providers
-PROVIDERS = ["aws"]
+PROVIDERS = ["aws", "azure"]
 
 # Repository thaw lifecycle states
 THAW_STATE_ACTIVE = "active"  # Active repository, never been through thaw lifecycle
