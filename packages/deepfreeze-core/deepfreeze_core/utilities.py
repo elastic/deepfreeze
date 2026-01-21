@@ -317,43 +317,64 @@ def create_repo(
     base_path: str,
     canned_acl: str,
     storage_class: str,
+    provider: str = "aws",
     dry_run: bool = False,
 ) -> None:
     """
-    Creates a new repo using the previously-created bucket.
+    Creates a new repo using the previously-created bucket/container.
 
     :param client: A client connection object
     :type client: Elasticsearch
     :param repo_name: The name of the repository to create
     :type repo_name: str
-    :param bucket_name: The name of the bucket to use for the repository
+    :param bucket_name: The name of the bucket/container to use for the repository
     :type bucket_name: str
     :param base_path: Path within a bucket where snapshots are stored
     :type base_path: str
-    :param canned_acl: One of the AWS canned ACL values
+    :param canned_acl: One of the AWS canned ACL values (AWS only)
     :type canned_acl: str
-    :param storage_class: AWS Storage class
+    :param storage_class: Storage class (AWS only)
     :type storage_class: str
+    :param provider: Cloud provider (aws, azure, gcp)
+    :type provider: str
     :param dry_run: If True, do not actually create the repository
     :type dry_run: bool
 
     :raises ActionError: If the repository cannot be created
     """
     loggit = logging.getLogger("deepfreeze.utilities")
-    loggit.info("Creating repo %s using bucket %s", repo_name, bucket_name)
+    loggit.info("Creating repo %s using bucket %s (provider: %s)", repo_name, bucket_name, provider)
     if dry_run:
         return
+
+    # Build repository settings based on provider
+    if provider == "azure":
+        repo_type = "azure"
+        settings = {
+            "container": bucket_name,
+            "base_path": base_path,
+        }
+    elif provider == "gcp":
+        repo_type = "gcs"
+        settings = {
+            "bucket": bucket_name,
+            "base_path": base_path,
+        }
+    else:  # aws
+        repo_type = "s3"
+        settings = {
+            "bucket": bucket_name,
+            "base_path": base_path,
+            "canned_acl": canned_acl,
+            "storage_class": storage_class,
+        }
+
     try:
         client.snapshot.create_repository(
             name=repo_name,
             body={
-                "type": "s3",
-                "settings": {
-                    "bucket": bucket_name,
-                    "base_path": base_path,
-                    "canned_acl": canned_acl,
-                    "storage_class": storage_class,
-                },
+                "type": repo_type,
+                "settings": settings,
             },
         )
     except Exception as e:

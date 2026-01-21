@@ -144,6 +144,7 @@ class Rotate:
                 base_path,
                 self.settings.canned_acl,
                 self.settings.storage_class,
+                provider=self.settings.provider,
             )
 
             # Update last_suffix in settings

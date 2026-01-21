@@ -386,6 +386,7 @@ class Setup:
             self.base_path,
             self.settings.canned_acl,
             self.settings.storage_class,
+            provider=self.settings.provider,
             dry_run=True,
         )
 
@@ -485,6 +486,7 @@ class Setup:
                     self.base_path,
                     self.settings.canned_acl,
                     self.settings.storage_class,
+                    provider=self.settings.provider,
                 )
                 self.loggit.info(
                     "Successfully created repository %s", self.new_repo_name
