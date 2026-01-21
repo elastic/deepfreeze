@@ -249,9 +249,22 @@ class Setup:
                 template_type,
             )
 
-        # Fifth, check for S3 repository plugin (only for ES 7.x and below)
-        # NOTE: Elasticsearch 8.x+ has built-in S3 repository support, no plugin needed
-        self.loggit.debug("Checking S3 repository support")
+        # Fifth, check for repository plugin based on provider
+        # NOTE: Elasticsearch 8.x+ has built-in repository support for all providers
+        provider = self.settings.provider
+        plugin_map = {
+            "aws": ("repository-s3", "S3"),
+            "azure": ("repository-azure", "Azure"),
+            "gcp": ("repository-gcs", "GCS"),
+        }
+        plugin_name, plugin_display = plugin_map.get(provider, ("repository-s3", "S3"))
+        doc_urls = {
+            "aws": "https://www.elastic.co/guide/en/elasticsearch/plugins/current/repository-s3.html",
+            "azure": "https://www.elastic.co/guide/en/elasticsearch/plugins/current/repository-azure.html",
+            "gcp": "https://www.elastic.co/guide/en/elasticsearch/plugins/current/repository-gcs.html",
+        }
+
+        self.loggit.debug("Checking %s repository support", plugin_display)
         try:
             # Get Elasticsearch version
             cluster_info = self.client.info()
@@ -259,47 +272,55 @@ class Setup:
             major_version = int(es_version.split(".")[0])
 
             if major_version < 8:
-                # ES 7.x and below require the repository-s3 plugin
+                # ES 7.x and below require repository plugins
                 self.loggit.debug(
-                    "Elasticsearch %s detected - checking for S3 repository plugin",
+                    "Elasticsearch %s detected - checking for %s repository plugin",
                     es_version,
+                    plugin_display,
                 )
 
                 # Get cluster plugins
                 nodes_info = self.client.nodes.info(node_id="_all", metric="plugins")
 
-                # Check if any node has the S3 plugin
-                has_s3_plugin = False
+                # Check if any node has the required plugin
+                has_plugin = False
                 for node_id, node_data in nodes_info.get("nodes", {}).items():
                     plugins = node_data.get("plugins", [])
                     for plugin in plugins:
-                        if plugin.get("name") == "repository-s3":
-                            has_s3_plugin = True
-                            self.loggit.debug("Found S3 plugin on node %s", node_id)
+                        if plugin.get("name") == plugin_name:
+                            has_plugin = True
+                            self.loggit.debug(
+                                "Found %s plugin on node %s", plugin_name, node_id
+                            )
                             break
-                    if has_s3_plugin:
+                    if has_plugin:
                         break
 
-                if not has_s3_plugin:
+                if not has_plugin:
                     errors.append(
                         {
-                            "issue": "Elasticsearch S3 repository plugin is not installed",
-                            "solution": "Install the S3 repository plugin on all Elasticsearch nodes:\n"
-                            "  [yellow]bin/elasticsearch-plugin install repository-s3[/yellow]\n"
+                            "issue": f"Elasticsearch {plugin_display} repository plugin is not installed",
+                            "solution": f"Install the {plugin_display} repository plugin on all Elasticsearch nodes:\n"
+                            f"  [yellow]bin/elasticsearch-plugin install {plugin_name}[/yellow]\n"
                             "  Then restart all Elasticsearch nodes.\n"
-                            "  See: https://www.elastic.co/guide/en/elasticsearch/plugins/current/repository-s3.html",
+                            f"  See: {doc_urls[provider]}",
                         }
                     )
                 else:
-                    self.loggit.debug("S3 repository plugin is installed")
+                    self.loggit.debug(
+                        "%s repository plugin is installed", plugin_display
+                    )
             else:
-                # ES 8.x+ has built-in S3 support
+                # ES 8.x+ has built-in repository support
                 self.loggit.debug(
-                    "Elasticsearch %s detected - S3 repository support is built-in",
+                    "Elasticsearch %s detected - %s repository support is built-in",
                     es_version,
+                    plugin_display,
                 )
         except Exception as e:
-            self.loggit.warning("Could not verify S3 repository support: %s", e)
+            self.loggit.warning(
+                "Could not verify %s repository support: %s", plugin_display, e
+            )
             # Don't add to errors - this is a soft check that may fail due to permissions
 
         # If any errors were found, display them all and raise exception
@@ -433,19 +454,45 @@ class Setup:
                 )
             except Exception as e:
                 if self.porcelain:
-                    print(f"ERROR\ts3_bucket\t{self.new_bucket_name}\t{str(e)}")
+                    print(f"ERROR\tstorage\t{self.new_bucket_name}\t{str(e)}")
                 else:
+                    # Provider-specific error messages
+                    provider = self.settings.provider
+                    if provider == "azure":
+                        storage_type = "Azure container"
+                        solutions = (
+                            "[bold]Possible Solutions:[/bold]\n"
+                            "  - Check Azure credentials (connection string or account name + key)\n"
+                            "  - Verify the storage account exists and is accessible\n"
+                            "  - Check if container name is valid (lowercase, no underscores)\n"
+                            "  - Verify Azure RBAC permissions allow container creation"
+                        )
+                    elif provider == "gcp":
+                        storage_type = "GCS bucket"
+                        solutions = (
+                            "[bold]Possible Solutions:[/bold]\n"
+                            "  - Check GCP credentials (service account JSON)\n"
+                            "  - Verify the GCP project is correctly configured\n"
+                            "  - Check if bucket name is globally unique\n"
+                            "  - Verify IAM permissions allow storage.buckets.create"
+                        )
+                    else:  # aws
+                        storage_type = "S3 bucket"
+                        solutions = (
+                            "[bold]Possible Solutions:[/bold]\n"
+                            "  - Check AWS credentials and permissions\n"
+                            "  - Verify IAM policy allows s3:CreateBucket\n"
+                            "  - Check if bucket name is globally unique\n"
+                            "  - Verify AWS region settings\n"
+                            "  - Check AWS account limits for S3 buckets"
+                        )
+
                     self.console.print(
                         Panel(
-                            f"[bold]Failed to create S3 bucket [cyan]{self.new_bucket_name}[/cyan][/bold]\n\n"
+                            f"[bold]Failed to create {storage_type} [cyan]{self.new_bucket_name}[/cyan][/bold]\n\n"
                             f"Error: {escape(str(e))}\n\n"
-                            f"[bold]Possible Solutions:[/bold]\n"
-                            f"  - Check AWS credentials and permissions\n"
-                            f"  - Verify IAM policy allows s3:CreateBucket\n"
-                            f"  - Check if bucket name is globally unique\n"
-                            f"  - Verify AWS region settings\n"
-                            f"  - Check AWS account limits for S3 buckets",
-                            title="[bold red]S3 Bucket Creation Error[/bold red]",
+                            f"{solutions}",
+                            title=f"[bold red]{storage_type.title()} Creation Error[/bold red]",
                             border_style="red",
                             expand=False,
                         )
@@ -479,16 +526,52 @@ class Setup:
                 if self.porcelain:
                     print(f"ERROR\trepository\t{self.new_repo_name}\t{str(e)}")
                 else:
+                    # Provider-specific error messages and documentation
+                    provider = self.settings.provider
+                    if provider == "azure":
+                        solutions = (
+                            f"[bold]Possible Solutions:[/bold]\n"
+                            f"  1. Install the Azure repository plugin on all Elasticsearch nodes:\n"
+                            f"     [yellow]bin/elasticsearch-plugin install repository-azure[/yellow]\n\n"
+                            f"  2. Configure Azure credentials in Elasticsearch keystore:\n"
+                            f"     [yellow]bin/elasticsearch-keystore add azure.client.default.account[/yellow]\n"
+                            f"     [yellow]bin/elasticsearch-keystore add azure.client.default.key[/yellow]\n\n"
+                            f"  3. Restart Elasticsearch after configuring the keystore\n\n"
+                            f"  4. Verify Azure container [cyan]{self.new_bucket_name}[/cyan] is accessible\n\n"
+                            f"[bold]Documentation:[/bold]\n"
+                            f"  https://www.elastic.co/guide/en/elasticsearch/plugins/current/repository-azure.html"
+                        )
+                    elif provider == "gcp":
+                        solutions = (
+                            f"[bold]Possible Solutions:[/bold]\n"
+                            f"  1. Install the GCS repository plugin on all Elasticsearch nodes:\n"
+                            f"     [yellow]bin/elasticsearch-plugin install repository-gcs[/yellow]\n\n"
+                            f"  2. Configure GCP credentials in Elasticsearch keystore:\n"
+                            f"     [yellow]bin/elasticsearch-keystore add-file gcs.client.default.credentials_file /path/to/service-account.json[/yellow]\n\n"
+                            f"  3. Restart Elasticsearch after configuring the keystore\n\n"
+                            f"  4. Verify GCS bucket [cyan]{self.new_bucket_name}[/cyan] is accessible\n\n"
+                            f"[bold]Documentation:[/bold]\n"
+                            f"  https://www.elastic.co/guide/en/elasticsearch/plugins/current/repository-gcs.html"
+                        )
+                    else:  # aws
+                        solutions = (
+                            f"[bold]Possible Solutions:[/bold]\n"
+                            f"  1. Install the S3 repository plugin on all Elasticsearch nodes:\n"
+                            f"     [yellow]bin/elasticsearch-plugin install repository-s3[/yellow]\n\n"
+                            f"  2. Configure AWS credentials in Elasticsearch keystore:\n"
+                            f"     [yellow]bin/elasticsearch-keystore add s3.client.default.access_key[/yellow]\n"
+                            f"     [yellow]bin/elasticsearch-keystore add s3.client.default.secret_key[/yellow]\n\n"
+                            f"  3. Restart Elasticsearch after configuring the keystore\n\n"
+                            f"  4. Verify S3 bucket [cyan]{self.new_bucket_name}[/cyan] is accessible\n\n"
+                            f"[bold]Documentation:[/bold]\n"
+                            f"  https://www.elastic.co/guide/en/elasticsearch/plugins/current/repository-s3.html"
+                        )
+
                     self.console.print(
                         Panel(
                             f"[bold]Failed to create repository [cyan]{self.new_repo_name}[/cyan][/bold]\n\n"
                             f"Error: {escape(str(e))}\n\n"
-                            f"[bold]Possible Solutions:[/bold]\n"
-                            f"  - Verify Elasticsearch has S3 plugin installed\n"
-                            f"  - Check AWS credentials are configured in Elasticsearch keystore\n"
-                            f"  - Verify S3 bucket [cyan]{self.new_bucket_name}[/cyan] is accessible\n"
-                            f"  - Check repository settings (ACL, storage class, etc.)\n"
-                            f"  - Review Elasticsearch logs for detailed error messages",
+                            f"{solutions}",
                             title="[bold red]Repository Creation Error[/bold red]",
                             border_style="red",
                             expand=False,
