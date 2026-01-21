@@ -71,6 +71,7 @@ Then restart Elasticsearch to apply the keystore changes."""
         account_key: str = None,
     ) -> None:
         self.loggit = logging.getLogger("deepfreeze.azure_client")
+        self.account_name = None  # Will be set during initialization
         try:
             # Priority: constructor args > environment variables
             conn_str = connection_string or os.environ.get(
@@ -81,18 +82,23 @@ Then restart Elasticsearch to apply the keystore changes."""
 
             if conn_str:
                 self.service_client = BlobServiceClient.from_connection_string(conn_str)
+                # Extract account name from connection string
+                self.account_name = self._extract_account_name_from_conn_str(conn_str)
                 self.loggit.debug(
-                    "Using connection string for auth (source: %s)",
+                    "Using connection string for auth (source: %s, account: %s)",
                     "config" if connection_string else "environment",
+                    self.account_name,
                 )
             elif acct_name and acct_key:
                 account_url = f"https://{acct_name}.blob.core.windows.net"
                 self.service_client = BlobServiceClient(
                     account_url=account_url, credential=acct_key
                 )
+                self.account_name = acct_name
                 self.loggit.debug(
-                    "Using account name + key for auth (source: %s)",
+                    "Using account name + key for auth (source: %s, account: %s)",
                     "config" if account_name else "environment",
+                    self.account_name,
                 )
             else:
                 raise ActionError(
@@ -137,33 +143,71 @@ Then restart Elasticsearch to apply the keystore changes."""
 
     def create_bucket(self, bucket_name: str) -> None:
         """Create an Azure Blob container (equivalent to S3 bucket)."""
-        self.loggit.info(f"Creating container: {bucket_name}")
+        self.loggit.info(
+            "Creating container: %s in storage account: %s",
+            bucket_name,
+            self.account_name,
+        )
         if self.bucket_exists(bucket_name):
-            self.loggit.info(f"Container {bucket_name} already exists")
-            raise ActionError(f"Container {bucket_name} already exists")
+            self.loggit.info(
+                "Container %s already exists in storage account %s",
+                bucket_name,
+                self.account_name,
+            )
+            raise ActionError(
+                f"Container {bucket_name} already exists in storage account {self.account_name}"
+            )
         try:
             self.service_client.create_container(bucket_name)
-            self.loggit.info(f"Successfully created container {bucket_name}")
+            self.loggit.info(
+                "Successfully created container %s in storage account %s",
+                bucket_name,
+                self.account_name,
+            )
         except ResourceExistsError as e:
-            raise ActionError(f"Container {bucket_name} already exists") from e
+            raise ActionError(
+                f"Container {bucket_name} already exists in storage account {self.account_name}"
+            ) from e
         except AzureError as e:
-            self.loggit.error(f"Error creating container {bucket_name}: {e}")
-            raise ActionError(f"Error creating container {bucket_name}: {e}") from e
+            self.loggit.error(
+                "Error creating container %s in storage account %s: %s",
+                bucket_name,
+                self.account_name,
+                e,
+            )
+            raise ActionError(
+                f"Error creating container {bucket_name} in storage account {self.account_name}: {e}"
+            ) from e
 
     def bucket_exists(self, bucket_name: str) -> bool:
         """Check if an Azure Blob container exists."""
-        self.loggit.debug(f"Checking if container {bucket_name} exists")
+        self.loggit.debug(
+            "Checking if container %s exists in storage account %s",
+            bucket_name,
+            self.account_name,
+        )
         try:
             container_client = self.service_client.get_container_client(bucket_name)
             container_client.get_container_properties()
-            self.loggit.debug(f"Container {bucket_name} exists")
+            self.loggit.debug(
+                "Container %s exists in storage account %s",
+                bucket_name,
+                self.account_name,
+            )
             return True
         except ResourceNotFoundError:
-            self.loggit.debug(f"Container {bucket_name} does not exist")
+            self.loggit.debug(
+                "Container %s does not exist in storage account %s",
+                bucket_name,
+                self.account_name,
+            )
             return False
         except AzureError as e:
             self.loggit.error(
-                "Error checking container existence for %s: %s", bucket_name, e
+                "Error checking container existence for %s in storage account %s: %s",
+                bucket_name,
+                self.account_name,
+                e,
             )
             raise ActionError(e) from e
 
@@ -580,3 +624,33 @@ Then restart Elasticsearch to apply the keystore changes."""
             # Was rehydrated from archive
             return 'ongoing-request="false"'
         return None
+
+    def _extract_account_name_from_conn_str(self, conn_str: str) -> str:
+        """
+        Extract the account name from an Azure connection string.
+
+        Args:
+            conn_str (str): The Azure Storage connection string.
+
+        Returns:
+            str: The storage account name, or "unknown" if not found.
+        """
+        try:
+            for part in conn_str.split(";"):
+                if part.startswith("AccountName="):
+                    return part.split("=", 1)[1]
+        except Exception:
+            pass
+        return "unknown"
+
+    def get_storage_delete_cmd(self, bucket_name: str) -> str:
+        """
+        Get the provider-specific command to delete a storage container.
+
+        Args:
+            bucket_name (str): The name of the container to delete.
+
+        Returns:
+            str: The command string with bucket and account name filled in.
+        """
+        return f"az storage container delete --name {bucket_name} --account-name {self.account_name}"
