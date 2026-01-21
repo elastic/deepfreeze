@@ -80,7 +80,8 @@ class AzureBlobClient(S3Client):
 
             # Validate credentials
             self.loggit.debug("Validating Azure credentials")
-            list(self.service_client.list_containers(max_results=1))
+            # Use results_per_page (azure-storage-blob 12.x parameter name)
+            list(self.service_client.list_containers(results_per_page=1))
             self.loggit.info("Azure Blob Storage Client initialized successfully")
 
         except AzureError as e:
@@ -105,7 +106,7 @@ class AzureBlobClient(S3Client):
         """
         try:
             self.loggit.debug("Testing Azure connection")
-            list(self.service_client.list_containers(max_results=1))
+            list(self.service_client.list_containers(results_per_page=1))
             return True
         except AzureError as e:
             self.loggit.error("Azure connection test failed: %s", e)
