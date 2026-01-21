@@ -1322,21 +1322,46 @@ def mount_repo(client: Elasticsearch, repo: Repository) -> None:
     loggit = logging.getLogger("deepfreeze.utilities")
     loggit.info("Mounting repository %s", repo.name)
 
-    # Get settings to retrieve canned_acl and storage_class
+    # Get settings to retrieve provider and storage settings
     settings = get_settings(client)
+    provider = settings.provider
+
+    # Build repository settings based on provider
+    if provider == "azure":
+        repo_type = "azure"
+        repo_settings = {
+            "container": repo.bucket,
+            "base_path": repo.base_path,
+        }
+    elif provider == "gcp":
+        repo_type = "gcs"
+        repo_settings = {
+            "bucket": repo.bucket,
+            "base_path": repo.base_path,
+        }
+    else:  # aws (default)
+        repo_type = "s3"
+        repo_settings = {
+            "bucket": repo.bucket,
+            "base_path": repo.base_path,
+            "canned_acl": settings.canned_acl,
+            "storage_class": settings.storage_class,
+        }
+
+    loggit.debug(
+        "Mounting repository %s with type=%s, settings=%s",
+        repo.name,
+        repo_type,
+        repo_settings,
+    )
 
     # Create the repository in Elasticsearch
     try:
         client.snapshot.create_repository(
             name=repo.name,
             body={
-                "type": "s3",
-                "settings": {
-                    "bucket": repo.bucket,
-                    "base_path": repo.base_path,
-                    "canned_acl": settings.canned_acl,
-                    "storage_class": settings.storage_class,
-                },
+                "type": repo_type,
+                "settings": repo_settings,
             },
         )
         loggit.info("Repository %s created successfully", repo.name)

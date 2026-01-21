@@ -125,7 +125,7 @@ def provider():
     """
     Cloud provider for deepfreeze.
     """
-    return {Optional("provider", default="aws"): Any("aws")}
+    return {Optional("provider", default="aws"): Any("aws", "azure", "gcp")}
 
 
 def rotate_by():

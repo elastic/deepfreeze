@@ -120,21 +120,25 @@ class Rotate:
             new_bucket_name = self.settings.bucket_name_prefix
             base_path = f"{self.settings.base_path_prefix}-{next_suffix}"
 
+        # Get provider-specific storage type for logging
+        storage_type = getattr(self.s3, "STORAGE_TYPE", "bucket").lower()
+
         self.loggit.info(
-            "Creating new repository %s (bucket: %s, base_path: %s)",
+            "Creating new repository %s (%s: %s, base_path: %s)",
             new_repo_name,
+            storage_type,
             new_bucket_name,
             base_path,
         )
 
         if not dry_run:
-            # Create bucket if rotating by bucket
+            # Create storage container/bucket if rotating by bucket
             if self.settings.rotate_by == "bucket":
                 if not self.s3.bucket_exists(new_bucket_name):
                     self.s3.create_bucket(new_bucket_name)
-                    self.loggit.info("Created S3 bucket %s", new_bucket_name)
+                    self.loggit.info("Created %s %s", storage_type, new_bucket_name)
                 else:
-                    self.loggit.info("S3 bucket %s already exists", new_bucket_name)
+                    self.loggit.info("%s %s already exists", storage_type.capitalize(), new_bucket_name)
 
             # Create repository in Elasticsearch
             create_repo(
