@@ -56,6 +56,9 @@ Then restart Elasticsearch to apply the keystore changes."""
   - Check if bucket name is globally unique
   - Verify IAM permissions allow storage.buckets.create"""
 
+    # Storage bucket deletion command template ({bucket} will be replaced)
+    STORAGE_DELETE_CMD = "gcloud storage rm -r gs://{bucket}"
+
     def __init__(
         self,
         project: str = None,

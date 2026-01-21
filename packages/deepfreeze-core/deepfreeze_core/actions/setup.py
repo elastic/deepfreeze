@@ -143,10 +143,10 @@ class Setup:
             errors.append(
                 {
                     "issue": f"Status index [cyan]{STATUS_INDEX}[/cyan] already exists",
-                    "solution": f"Delete the existing index before running setup:\n"
-                    f"  [yellow]deepfreeze --host <host> DELETE index --name {STATUS_INDEX}[/yellow]\n"
-                    f"  or use the Elasticsearch API:\n"
-                    f"  [yellow]curl -X DELETE 'http://<host>:9200/{STATUS_INDEX}'[/yellow]",
+                    "solution": f"Delete the existing index using the Elasticsearch API:\n"
+                    f"  [yellow]curl -X DELETE 'https://<host>:9200/{STATUS_INDEX}'[/yellow]\n\n"
+                    "Or via Kibana Dev Tools:\n"
+                    f"  [yellow]DELETE /{STATUS_INDEX}[/yellow]",
                 }
             )
 
@@ -179,11 +179,13 @@ class Setup:
         # Third, check if the bucket already exists
         self.loggit.debug("Checking if bucket %s exists", self.new_bucket_name)
         if self.s3.bucket_exists(self.new_bucket_name):
+            storage_type = self.s3.STORAGE_TYPE
+            delete_cmd = self.s3.STORAGE_DELETE_CMD.format(bucket=self.new_bucket_name)
             errors.append(
                 {
-                    "issue": f"S3 bucket [cyan]{self.new_bucket_name}[/cyan] already exists",
-                    "solution": f"Delete the existing bucket before running setup:\n"
-                    f"  [yellow]aws s3 rb s3://{self.new_bucket_name} --force[/yellow]\n"
+                    "issue": f"{storage_type} [cyan]{self.new_bucket_name}[/cyan] already exists",
+                    "solution": f"Delete the existing {storage_type.lower()} before running setup:\n"
+                    f"  [yellow]{delete_cmd}[/yellow]\n"
                     "\n[bold]WARNING:[/bold] This will delete all data in the bucket!\n"
                     "Or use a different bucket_name_prefix in your configuration.",
                 }

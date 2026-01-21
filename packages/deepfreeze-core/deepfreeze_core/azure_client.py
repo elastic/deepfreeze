@@ -61,6 +61,9 @@ Then restart Elasticsearch to apply the keystore changes."""
   - Check if container name is valid (lowercase, no underscores, 3-63 chars)
   - Verify Azure RBAC permissions allow container creation"""
 
+    # Storage bucket deletion command template ({bucket} will be replaced)
+    STORAGE_DELETE_CMD = "az storage container delete --name {bucket} --account-name <storage-account>"
+
     def __init__(
         self,
         connection_string: str = None,

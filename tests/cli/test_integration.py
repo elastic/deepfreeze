@@ -119,6 +119,7 @@ class MockS3Client:
     STORAGE_TYPE = "S3 bucket"
     ES_KEYSTORE_INSTRUCTIONS = "Configure AWS credentials in Elasticsearch keystore"
     STORAGE_CREATION_HELP = "Check AWS credentials and permissions"
+    STORAGE_DELETE_CMD = "aws s3 rb s3://{bucket} --force"
 
     def __init__(self):
         self._buckets = {}

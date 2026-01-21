@@ -54,6 +54,9 @@ Then restart Elasticsearch to apply the keystore changes."""
   - Verify AWS region settings
   - Check AWS account limits for S3 buckets"""
 
+    # Storage bucket deletion command template ({bucket} will be replaced)
+    STORAGE_DELETE_CMD = "aws s3 rb s3://{bucket} --force"
+
     def __init__(
         self,
         region: str = None,
