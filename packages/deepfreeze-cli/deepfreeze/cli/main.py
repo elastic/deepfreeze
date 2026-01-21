@@ -300,6 +300,42 @@ def setup(
 
     client = get_client_from_context(ctx)
 
+    # Azure container names don't allow underscores - offer to convert them
+    if provider == "azure":
+        names_to_check = {
+            "bucket_name_prefix": bucket_name_prefix,
+            "repo_name_prefix": repo_name_prefix,
+            "base_path_prefix": base_path_prefix,
+        }
+        names_with_underscores = {
+            name: value
+            for name, value in names_to_check.items()
+            if value and "_" in value
+        }
+        if names_with_underscores:
+            converted = {
+                name: value.replace("_", "-")
+                for name, value in names_with_underscores.items()
+            }
+            click.echo(
+                "Azure container names cannot contain underscores. "
+                "The following names would be converted:"
+            )
+            for name, value in names_with_underscores.items():
+                click.echo(f"  {name}: {value} -> {converted[name]}")
+
+            if not click.confirm("Do you want to proceed with these converted names?"):
+                click.echo("Aborted. Please provide names without underscores.")
+                ctx.exit(1)
+
+            # Apply conversions
+            if "bucket_name_prefix" in converted:
+                bucket_name_prefix = converted["bucket_name_prefix"]
+            if "repo_name_prefix" in converted:
+                repo_name_prefix = converted["repo_name_prefix"]
+            if "base_path_prefix" in converted:
+                base_path_prefix = converted["base_path_prefix"]
+
     action = Setup(
         client=client,
         year=year,
