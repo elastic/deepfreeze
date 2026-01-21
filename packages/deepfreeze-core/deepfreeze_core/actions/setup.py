@@ -741,13 +741,14 @@ class Setup:
             if self.porcelain:
                 print(f"ERROR\tunexpected\t{str(e)}")
             else:
+                provider_name = self.s3.ES_PLUGIN_DISPLAY_NAME
                 self.console.print(
                     Panel(
                         f"[bold]An unexpected error occurred during setup[/bold]\n\n"
                         f"Error: {escape(str(e))}\n\n"
                         f"[bold]What to do:[/bold]\n"
                         f"  - Check the logs for detailed error information\n"
-                        f"  - Verify all prerequisites are met (AWS credentials, ES connection, etc.)\n"
+                        f"  - Verify all prerequisites are met ({provider_name} credentials, ES connection, etc.)\n"
                         f"  - You may need to manually clean up any partially created resources\n"
                         f"  - Run [yellow]deepfreeze cleanup[/yellow] to remove any partial state",
                         title="[bold red]Unexpected Setup Error[/bold red]",
