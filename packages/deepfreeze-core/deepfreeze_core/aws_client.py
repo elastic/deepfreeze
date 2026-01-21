@@ -33,6 +33,27 @@ class AwsS3Client(S3Client):
         AWS_SECRET_ACCESS_KEY: Secret access key
     """
 
+    # Elasticsearch repository plugin information
+    ES_PLUGIN_NAME = "repository-s3"
+    ES_PLUGIN_DISPLAY_NAME = "S3"
+    ES_PLUGIN_DOC_URL = "https://www.elastic.co/guide/en/elasticsearch/plugins/current/repository-s3.html"
+    STORAGE_TYPE = "S3 bucket"
+
+    # Elasticsearch keystore setup instructions
+    ES_KEYSTORE_INSTRUCTIONS = """Configure AWS credentials in Elasticsearch keystore:
+  bin/elasticsearch-keystore add s3.client.default.access_key
+  bin/elasticsearch-keystore add s3.client.default.secret_key
+
+Then restart Elasticsearch to apply the keystore changes."""
+
+    # Storage bucket creation error help
+    STORAGE_CREATION_HELP = """Possible solutions:
+  - Check AWS credentials and permissions
+  - Verify IAM policy allows s3:CreateBucket
+  - Check if bucket name is globally unique
+  - Verify AWS region settings
+  - Check AWS account limits for S3 buckets"""
+
     def __init__(
         self,
         region: str = None,

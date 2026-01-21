@@ -41,6 +41,26 @@ class AzureBlobClient(S3Client):
         AZURE_STORAGE_KEY: Account key
     """
 
+    # Elasticsearch repository plugin information
+    ES_PLUGIN_NAME = "repository-azure"
+    ES_PLUGIN_DISPLAY_NAME = "Azure"
+    ES_PLUGIN_DOC_URL = "https://www.elastic.co/guide/en/elasticsearch/plugins/current/repository-azure.html"
+    STORAGE_TYPE = "Azure container"
+
+    # Elasticsearch keystore setup instructions
+    ES_KEYSTORE_INSTRUCTIONS = """Configure Azure credentials in Elasticsearch keystore:
+  bin/elasticsearch-keystore add azure.client.default.account
+  bin/elasticsearch-keystore add azure.client.default.key
+
+Then restart Elasticsearch to apply the keystore changes."""
+
+    # Storage bucket creation error help
+    STORAGE_CREATION_HELP = """Possible solutions:
+  - Check Azure credentials (connection string or account name + key)
+  - Verify the storage account exists and is accessible
+  - Check if container name is valid (lowercase, no underscores, 3-63 chars)
+  - Verify Azure RBAC permissions allow container creation"""
+
     def __init__(
         self,
         connection_string: str = None,

@@ -37,6 +37,25 @@ class GcpStorageClient(S3Client):
         GOOGLE_CLOUD_LOCATION: Default location for buckets
     """
 
+    # Elasticsearch repository plugin information
+    ES_PLUGIN_NAME = "repository-gcs"
+    ES_PLUGIN_DISPLAY_NAME = "GCS"
+    ES_PLUGIN_DOC_URL = "https://www.elastic.co/guide/en/elasticsearch/plugins/current/repository-gcs.html"
+    STORAGE_TYPE = "GCS bucket"
+
+    # Elasticsearch keystore setup instructions
+    ES_KEYSTORE_INSTRUCTIONS = """Configure GCP credentials in Elasticsearch keystore:
+  bin/elasticsearch-keystore add-file gcs.client.default.credentials_file /path/to/service-account.json
+
+Then restart Elasticsearch to apply the keystore changes."""
+
+    # Storage bucket creation error help
+    STORAGE_CREATION_HELP = """Possible solutions:
+  - Check GCP credentials (service account JSON file)
+  - Verify the GCP project is correctly configured
+  - Check if bucket name is globally unique
+  - Verify IAM permissions allow storage.buckets.create"""
+
     def __init__(
         self,
         project: str = None,

@@ -112,6 +112,14 @@ class MockElasticsearchClient:
 class MockS3Client:
     """Mock S3 client for integration testing"""
 
+    # Elasticsearch repository plugin information (matches AwsS3Client defaults)
+    ES_PLUGIN_NAME = "repository-s3"
+    ES_PLUGIN_DISPLAY_NAME = "S3"
+    ES_PLUGIN_DOC_URL = "https://www.elastic.co/guide/en/elasticsearch/plugins/current/repository-s3.html"
+    STORAGE_TYPE = "S3 bucket"
+    ES_KEYSTORE_INSTRUCTIONS = "Configure AWS credentials in Elasticsearch keystore"
+    STORAGE_CREATION_HELP = "Check AWS credentials and permissions"
+
     def __init__(self):
         self._buckets = {}
         self._objects = {}
