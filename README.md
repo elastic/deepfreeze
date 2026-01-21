@@ -28,13 +28,23 @@ pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/
 
 [View deepfreeze-cli documentation](packages/deepfreeze-cli/README.md)
 
+## Supported Cloud Providers
+
+Deepfreeze supports multiple cloud storage providers:
+
+| Provider | Storage Type | Archive Tier |
+|----------|--------------|--------------|
+| **AWS** | S3 | Glacier, Glacier Deep Archive |
+| **Azure** | Blob Storage | Archive tier |
+| **GCP** | Cloud Storage | Archive storage class |
+
 ## Features
 
-- **Setup**: Configure ILM policies, index templates, and S3 buckets for deepfreeze
+- **Setup**: Configure ILM policies, index templates, and storage buckets for deepfreeze
 - **Rotate**: Create new snapshot repositories on a schedule (weekly/monthly/yearly)
 - **Status**: View the current state of all deepfreeze components
-- **Thaw**: Restore data from Glacier for analysis
-- **Refreeze**: Return thawed data to Glacier storage
+- **Thaw**: Restore data from archive storage for analysis
+- **Refreeze**: Return thawed data to archive storage
 - **Cleanup**: Remove expired thaw requests and associated resources
 - **Repair Metadata**: Fix inconsistencies in the deepfreeze status index
 
@@ -53,11 +63,22 @@ pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/
      username: elastic
      password: changeme
 
-   deepfreeze:
-     provider: aws
-     bucket_name_prefix: my-deepfreeze
-     repo_name_prefix: deepfreeze
-     rotate_by: week
+   # Storage provider credentials (optional - can also use environment variables)
+   storage:
+     # AWS S3
+     aws:
+       region: us-east-1
+       # profile: my-profile  # Or use access_key_id + secret_access_key
+
+     # Azure Blob Storage
+     azure:
+       connection_string: "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=..."
+       # Or use account_name + account_key
+
+     # Google Cloud Storage
+     gcp:
+       project: my-gcp-project
+       credentials_file: /path/to/service-account.json
    ```
 
 3. Initialize deepfreeze:

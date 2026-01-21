@@ -80,7 +80,7 @@ def test_constants_importable():
     # Verify values
     assert STATUS_INDEX == "deepfreeze-status"
     assert SETTINGS_ID == "1"
-    assert PROVIDERS == ["aws"]
+    assert PROVIDERS == ["aws", "azure", "gcp"]
 
     # Verify thaw states
     assert THAW_STATE_ACTIVE == "active"

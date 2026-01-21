@@ -203,15 +203,9 @@ def cli(ctx, config_path, dry_run):
 @click.option(
     "-o",
     "--provider",
-    type=click.Choice(
-        [
-            "aws",
-            # "gcp",
-            # "azure",
-        ]
-    ),
+    type=click.Choice(["aws", "azure", "gcp"]),
     default="aws",
-    help="What provider to use (AWS only for now)",
+    help="Cloud storage provider to use (aws, azure, or gcp)",
 )
 @click.option(
     "-t",

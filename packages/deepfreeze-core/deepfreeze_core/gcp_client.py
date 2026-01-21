@@ -44,7 +44,9 @@ class GcpStorageClient(S3Client):
         location: str = None,
     ) -> None:
         self.loggit = logging.getLogger("deepfreeze.gcp_client")
-        self.default_location = location or os.environ.get("GOOGLE_CLOUD_LOCATION", "US")
+        self.default_location = location or os.environ.get(
+            "GOOGLE_CLOUD_LOCATION", "US"
+        )
 
         try:
             # Priority: constructor args > environment variables
@@ -83,16 +85,12 @@ class GcpStorageClient(S3Client):
 
         except GoogleAPIError as e:
             self.loggit.error("Failed to initialize GCP Storage Client: %s", e)
-            raise ActionError(
-                f"Failed to initialize GCP Storage Client: {e}"
-            ) from e
+            raise ActionError(f"Failed to initialize GCP Storage Client: {e}") from e
         except Exception as e:
             self.loggit.error(
                 "Failed to initialize GCP Storage Client: %s", e, exc_info=True
             )
-            raise ActionError(
-                f"Failed to initialize GCP Storage Client: {e}"
-            ) from e
+            raise ActionError(f"Failed to initialize GCP Storage Client: {e}") from e
 
     def test_connection(self) -> bool:
         """

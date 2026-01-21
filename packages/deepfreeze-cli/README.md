@@ -1,14 +1,22 @@
 # Deepfreeze
 
-Standalone Elasticsearch S3 Glacier archival and lifecycle management tool.
+Standalone Elasticsearch cloud storage archival and lifecycle management tool.
 
 ## Overview
 
-Deepfreeze provides cost-effective S3 Glacier archival and lifecycle management for Elasticsearch snapshot repositories without requiring full Curator installation. It is a lightweight, focused tool for managing long-term data retention in AWS S3 Glacier storage.
+Deepfreeze provides cost-effective cloud storage archival and lifecycle management for Elasticsearch snapshot repositories without requiring full Curator installation. It is a lightweight, focused tool for managing long-term data retention in cloud archive storage.
+
+## Supported Cloud Providers
+
+| Provider | Storage Type | Archive Tier |
+|----------|--------------|--------------|
+| **AWS** | S3 | Glacier, Glacier Deep Archive |
+| **Azure** | Blob Storage | Archive tier |
+| **GCP** | Cloud Storage | Archive storage class |
 
 ## Features
 
-- S3 Glacier archival for Elasticsearch snapshot repositories
+- Cloud archive storage for Elasticsearch snapshot repositories
 - Repository rotation with configurable retention
 - Thaw frozen repositories for data retrieval
 - Automatic refreeze after data access
@@ -52,14 +60,20 @@ deepfreeze --help
 
 - Python 3.8 or higher
 - Elasticsearch 8.x cluster
-- AWS credentials configured (for S3 access)
+- Cloud provider credentials (one of):
+  - **AWS**: AWS credentials via environment, config file, or IAM role
+  - **Azure**: Connection string or account name + key
+  - **GCP**: Application Default Credentials or service account JSON
 - Required Python packages (installed automatically):
   - elasticsearch8
-  - boto3
+  - boto3 (for AWS)
   - click
   - rich
   - voluptuous
   - pyyaml
+- Optional packages for additional providers:
+  - azure-storage-blob (for Azure): `pip install deepfreeze-cli[azure]`
+  - google-cloud-storage (for GCP): `pip install deepfreeze-cli[gcp]`
 
 ## Configuration
 
@@ -88,7 +102,7 @@ vim ~/.deepfreeze/config.yml
 
 ### Configuration Format
 
-Create a YAML configuration file to specify Elasticsearch connection settings:
+Create a YAML configuration file to specify Elasticsearch connection and storage provider settings:
 
 ```yaml
 elasticsearch:
@@ -103,6 +117,29 @@ elasticsearch:
   # Or use Elastic Cloud
   # cloud_id: deployment:base64string
 
+# Storage provider credentials (optional - can also use environment variables)
+storage:
+  # AWS S3 configuration
+  aws:
+    region: us-east-1
+    # profile: my-profile  # Use named profile from ~/.aws/credentials
+    # Or explicit credentials:
+    # access_key_id: AKIA...
+    # secret_access_key: ...
+
+  # Azure Blob Storage configuration
+  azure:
+    connection_string: "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=..."
+    # Or use account name + key:
+    # account_name: mystorageaccount
+    # account_key: ...
+
+  # Google Cloud Storage configuration
+  gcp:
+    project: my-gcp-project
+    credentials_file: /path/to/service-account.json
+    location: US
+
 logging:
   loglevel: INFO
   # logfile: /var/log/deepfreeze.log
@@ -112,13 +149,30 @@ logging:
 
 Configuration can also be provided via environment variables:
 
+**Elasticsearch:**
 - `DEEPFREEZE_ES_HOSTS` - Elasticsearch hosts (comma-separated)
 - `DEEPFREEZE_ES_USERNAME` - Elasticsearch username
 - `DEEPFREEZE_ES_PASSWORD` - Elasticsearch password
 - `DEEPFREEZE_ES_API_KEY` - Elasticsearch API key
 - `DEEPFREEZE_ES_CLOUD_ID` - Elastic Cloud ID
 
-Environment variables override file configuration.
+**AWS S3:**
+- `AWS_ACCESS_KEY_ID` - AWS access key
+- `AWS_SECRET_ACCESS_KEY` - AWS secret key
+- `AWS_DEFAULT_REGION` - AWS region
+- `AWS_PROFILE` - AWS profile name
+
+**Azure Blob Storage:**
+- `AZURE_STORAGE_CONNECTION_STRING` - Full connection string
+- `AZURE_STORAGE_ACCOUNT` - Storage account name (with AZURE_STORAGE_KEY)
+- `AZURE_STORAGE_KEY` - Storage account key
+
+**Google Cloud Storage:**
+- `GOOGLE_APPLICATION_CREDENTIALS` - Path to service account JSON
+- `GOOGLE_CLOUD_PROJECT` - GCP project ID
+- `GOOGLE_CLOUD_LOCATION` - Default bucket location
+
+Environment variables are used as fallback when config file credentials are not provided.
 
 ## Usage
 
@@ -127,9 +181,24 @@ Environment variables override file configuration.
 Set up deepfreeze with ILM policy and index template configuration:
 
 ```bash
+# AWS (default)
 deepfreeze --config config.yaml setup \
   --ilm_policy_name my-ilm-policy \
   --index_template_name my-template \
+  --bucket_name_prefix my-deepfreeze \
+  --repo_name_prefix my-deepfreeze
+
+# Azure
+deepfreeze --config config.yaml setup \
+  --provider azure \
+  --ilm_policy_name my-ilm-policy \
+  --bucket_name_prefix my-deepfreeze \
+  --repo_name_prefix my-deepfreeze
+
+# GCP
+deepfreeze --config config.yaml setup \
+  --provider gcp \
+  --ilm_policy_name my-ilm-policy \
   --bucket_name_prefix my-deepfreeze \
   --repo_name_prefix my-deepfreeze
 ```
@@ -216,11 +285,11 @@ deepfreeze --config config.yaml --dry-run repair-metadata
 
 | Command | Description |
 |---------|-------------|
-| `setup` | Initialize deepfreeze environment |
+| `setup` | Initialize deepfreeze environment (supports `--provider` option) |
 | `status` | Show current status of repositories and requests |
 | `rotate` | Create new repository and archive old ones |
-| `thaw` | Initiate or check Glacier restore operations |
-| `refreeze` | Return thawed repositories to Glacier |
+| `thaw` | Initiate or check archive restore operations |
+| `refreeze` | Return thawed repositories to archive storage |
 | `cleanup` | Remove expired repositories and old requests |
 | `repair-metadata` | Scan and repair metadata discrepancies |
 

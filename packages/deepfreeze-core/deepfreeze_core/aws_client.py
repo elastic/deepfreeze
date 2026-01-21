@@ -65,7 +65,9 @@ class AwsS3Client(S3Client):
                 self.client = session.client("s3", **client_kwargs)
             else:
                 self.client = boto3.client("s3", **client_kwargs)
-                self.loggit.debug("Using default AWS credentials (environment/instance)")
+                self.loggit.debug(
+                    "Using default AWS credentials (environment/instance)"
+                )
 
             # Validate credentials by attempting a simple operation
             self.loggit.debug("Validating AWS credentials")
