@@ -23,8 +23,10 @@ from deepfreeze_core.utilities import (
     get_ilm_policy,
     get_index_templates,
     get_matching_repos,
+    get_matching_repo_names,
     get_next_suffix,
     get_settings,
+    is_policy_safe_to_delete,
     push_to_glacier,
     save_settings,
     unmount_repo,
@@ -364,6 +366,76 @@ class Rotate:
 
         return archived_repos
 
+    def _cleanup_orphaned_policies(self, dry_run: bool = False) -> list:
+        """
+        Delete ILM policies that reference unmounted deepfreeze repositories.
+
+        This is called after archiving repos to clean up the old versioned
+        policies that now reference non-existent repositories.
+
+        :param dry_run: If True, don't actually delete anything
+        :return: List of deleted policy names
+        """
+        deleted_policies = []
+
+        if not self.settings.ilm_policy_name:
+            return deleted_policies
+
+        try:
+            all_policies = self.client.ilm.get_lifecycle()
+
+            # Get currently mounted repos
+            mounted_repos = set(get_matching_repo_names(
+                self.client, self.settings.repo_name_prefix
+            ))
+
+            for policy_name, policy_data in all_policies.items():
+                # Only check versioned policies matching our prefix
+                if not policy_name.startswith(f"{self.settings.ilm_policy_name}-"):
+                    continue
+
+                # Check if policy references a deepfreeze repo
+                policy_body = policy_data.get("policy", {})
+                phases = policy_body.get("phases", {})
+
+                for _phase_name, phase_config in phases.items():
+                    actions = phase_config.get("actions", {})
+                    if "searchable_snapshot" in actions:
+                        snapshot_repo = actions["searchable_snapshot"].get(
+                            "snapshot_repository"
+                        )
+                        # Check if it references a repo that's no longer mounted
+                        if (
+                            snapshot_repo
+                            and snapshot_repo.startswith(self.settings.repo_name_prefix)
+                            and snapshot_repo not in mounted_repos
+                        ):
+                            # Check if policy is safe to delete
+                            if is_policy_safe_to_delete(self.client, policy_name):
+                                self.loggit.info(
+                                    "Deleting orphaned ILM policy %s (references unmounted repo %s)",
+                                    policy_name,
+                                    snapshot_repo,
+                                )
+                                if not dry_run:
+                                    try:
+                                        self.client.ilm.delete_lifecycle(name=policy_name)
+                                        deleted_policies.append(policy_name)
+                                    except Exception as e:
+                                        self.loggit.error(
+                                            "Failed to delete policy %s: %s",
+                                            policy_name,
+                                            e,
+                                        )
+                                else:
+                                    deleted_policies.append(policy_name)
+                            break
+
+        except Exception as e:
+            self.loggit.warning("Error cleaning up orphaned policies: %s", e)
+
+        return deleted_policies
+
     def do_dry_run(self) -> None:
         """
         Perform a dry-run of the rotation.
@@ -429,6 +501,25 @@ class Rotate:
                             f"  Create: [cyan]{self.settings.ilm_policy_name}-{new_suffix}[/cyan]\n"
                             f"  From: [yellow]{self.settings.ilm_policy_name}-{old_suffix}[/yellow]",
                             title="[bold blue]Dry Run - ILM Policy[/bold blue]",
+                            border_style="blue",
+                            expand=False,
+                        )
+                    )
+
+            # Show orphaned policies that would be deleted
+            orphaned_policies = self._cleanup_orphaned_policies(dry_run=True)
+            if orphaned_policies:
+                if self.porcelain:
+                    for policy in orphaned_policies:
+                        print(f"DRY_RUN\tdelete_policy\t{policy}")
+                else:
+                    policy_list = "\n".join(
+                        [f"  - [red]{p}[/red]" for p in orphaned_policies]
+                    )
+                    self.console.print(
+                        Panel(
+                            f"[bold]Would delete {len(orphaned_policies)} orphaned ILM policies:[/bold]\n{policy_list}",
+                            title="[bold blue]Dry Run - Delete Orphaned Policies[/bold blue]",
                             border_style="blue",
                             expand=False,
                         )
@@ -512,6 +603,25 @@ class Rotate:
                         )
                     )
 
+            # Clean up orphaned ILM policies (policies referencing unmounted repos)
+            deleted_policies = self._cleanup_orphaned_policies()
+            if deleted_policies:
+                if self.porcelain:
+                    for policy in deleted_policies:
+                        print(f"DELETED\tilm_policy\t{policy}")
+                else:
+                    policy_list = "\n".join(
+                        [f"  - [red]{p}[/red]" for p in deleted_policies]
+                    )
+                    self.console.print(
+                        Panel(
+                            f"[bold]Deleted {len(deleted_policies)} orphaned ILM policies:[/bold]\n{policy_list}",
+                            title="[bold green]Orphaned Policies Cleaned Up[/bold green]",
+                            border_style="green",
+                            expand=False,
+                        )
+                    )
+
             # Final summary
             if not self.porcelain:
                 self.console.print(
@@ -519,7 +629,8 @@ class Rotate:
                         f"[bold green]Rotation completed successfully![/bold green]\n\n"
                         f"New repository: [cyan]{new_repo}[/cyan]\n"
                         f"Policies updated: {len(updated_policies)}\n"
-                        f"Repositories archived: {len(archived)}\n\n"
+                        f"Repositories archived: {len(archived)}\n"
+                        f"Orphaned policies deleted: {len(deleted_policies)}\n\n"
                         f"[bold]Next steps:[/bold]\n"
                         f"  - Verify ILM policies are using the new repository\n"
                         f"  - Monitor searchable snapshot transitions\n"
