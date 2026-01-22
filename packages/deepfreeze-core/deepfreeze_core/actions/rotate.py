@@ -25,11 +25,13 @@ from deepfreeze_core.utilities import (
     get_matching_repos,
     get_matching_repo_names,
     get_next_suffix,
+    get_repository,
     get_settings,
     is_policy_safe_to_delete,
     push_to_glacier,
     save_settings,
     unmount_repo,
+    update_repository_date_range,
     update_template_ilm_policy,
 )
 
@@ -343,10 +345,18 @@ class Rotate:
 
             if not dry_run:
                 try:
-                    # Push all objects to Glacier
+                    # Update date range BEFORE archiving (snapshot metadata won't be
+                    # readable after blobs are moved to archive tier)
+                    repo_obj = get_repository(self.client, repo.name)
+                    if update_repository_date_range(self.client, repo_obj):
+                        self.loggit.info(
+                            "Updated date range for %s before archiving", repo.name
+                        )
+
+                    # Push all objects to archive tier
                     push_to_glacier(self.s3, repo)
 
-                    # Unmount the repository
+                    # Unmount the repository (skip date range update since we did it above)
                     unmounted_repo = unmount_repo(self.client, repo.name)
 
                     # Update thaw state to frozen
