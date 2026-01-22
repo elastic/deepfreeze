@@ -29,6 +29,7 @@ from deepfreeze_core.utilities import (
     get_settings,
     is_policy_safe_to_delete,
     push_to_glacier,
+    repo_has_active_indices,
     save_settings,
     unmount_repo,
     update_repository_date_range,
@@ -340,7 +341,22 @@ class Rotate:
         # Keep the newest 'keep' repos mounted
         repos_to_archive = repos[: -self.keep] if len(repos) > self.keep else []
 
+        skipped_repos = []
+
         for repo in repos_to_archive:
+            # Check if repo has active indices BEFORE archiving
+            # (can't unmount a repo with active searchable snapshot indices)
+            has_active, active_indices = repo_has_active_indices(self.client, repo.name)
+            if has_active:
+                self.loggit.warning(
+                    "Skipping archive of %s - has %d active indices: %s",
+                    repo.name,
+                    len(active_indices),
+                    active_indices[:3],
+                )
+                skipped_repos.append(repo.name)
+                continue
+
             self.loggit.info("Archiving repository %s to Glacier", repo.name)
 
             if not dry_run:
@@ -356,7 +372,7 @@ class Rotate:
                     # Push all objects to archive tier
                     push_to_glacier(self.s3, repo)
 
-                    # Unmount the repository (skip date range update since we did it above)
+                    # Unmount the repository
                     unmounted_repo = unmount_repo(self.client, repo.name)
 
                     # Update thaw state to frozen
@@ -373,6 +389,13 @@ class Rotate:
 
             else:
                 archived_repos.append(repo.name)
+
+        if skipped_repos:
+            self.loggit.info(
+                "Skipped %d repos with active indices (will retry on next rotation): %s",
+                len(skipped_repos),
+                skipped_repos,
+            )
 
         return archived_repos
 

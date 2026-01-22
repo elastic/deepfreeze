@@ -101,6 +101,71 @@ def get_all_indices_in_repo(client: Elasticsearch, repository: str) -> list:
     return list(indices)
 
 
+def repo_has_active_indices(client: Elasticsearch, repo_name: str) -> tuple[bool, list]:
+    """
+    Check if a repository has any active searchable snapshot indices using it.
+
+    This is used to determine if a repository can be safely archived/unmounted.
+    Elasticsearch won't allow unmounting a repo that has active indices.
+
+    :param client: A client connection object
+    :type client: Elasticsearch
+    :param repo_name: The repository name to check
+    :type repo_name: str
+
+    :returns: Tuple of (has_active_indices, list_of_index_names)
+    :rtype: tuple[bool, list]
+    """
+    loggit = logging.getLogger("deepfreeze.utilities")
+    active_indices = []
+
+    try:
+        # Get all indices and check which ones are searchable snapshots from this repo
+        all_indices = client.cat.indices(format="json")
+
+        for idx in all_indices:
+            index_name = idx.get("index", "")
+            # Searchable snapshots have names like "partial-<original>-<repo>-<hash>"
+            # or the index settings will reference the repository
+            if repo_name in index_name:
+                active_indices.append(index_name)
+                continue
+
+            # Also check index settings for repository reference
+            try:
+                settings = client.indices.get_settings(index=index_name)
+                store_type = (
+                    settings.get(index_name, {})
+                    .get("settings", {})
+                    .get("index", {})
+                    .get("store", {})
+                    .get("type")
+                )
+                snapshot_repo = (
+                    settings.get(index_name, {})
+                    .get("settings", {})
+                    .get("index", {})
+                    .get("store", {})
+                    .get("snapshot", {})
+                    .get("repository_name")
+                )
+                if store_type == "snapshot" and snapshot_repo == repo_name:
+                    active_indices.append(index_name)
+            except Exception:
+                pass  # Index might not exist or be accessible
+
+    except Exception as e:
+        loggit.warning("Error checking for active indices in repo %s: %s", repo_name, e)
+
+    loggit.debug(
+        "Repository %s has %d active indices: %s",
+        repo_name,
+        len(active_indices),
+        active_indices[:5] if active_indices else [],
+    )
+    return len(active_indices) > 0, active_indices
+
+
 def get_timestamp_range(client: Elasticsearch, indices: list) -> tuple:
     """
     Retrieve the earliest and latest @timestamp values from the given indices.
@@ -566,21 +631,21 @@ def unmount_repo(client: Elasticsearch, repo: str) -> Repository:
             repo_obj.end.isoformat() if repo_obj.end else "None",
         )
 
-    # Mark repository as unmounted
-    repo_obj.unmount()
-    msg = f"Recording repository details as {repo_obj}"
-    loggit.debug(msg)
-
     # Remove the repository from Elasticsearch
-    loggit.debug("Removing repo %s", repo)
+    loggit.debug("Removing repo %s from Elasticsearch", repo)
     try:
         client.snapshot.delete_repository(name=repo)
     except Exception as e:
         loggit.warning("Repository %s could not be unmounted due to %s", repo, e)
         loggit.warning("Another attempt will be made when rotate runs next")
+        # Don't mark as unmounted if the actual unmount failed
+        raise
+
+    # Only mark as unmounted AFTER successful ES unmount
+    repo_obj.unmount()
+    loggit.debug("Recording repository details as %s", repo_obj)
 
     # Update the status index with final repository state
-    loggit.debug("Updating repo: %s", repo_obj)
     client.update(index=STATUS_INDEX, doc=repo_obj.to_dict(), id=repo_obj.docid)
     loggit.debug("Repo %s removed", repo)
     return repo_obj
