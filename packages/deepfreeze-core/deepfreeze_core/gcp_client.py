@@ -288,14 +288,26 @@ Then restart Elasticsearch to apply the keystore changes."""
 
         bucket = self.client.bucket(bucket_name)
         refrozen_count = 0
+        skipped_count = 0
         error_count = 0
 
         # List blobs with prefix
         blobs = bucket.list_blobs(prefix=path)
 
         for blob in blobs:
+            current_class = blob.storage_class
+
+            # Skip blobs already in the target storage class
+            if current_class == target_class:
+                self.loggit.debug(
+                    "Skipping blob %s - already in %s",
+                    blob.name,
+                    current_class,
+                )
+                skipped_count += 1
+                continue
+
             try:
-                current_class = blob.storage_class
                 self.loggit.debug(
                     "Refreezing blob: %s (from %s to %s)",
                     blob.name,
@@ -315,8 +327,9 @@ Then restart Elasticsearch to apply the keystore changes."""
                 )
 
         self.loggit.info(
-            "Refreeze operation completed - refrozen: %d, errors: %d",
+            "Refreeze operation completed - changed: %d, skipped (already archived): %d, errors: %d",
             refrozen_count,
+            skipped_count,
             error_count,
         )
 

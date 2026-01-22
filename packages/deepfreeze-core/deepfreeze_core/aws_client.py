@@ -313,6 +313,7 @@ Then restart Elasticsearch to apply the keystore changes."""
         )
 
         refrozen_count = 0
+        skipped_count = 0
         error_count = 0
 
         paginator = self.client.get_paginator("list_objects_v2")
@@ -328,6 +329,16 @@ Then restart Elasticsearch to apply the keystore changes."""
                 for obj_num, obj in enumerate(page["Contents"], 1):
                     key = obj["Key"]
                     current_storage = obj.get("StorageClass", "STANDARD")
+
+                    # Skip objects already in the target storage class
+                    if current_storage == storage_class:
+                        self.loggit.debug(
+                            "Skipping object %s - already in %s",
+                            key,
+                            current_storage,
+                        )
+                        skipped_count += 1
+                        continue
 
                     try:
                         # Copy the object with a new storage class
@@ -360,8 +371,9 @@ Then restart Elasticsearch to apply the keystore changes."""
 
         # Log summary
         self.loggit.info(
-            "Refreeze operation completed - refrozen: %d, errors: %d",
+            "Refreeze operation completed - changed: %d, skipped (already archived): %d, errors: %d",
             refrozen_count,
+            skipped_count,
             error_count,
         )
 

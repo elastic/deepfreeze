@@ -96,17 +96,77 @@ class Status:
         # Initialize S3 client with provider from settings
         self.s3 = s3_client_factory(self.settings.provider)
 
+    def _get_repo_storage_tier(self, bucket: str, base_path: str) -> str:
+        """
+        Sample blobs in a repository to determine the predominant storage tier.
+
+        Returns a summary like "Archive", "Hot", "Cool", or "Mixed".
+        """
+        try:
+            # Normalize path
+            path = base_path.strip("/")
+            if path:
+                path += "/"
+
+            # List first few objects to sample storage tier
+            objects = self.s3.list_objects(bucket, path)
+            if not objects:
+                return "Empty"
+
+            # Sample up to 10 objects
+            sample = objects[:10]
+            tiers = set()
+            for obj in sample:
+                # Get storage class from object metadata
+                storage_class = obj.get("StorageClass", "STANDARD")
+                # For Azure, also check BlobTier
+                blob_tier = obj.get("BlobTier")
+                if blob_tier:
+                    tiers.add(blob_tier)
+                else:
+                    tiers.add(storage_class)
+
+            # Return summary
+            if len(tiers) == 1:
+                tier = tiers.pop()
+                # Normalize tier names for display
+                tier_display = {
+                    "GLACIER": "Archive",
+                    "DEEP_ARCHIVE": "Archive",
+                    "Archive": "Archive",
+                    "STANDARD": "Hot",
+                    "Hot": "Hot",
+                    "Cool": "Cool",
+                    "STANDARD_IA": "Cool",
+                    "ARCHIVE": "Archive",
+                    "COLDLINE": "Archive",
+                    "NEARLINE": "Cool",
+                }.get(tier, tier)
+                return tier_display
+            elif len(tiers) > 1:
+                return "Mixed"
+            else:
+                return "Unknown"
+        except Exception as e:
+            self.loggit.debug("Error getting storage tier for %s/%s: %s", bucket, base_path, e)
+            return "N/A"
+
     def _get_repositories_status(self) -> list:
         """Get status of all repositories."""
         repos = []
         try:
             all_repos = get_all_repos(self.client)
+            # Get mounted repos list once
+            mounted_repos = get_matching_repo_names(
+                self.client, self.settings.repo_name_prefix
+            )
+
             for repo in all_repos:
                 # Check if repo is actually mounted in ES
-                mounted_repos = get_matching_repo_names(
-                    self.client, self.settings.repo_name_prefix
-                )
                 is_mounted_in_es = repo.name in mounted_repos
+
+                # Get storage tier (sample blobs)
+                storage_tier = self._get_repo_storage_tier(repo.bucket, repo.base_path)
 
                 repos.append(
                     {
@@ -117,6 +177,7 @@ class Status:
                         "end": repo.end.isoformat() if repo.end else None,
                         "is_mounted": is_mounted_in_es,
                         "thaw_state": repo.thaw_state,
+                        "storage_tier": storage_tier,
                         "thawed_at": (
                             repo.thawed_at.isoformat() if repo.thawed_at else None
                         ),
@@ -258,6 +319,7 @@ class Status:
                 table.add_column("Date Range", style="white")
                 table.add_column("Mounted", style="green")
                 table.add_column("Thaw State", style="magenta")
+                table.add_column("Storage Tier", style="blue")
 
                 for repo in sorted(display_repos, key=lambda x: x["name"]):
                     date_range = ""
@@ -278,6 +340,17 @@ class Status:
                         "expired": "red",
                     }.get(thaw_state, "white")
 
+                    # Storage tier with color coding
+                    storage_tier = repo.get("storage_tier", "N/A")
+                    tier_color = {
+                        "Archive": "blue",
+                        "Hot": "green",
+                        "Cool": "cyan",
+                        "Mixed": "yellow",
+                        "Empty": "dim",
+                        "N/A": "dim",
+                    }.get(storage_tier, "white")
+
                     table.add_row(
                         repo["name"],
                         repo.get("bucket", "N/A"),
@@ -285,6 +358,7 @@ class Status:
                         date_range,
                         mounted_str,
                         f"[{state_color}]{thaw_state}[/{state_color}]",
+                        f"[{tier_color}]{storage_tier}[/{tier_color}]",
                     )
 
                 self.console.print(table)

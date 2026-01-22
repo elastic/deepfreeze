@@ -24,79 +24,58 @@ from deepfreeze_core.helpers import Repository, Settings
 from deepfreeze_core.s3client import S3Client
 
 
-def push_to_glacier(s3: S3Client, repo: Repository) -> bool:
-    """Push objects to Glacier storage
+def push_to_glacier(s3: S3Client, repo: Repository, storage_class: str = "GLACIER") -> bool:
+    """Push objects to archive storage (Glacier for AWS, Archive tier for Azure, etc.)
 
-    :param s3: The S3 client object
+    Uses the storage client's refreeze method which handles provider-specific
+    archiving correctly:
+    - AWS S3: Copy-in-place with new storage class
+    - Azure: Direct tier change with set_standard_blob_tier()
+    - GCP: Direct storage class change
+
+    :param s3: The storage client object
     :type s3: S3Client
-    :param repo: The repository to push to Glacier
+    :param repo: The repository to archive
     :type repo: Repository
+    :param storage_class: Target storage class (default: GLACIER)
+    :type storage_class: str
 
-    :return: True if all objects were successfully moved, False otherwise
+    :return: True if archiving completed (may have partial failures), False on error
     :rtype: bool
-
-    :raises Exception: If the object is not in the restoration process
     """
+    loggit = logging.getLogger("deepfreeze.utilities")
+
     try:
-        # Normalize base_path: remove leading/trailing slashes, ensure it ends with /
+        # Normalize base_path: remove leading/trailing slashes
         base_path = repo.base_path.strip("/")
         if base_path:
             base_path += "/"
 
-        # Initialize variables for pagination
-        success = True
-        object_count = 0
-
-        # List objects
-        objects = s3.list_objects(repo.bucket, base_path)
-
-        # Process each object
-        for obj in objects:
-            key = obj["Key"]
-            current_storage_class = obj.get("StorageClass", "STANDARD")
-
-            # Log the object being processed
-            logging.info(
-                "Processing object: s3://%s/%s (Current: %s)",
-                repo.bucket,
-                key,
-                current_storage_class,
-            )
-
-            try:
-                # Copy object to itself with new storage class
-                copy_source = {"Bucket": repo.bucket, "Key": key}
-                s3.copy_object(
-                    Bucket=repo.bucket,
-                    Key=key,
-                    CopySource=copy_source,
-                    StorageClass="GLACIER",
-                )
-
-                # Log success
-                logging.info(
-                    "Successfully moved s3://%s/%s to GLACIER", repo.bucket, key
-                )
-                object_count += 1
-
-            except botocore.exceptions.ClientError as e:
-                logging.error("Failed to move s3://%s/%s: %s", repo.bucket, key, e)
-                success = False
-                continue
-
-        # Log summary
-        logging.info(
-            "Processed %d objects in s3://%s/%s", object_count, repo.bucket, base_path
+        loggit.info(
+            "Archiving repository %s (bucket: %s, path: %s) to %s",
+            repo.name,
+            repo.bucket,
+            base_path,
+            storage_class,
         )
-        if success:
-            logging.info("All objects successfully moved to GLACIER")
-        else:
-            logging.warning("Some objects failed to move to GLACIER")
 
-        return success
+        # Use the storage client's refreeze method which handles provider-specific
+        # archiving correctly (direct tier change for Azure/GCP, copy-in-place for AWS)
+        s3.refreeze(repo.bucket, base_path, storage_class)
 
-    except botocore.exceptions.ClientError as e:
-        logging.error("Failed to process bucket s3://%s: %s", repo.bucket, e)
+        loggit.info(
+            "Archive operation completed for repository %s",
+            repo.name,
+        )
+        return True
+
+    except Exception as e:
+        loggit.error(
+            "Failed to archive repository %s: %s",
+            repo.name,
+            e,
+            exc_info=True,
+        )
         return False
 
 

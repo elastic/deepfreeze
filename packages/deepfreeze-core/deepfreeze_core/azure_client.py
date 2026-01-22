@@ -349,27 +349,42 @@ Then restart Elasticsearch to apply the keystore changes."""
 
         container_client = self.service_client.get_container_client(bucket_name)
         refrozen_count = 0
+        skipped_count = 0
         error_count = 0
+
+        # Map target tier to string for comparison
+        target_tier_str = str(target_tier).replace("StandardBlobTier.", "")
 
         # List blobs with prefix
         blobs = container_client.list_blobs(name_starts_with=path)
 
         for blob in blobs:
-            try:
-                blob_client = container_client.get_blob_client(blob.name)
-                current_tier = blob.blob_tier
+            current_tier = blob.blob_tier
+
+            # Skip blobs already in the target tier
+            if current_tier == target_tier_str:
                 self.loggit.debug(
-                    "Refreezing blob: %s (from %s to %s)",
+                    "Skipping blob %s - already in %s tier",
                     blob.name,
                     current_tier,
-                    target_tier,
+                )
+                skipped_count += 1
+                continue
+
+            try:
+                blob_client = container_client.get_blob_client(blob.name)
+                self.loggit.debug(
+                    "Changing tier for blob: %s (from %s to %s)",
+                    blob.name,
+                    current_tier,
+                    target_tier_str,
                 )
                 blob_client.set_standard_blob_tier(target_tier)
                 refrozen_count += 1
             except AzureError as e:
                 error_count += 1
                 self.loggit.error(
-                    "Error refreezing blob %s: %s (type: %s)",
+                    "Error changing tier for blob %s: %s (type: %s)",
                     blob.name,
                     str(e),
                     type(e).__name__,
@@ -377,8 +392,9 @@ Then restart Elasticsearch to apply the keystore changes."""
                 )
 
         self.loggit.info(
-            "Refreeze operation completed - refrozen: %d, errors: %d",
+            "Refreeze operation completed - changed: %d, skipped (already archived): %d, errors: %d",
             refrozen_count,
+            skipped_count,
             error_count,
         )
 
