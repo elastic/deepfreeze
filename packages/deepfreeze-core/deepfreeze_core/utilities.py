@@ -545,7 +545,8 @@ def unmount_repo(client: Elasticsearch, repo: str) -> Repository:
     loggit = logging.getLogger("deepfreeze.utilities")
     # Get repository info from Elasticsearch
     repo_info = client.snapshot.get_repository(name=repo)[repo]
-    bucket = repo_info["settings"]["bucket"]
+    # Handle different providers: AWS/GCP use "bucket", Azure uses "container"
+    bucket = repo_info["settings"].get("bucket") or repo_info["settings"].get("container")
     base_path = repo_info["settings"]["base_path"]
 
     # Get repository object from status index
