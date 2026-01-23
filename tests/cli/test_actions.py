@@ -575,7 +575,8 @@ class TestRepairMetadataAction:
                     repair = RepairMetadata(client=mock_client, porcelain=True)
                     repair.do_dry_run()
 
-                    mock_repos.assert_called_once()
+                    # Called twice: once for state scan, once for date range update
+                    assert mock_repos.call_count == 2
 
 
 class TestActionInterfaceConsistency:
