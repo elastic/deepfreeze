@@ -200,15 +200,62 @@ class RepairMetadata:
                 )
                 continue
 
-            # Compare recorded state vs actual state
-            if repo.thaw_state != actual["determined_state"]:
+            # Compare recorded state vs actual storage state
+            # Note: "active" and "thawed" both use instant-access storage, so they're
+            # indistinguishable by storage class alone. We only flag a discrepancy
+            # when the storage state contradicts the recorded state.
+            is_discrepancy = False
+            suggested_state = None
+
+            if repo.thaw_state in [THAW_STATE_ACTIVE, THAW_STATE_THAWED]:
+                # These states should have instant-access storage
+                if actual["glacier"] == actual["total_objects"] and actual["total_objects"] > 0:
+                    # All objects in archive - should be frozen
+                    is_discrepancy = True
+                    suggested_state = THAW_STATE_FROZEN
+                elif actual["restoring"] > 0:
+                    # Some objects restoring - should be thawing
+                    is_discrepancy = True
+                    suggested_state = THAW_STATE_THAWING
+                # If instant_access, no discrepancy - active/thawed both valid
+
+            elif repo.thaw_state == THAW_STATE_FROZEN:
+                # This state should have archive storage
+                if actual["instant_access"] == actual["total_objects"] and actual["total_objects"] > 0:
+                    # All objects accessible - was restored (thawed)
+                    is_discrepancy = True
+                    suggested_state = THAW_STATE_THAWED
+                elif actual["restoring"] > 0:
+                    # Some objects restoring - thaw in progress
+                    is_discrepancy = True
+                    suggested_state = THAW_STATE_THAWING
+
+            elif repo.thaw_state == THAW_STATE_THAWING:
+                # This state should have some objects restoring or all accessible
+                if actual["glacier"] == actual["total_objects"] and actual["total_objects"] > 0:
+                    # All still in archive - thaw failed or not started
+                    is_discrepancy = True
+                    suggested_state = THAW_STATE_FROZEN
+                elif actual["instant_access"] == actual["total_objects"] and actual["total_objects"] > 0:
+                    # All accessible - thaw completed
+                    is_discrepancy = True
+                    suggested_state = THAW_STATE_THAWED
+
+            elif repo.thaw_state == THAW_STATE_EXPIRED:
+                # Expired should have archive storage (restore expired)
+                if actual["instant_access"] == actual["total_objects"] and actual["total_objects"] > 0:
+                    # Still accessible - not actually expired
+                    is_discrepancy = True
+                    suggested_state = THAW_STATE_THAWED
+
+            if is_discrepancy and suggested_state:
                 discrepancies.append(
                     {
                         "repo": repo.name,
                         "bucket": repo.bucket,
                         "base_path": repo.base_path,
                         "recorded_state": repo.thaw_state,
-                        "actual_state": actual["determined_state"],
+                        "actual_state": suggested_state,
                         "storage_classes": actual["storage_classes"],
                         "total_objects": actual["total_objects"],
                         "instant_access": actual["instant_access"],
@@ -220,7 +267,7 @@ class RepairMetadata:
                     "Discrepancy found for %s: recorded=%s, actual=%s",
                     repo.name,
                     repo.thaw_state,
-                    actual["determined_state"],
+                    suggested_state,
                 )
 
         return discrepancies
