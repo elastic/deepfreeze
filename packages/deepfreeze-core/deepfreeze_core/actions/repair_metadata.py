@@ -369,6 +369,8 @@ class RepairMetadata:
                 )
                 continue
 
+            self.loggit.info("Checking date range for repo %s", repo.name)
+
             result = {
                 "repo": repo.name,
                 "success": False,
@@ -378,6 +380,21 @@ class RepairMetadata:
                 "new_end": None,
                 "error": None,
             }
+
+            # Verify the repo actually exists in ES before trying to query it
+            try:
+                es_repos = self.client.snapshot.get_repository(name=repo.name)
+                if repo.name not in es_repos:
+                    self.loggit.debug(
+                        "Repo %s marked as mounted but not found in ES, skipping",
+                        repo.name,
+                    )
+                    continue
+            except Exception as e:
+                self.loggit.debug(
+                    "Repo %s not accessible in ES: %s, skipping", repo.name, e
+                )
+                continue
 
             if dry_run:
                 # In dry run, report that we would update
