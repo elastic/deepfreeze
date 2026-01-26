@@ -918,13 +918,26 @@ def update_index_template_ilm_policy(
             "name"
         ] = ilm_policy_name
 
-        # Remove system-managed fields that ES rejects on PUT
-        template_data.pop("created_date", None)
+        # Only include fields accepted by put_index_template to avoid
+        # sending system-managed fields (e.g. created_date) from the GET response
+        _COMPOSABLE_TEMPLATE_FIELDS = {
+            "index_patterns",
+            "template",
+            "composed_of",
+            "priority",
+            "version",
+            "_meta",
+            "data_stream",
+            "allow_auto_create",
+            "deprecated",
+            "ignore_missing_component_templates",
+        }
+        put_body = {k: v for k, v in template_data.items() if k in _COMPOSABLE_TEMPLATE_FIELDS}
 
         # Put the updated template
         try:
             client.indices.put_index_template(
-                name=template_name, body=template_data
+                name=template_name, body=put_body
             )
         except Exception as e:
             loggit.error(
@@ -1743,10 +1756,23 @@ def update_template_ilm_policy(
                     "name"
                 ] = new_policy_name
 
-                # Remove system-managed fields that ES rejects on PUT
-                template.pop("created_date", None)
+                # Only include fields accepted by put_index_template to avoid
+                # sending system-managed fields (e.g. created_date) from the GET response
+                _COMPOSABLE_FIELDS = {
+                    "index_patterns",
+                    "template",
+                    "composed_of",
+                    "priority",
+                    "version",
+                    "_meta",
+                    "data_stream",
+                    "allow_auto_create",
+                    "deprecated",
+                    "ignore_missing_component_templates",
+                }
+                put_body = {k: v for k, v in template.items() if k in _COMPOSABLE_FIELDS}
 
-                client.indices.put_index_template(name=template_name, body=template)
+                client.indices.put_index_template(name=template_name, body=put_body)
                 loggit.info(
                     "Updated composable template %s to use policy %s",
                     template_name,
