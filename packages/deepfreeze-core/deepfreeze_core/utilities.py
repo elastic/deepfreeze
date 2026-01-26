@@ -881,92 +881,71 @@ def update_index_template_ilm_policy(
     # First try composable templates (ES 7.8+)
     try:
         templates = client.indices.get_index_template(name=template_name)
-        if (
-            templates
-            and "index_templates" in templates
-            and len(templates["index_templates"]) > 0
-        ):
-            template_data = templates["index_templates"][0]["index_template"]
-            loggit.debug("Found composable template %s", template_name)
-
-            # Ensure template structure exists
-            if "template" not in template_data:
-                template_data["template"] = {}
-            if "settings" not in template_data["template"]:
-                template_data["template"]["settings"] = {}
-            if "index" not in template_data["template"]["settings"]:
-                template_data["template"]["settings"]["index"] = {}
-            if "lifecycle" not in template_data["template"]["settings"]["index"]:
-                template_data["template"]["settings"]["index"]["lifecycle"] = {}
-
-            # Get old policy name for logging
-            old_policy = template_data["template"]["settings"]["index"][
-                "lifecycle"
-            ].get("name", "none")
-
-            # Set the new ILM policy
-            template_data["template"]["settings"]["index"]["lifecycle"][
-                "name"
-            ] = ilm_policy_name
-
-            # Put the updated template
-            client.indices.put_index_template(name=template_name, body=template_data)
-            loggit.info(
-                "Updated composable template %s: ILM policy %s -> %s",
-                template_name,
-                old_policy,
-                ilm_policy_name,
-            )
-            return {
-                "action": "updated",
-                "template_type": "composable",
-                "old_policy": old_policy,
-                "new_policy": ilm_policy_name,
-            }
     except NotFoundError:
+        templates = None
         loggit.debug(
             "Composable template %s not found, trying legacy template", template_name
         )
     except Exception as e:
+        templates = None
         loggit.debug("Error checking composable template %s: %s", template_name, e)
+
+    if (
+        templates
+        and "index_templates" in templates
+        and len(templates["index_templates"]) > 0
+    ):
+        template_data = templates["index_templates"][0]["index_template"]
+        loggit.debug("Found composable template %s", template_name)
+
+        # Ensure template structure exists
+        if "template" not in template_data:
+            template_data["template"] = {}
+        if "settings" not in template_data["template"]:
+            template_data["template"]["settings"] = {}
+        if "index" not in template_data["template"]["settings"]:
+            template_data["template"]["settings"]["index"] = {}
+        if "lifecycle" not in template_data["template"]["settings"]["index"]:
+            template_data["template"]["settings"]["index"]["lifecycle"] = {}
+
+        # Get old policy name for logging
+        old_policy = template_data["template"]["settings"]["index"][
+            "lifecycle"
+        ].get("name", "none")
+
+        # Set the new ILM policy
+        template_data["template"]["settings"]["index"]["lifecycle"][
+            "name"
+        ] = ilm_policy_name
+
+        # Put the updated template
+        try:
+            client.indices.put_index_template(
+                name=template_name, body=template_data
+            )
+        except Exception as e:
+            loggit.error(
+                "Error updating composable template %s: %s", template_name, e
+            )
+            raise ActionError(
+                f"Failed to update composable template {template_name}: {e}"
+            ) from e
+        loggit.info(
+            "Updated composable template %s: ILM policy %s -> %s",
+            template_name,
+            old_policy,
+            ilm_policy_name,
+        )
+        return {
+            "action": "updated",
+            "template_type": "composable",
+            "old_policy": old_policy,
+            "new_policy": ilm_policy_name,
+        }
 
     # Try legacy templates
     try:
         templates = client.indices.get_template(name=template_name)
-        if templates and template_name in templates:
-            template_data = templates[template_name]
-            loggit.debug("Found legacy template %s", template_name)
-
-            # Ensure template structure exists
-            if "settings" not in template_data:
-                template_data["settings"] = {}
-            if "index" not in template_data["settings"]:
-                template_data["settings"]["index"] = {}
-            if "lifecycle" not in template_data["settings"]["index"]:
-                template_data["settings"]["index"]["lifecycle"] = {}
-
-            # Get old policy name for logging
-            old_policy = template_data["settings"]["index"]["lifecycle"].get(
-                "name", "none"
-            )
-
-            # Set the new ILM policy
-            template_data["settings"]["index"]["lifecycle"]["name"] = ilm_policy_name
-
-            # Put the updated template
-            client.indices.put_template(name=template_name, body=template_data)
-            loggit.info(
-                "Updated legacy template %s: ILM policy %s -> %s",
-                template_name,
-                old_policy,
-                ilm_policy_name,
-            )
-            return {
-                "action": "updated",
-                "template_type": "legacy",
-                "old_policy": old_policy,
-                "new_policy": ilm_policy_name,
-            }
     except NotFoundError:
         loggit.warning(
             "Template %s not found (checked both composable and legacy)", template_name
@@ -977,8 +956,49 @@ def update_index_template_ilm_policy(
             "error": f"Template {template_name} not found",
         }
     except Exception as e:
-        loggit.error("Error updating legacy template %s: %s", template_name, e)
-        raise ActionError(f"Failed to update template {template_name}: {e}") from e
+        loggit.error("Error checking legacy template %s: %s", template_name, e)
+        raise ActionError(f"Failed to check legacy template {template_name}: {e}") from e
+
+    if templates and template_name in templates:
+        template_data = templates[template_name]
+        loggit.debug("Found legacy template %s", template_name)
+
+        # Ensure template structure exists
+        if "settings" not in template_data:
+            template_data["settings"] = {}
+        if "index" not in template_data["settings"]:
+            template_data["settings"]["index"] = {}
+        if "lifecycle" not in template_data["settings"]["index"]:
+            template_data["settings"]["index"]["lifecycle"] = {}
+
+        # Get old policy name for logging
+        old_policy = template_data["settings"]["index"]["lifecycle"].get(
+            "name", "none"
+        )
+
+        # Set the new ILM policy
+        template_data["settings"]["index"]["lifecycle"]["name"] = ilm_policy_name
+
+        # Put the updated template
+        try:
+            client.indices.put_template(name=template_name, body=template_data)
+        except Exception as e:
+            loggit.error("Error updating legacy template %s: %s", template_name, e)
+            raise ActionError(
+                f"Failed to update legacy template {template_name}: {e}"
+            ) from e
+        loggit.info(
+            "Updated legacy template %s: ILM policy %s -> %s",
+            template_name,
+            old_policy,
+            ilm_policy_name,
+        )
+        return {
+            "action": "updated",
+            "template_type": "legacy",
+            "old_policy": old_policy,
+            "new_policy": ilm_policy_name,
+        }
 
 
 def create_thawed_ilm_policy(client: Elasticsearch, repo_name: str) -> str:
