@@ -918,6 +918,9 @@ def update_index_template_ilm_policy(
             "name"
         ] = ilm_policy_name
 
+        # Remove system-managed fields that ES rejects on PUT
+        template_data.pop("created_date", None)
+
         # Put the updated template
         try:
             client.indices.put_index_template(
@@ -1739,6 +1742,9 @@ def update_template_ilm_policy(
                 template["template"]["settings"]["index"]["lifecycle"][
                     "name"
                 ] = new_policy_name
+
+                # Remove system-managed fields that ES rejects on PUT
+                template.pop("created_date", None)
 
                 client.indices.put_index_template(name=template_name, body=template)
                 loggit.info(
