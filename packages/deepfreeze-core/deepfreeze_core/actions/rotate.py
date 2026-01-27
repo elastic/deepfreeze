@@ -22,10 +22,9 @@ from deepfreeze_core.utilities import (
     get_composable_templates,
     get_ilm_policy,
     get_index_templates,
-    get_matching_repos,
     get_matching_repo_names,
+    get_matching_repos,
     get_next_suffix,
-    get_repository,
     get_settings,
     is_policy_safe_to_delete,
     push_to_glacier,
@@ -361,14 +360,6 @@ class Rotate:
 
             if not dry_run:
                 try:
-                    # Update date range BEFORE archiving (snapshot metadata won't be
-                    # readable after blobs are moved to archive tier)
-                    repo_obj = get_repository(self.client, repo.name)
-                    if update_repository_date_range(self.client, repo_obj):
-                        self.loggit.info(
-                            "Updated date range for %s before archiving", repo.name
-                        )
-
                     # Push all objects to archive tier
                     push_to_glacier(self.s3, repo)
 
@@ -398,6 +389,34 @@ class Rotate:
             )
 
         return archived_repos
+
+    def _update_date_ranges(self) -> list:
+        """
+        Update date ranges for all mounted repositories.
+
+        Queries each mounted repo's indices to capture min/max @timestamp values.
+        This must run while repos still have searchable snapshot indices, i.e.
+        before the archive step unmounts them.
+
+        :return: List of repo names whose date ranges were updated
+        """
+        updated_repos = []
+
+        repos = get_matching_repos(
+            self.client, self.settings.repo_name_prefix, mounted=True
+        )
+
+        for repo in repos:
+            try:
+                if update_repository_date_range(self.client, repo):
+                    self.loggit.info("Updated date range for %s", repo.name)
+                    updated_repos.append(repo.name)
+            except Exception as e:
+                self.loggit.error(
+                    "Failed to update date range for %s: %s", repo.name, e
+                )
+
+        return updated_repos
 
     def _cleanup_orphaned_policies(self, dry_run: bool = False) -> list:
         """
@@ -617,6 +636,26 @@ class Rotate:
                         )
                     )
 
+            # Update date ranges for all mounted repos (before archiving
+            # removes searchable snapshot indices)
+            updated_date_ranges = self._update_date_ranges()
+            if updated_date_ranges:
+                if self.porcelain:
+                    for repo in updated_date_ranges:
+                        print(f"UPDATED\tdate_range\t{repo}")
+                else:
+                    range_list = "\n".join(
+                        [f"  - [cyan]{r}[/cyan]" for r in updated_date_ranges]
+                    )
+                    self.console.print(
+                        Panel(
+                            f"[bold]Updated date ranges for {len(updated_date_ranges)} repositories:[/bold]\n{range_list}",
+                            title="[bold green]Date Ranges Updated[/bold green]",
+                            border_style="green",
+                            expand=False,
+                        )
+                    )
+
             # Archive old repositories
             archived = self._archive_old_repos()
             if archived:
@@ -662,6 +701,7 @@ class Rotate:
                         f"[bold green]Rotation completed successfully![/bold green]\n\n"
                         f"New repository: [cyan]{new_repo}[/cyan]\n"
                         f"Policies updated: {len(updated_policies)}\n"
+                        f"Date ranges updated: {len(updated_date_ranges)}\n"
                         f"Repositories archived: {len(archived)}\n"
                         f"Orphaned policies deleted: {len(deleted_policies)}\n\n"
                         f"[bold]Next steps:[/bold]\n"

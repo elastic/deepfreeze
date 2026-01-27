@@ -282,6 +282,53 @@ class TestRotateAction:
                     assert new_repo == "deepfreeze-000006"
 
 
+    def test_update_date_ranges_calls_for_each_mounted_repo(self):
+        """Test _update_date_ranges calls update_repository_date_range for each mounted repo"""
+        mock_client = MagicMock()
+        mock_client.indices.exists.return_value = True
+
+        mock_settings = Settings(
+            repo_name_prefix="deepfreeze",
+            bucket_name_prefix="deepfreeze",
+            base_path_prefix="snapshots",
+            style="oneup",
+            last_suffix="000001",
+        )
+
+        repo1 = Repository(name="deepfreeze-000001", bucket="bucket1", is_mounted=True)
+        repo2 = Repository(name="deepfreeze-000002", bucket="bucket2", is_mounted=True)
+
+        with patch("deepfreeze_core.actions.rotate.get_settings") as mock_get:
+            mock_get.return_value = mock_settings
+
+            with patch(
+                "deepfreeze_core.actions.rotate.s3_client_factory"
+            ) as mock_factory:
+                mock_s3 = MagicMock()
+                mock_factory.return_value = mock_s3
+
+                with patch(
+                    "deepfreeze_core.actions.rotate.get_matching_repos"
+                ) as mock_repos:
+                    mock_repos.return_value = [repo1, repo2]
+
+                    with patch(
+                        "deepfreeze_core.actions.rotate.update_repository_date_range"
+                    ) as mock_update:
+                        # First repo updated, second repo unchanged
+                        mock_update.side_effect = [True, False]
+
+                        rotate = Rotate(client=mock_client, porcelain=True)
+                        rotate._load_settings()
+
+                        updated = rotate._update_date_ranges()
+
+                        assert mock_update.call_count == 2
+                        mock_update.assert_any_call(mock_client, repo1)
+                        mock_update.assert_any_call(mock_client, repo2)
+                        assert updated == ["deepfreeze-000001"]
+
+
 class TestThawAction:
     """Tests for the Thaw action class"""
 
