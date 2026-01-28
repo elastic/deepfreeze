@@ -199,6 +199,10 @@ def get_timestamp_range(client: Elasticsearch, indices: list) -> tuple:
     filtered = [index for index in indices if client.indices.exists(index=index)]
     logging.debug("after removing non-existent indices: %s", len(filtered))
 
+    if not filtered:
+        logging.debug("No existing indices remain after filtering")
+        return None, None
+
     try:
         response = client.search(
             index=",".join(filtered), body=query, allow_partial_search_results=True
@@ -208,12 +212,18 @@ def get_timestamp_range(client: Elasticsearch, indices: list) -> tuple:
         logging.error("Error retrieving timestamp range: %s", e)
         return None, None
 
-    earliest = response["aggregations"]["earliest"]["value_as_string"]
-    latest = response["aggregations"]["latest"]["value_as_string"]
+    earliest_val = response["aggregations"]["earliest"].get("value_as_string")
+    latest_val = response["aggregations"]["latest"].get("value_as_string")
 
-    logging.debug("Earliest: %s, Latest: %s", earliest, latest)
+    if not earliest_val or not latest_val:
+        logging.debug(
+            "Aggregation returned null timestamps (indices may have no @timestamp data)"
+        )
+        return None, None
 
-    return datetime.fromisoformat(earliest), datetime.fromisoformat(latest)
+    logging.debug("Earliest: %s, Latest: %s", earliest_val, latest_val)
+
+    return datetime.fromisoformat(earliest_val), datetime.fromisoformat(latest_val)
 
 
 def ensure_settings_index(
