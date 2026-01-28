@@ -197,6 +197,7 @@ class TestCLICommandRegistration:
         assert "--limit" in result.output
         assert "--repos" in result.output
         assert "--porcelain" in result.output
+        assert "--time" in result.output
 
     def test_rotate_command_options(self, runner):
         """Test that rotate command has expected options."""

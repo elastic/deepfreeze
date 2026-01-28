@@ -52,6 +52,7 @@ class Status:
         show_buckets: bool = False,
         show_ilm: bool = False,
         show_config: bool = False,
+        show_time: bool = False,
         limit: int = None,
         **kwargs,  # Accept extra kwargs for compatibility with curator CLI
     ) -> None:
@@ -64,6 +65,7 @@ class Status:
         self.client = client
         self.porcelain = porcelain
         self.limit = limit
+        self.show_time = show_time
 
         # Section flags - if none specified, show all
         any_section_specified = (
@@ -80,6 +82,17 @@ class Status:
         self.s3 = None
 
         self.loggit.debug("Deepfreeze Status initialized")
+
+    def _format_date_value(self, value: str) -> str:
+        if self.show_time:
+            return value.replace("T", " ")
+        return value[:10]
+
+    def _format_created_value(self, value: str) -> str:
+        display = value.replace("T", " ")
+        if self.show_time:
+            return display
+        return display[:16]
 
     def _load_settings(self) -> None:
         """Load settings from the status index."""
@@ -323,7 +336,10 @@ class Status:
                 for repo in sorted(display_repos, key=lambda x: x["name"]):
                     date_range = ""
                     if repo.get("start") and repo.get("end"):
-                        date_range = f"{repo['start'][:10]} - {repo['end'][:10]}"
+                        date_range = (
+                            f"{self._format_date_value(repo['start'])} - "
+                            f"{self._format_date_value(repo['end'])}"
+                        )
 
                     mounted_str = (
                         "[green]Yes[/green]"
@@ -388,7 +404,8 @@ class Status:
                     date_range = ""
                     if req.get("start_date") and req.get("end_date"):
                         date_range = (
-                            f"{req['start_date'][:10]} - {req['end_date'][:10]}"
+                            f"{self._format_date_value(req['start_date'])} - "
+                            f"{self._format_date_value(req['end_date'])}"
                         )
 
                     repos_str = ", ".join(req.get("repos", [])[:3])
@@ -397,7 +414,7 @@ class Status:
 
                     created = req.get("created_at", "N/A")
                     if created and created != "N/A":
-                        created = created[:16].replace("T", " ")
+                        created = self._format_created_value(created)
 
                     table.add_row(
                         req.get("request_id", "N/A"),
