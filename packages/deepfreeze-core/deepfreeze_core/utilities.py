@@ -1130,6 +1130,19 @@ def update_repository_date_range(client: Elasticsearch, repo: Repository) -> boo
             # Find which indices are actually mounted (try multiple naming patterns)
             mounted_indices = []
             for idx in snapshot_indices:
+                # ILM force-merge creates snapshots with fm-clone-xxxx- prefix,
+                # but mounted indices use the original name. Strip that prefix.
+                # Pattern: fm-clone-<random>-<original-name> -> <original-name>
+                if idx.startswith("fm-clone-"):
+                    # Find the second hyphen (after random chars) and strip prefix
+                    parts = idx.split("-", 3)  # ['fm', 'clone', 'random', 'rest']
+                    if len(parts) >= 4:
+                        original_idx = parts[3]  # Everything after fm-clone-xxxx-
+                        loggit.debug(
+                            "Stripped fm-clone prefix: %s -> %s", idx, original_idx
+                        )
+                        idx = original_idx
+
                 # Try original name
                 if client.indices.exists(index=idx):
                     mounted_indices.append(idx)
