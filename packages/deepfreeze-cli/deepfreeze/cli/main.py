@@ -478,6 +478,14 @@ def rotate(
     default=False,
     help="Output plain text without formatting (suitable for scripting)",
 )
+@click.option(
+    "-rt",
+    "--time",
+    "show_time",
+    is_flag=True,
+    default=False,
+    help="Show full date+time in tables",
+)
 @click.pass_context
 def status(
     ctx,
@@ -488,6 +496,7 @@ def status(
     ilm,
     show_config_flag,
     porcelain,
+    show_time,
 ):
     """
     Show the status of deepfreeze
@@ -509,6 +518,7 @@ def status(
         show_buckets=buckets,
         show_ilm=ilm,
         show_config=show_config_flag,
+        show_time=show_time,
     )
 
     try:

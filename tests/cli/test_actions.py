@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+from rich.console import Console
 from deepfreeze import (
     Cleanup,
     MissingIndexError,
@@ -725,6 +726,93 @@ class TestSetupActionAdditional:
 
 class TestStatusActionAdditional:
     """Additional tests for Status action (Task Group 18)"""
+
+    def test_status_rich_output_date_only(self):
+        """Test Status rich output truncates dates when show_time is False"""
+        status = Status(
+            client=MagicMock(),
+            porcelain=False,
+            show_repos=True,
+            show_thawed=True,
+            show_buckets=False,
+            show_ilm=False,
+            show_config=False,
+        )
+        status.console = Console(stderr=True, record=True, width=200)
+
+        repos = [
+            {
+                "name": "repo-1",
+                "bucket": "bucket-1",
+                "base_path": "path",
+                "start": "2024-01-01T00:00:00+00:00",
+                "end": "2024-01-31T23:59:59+00:00",
+                "is_mounted": True,
+                "thaw_state": "frozen",
+                "storage_tier": "Archive",
+            }
+        ]
+        thaw_requests = [
+            {
+                "request_id": "req-1",
+                "status": "completed",
+                "start_date": "2024-01-01T00:00:00+00:00",
+                "end_date": "2024-01-31T23:59:59+00:00",
+                "repos": ["repo-1"],
+                "created_at": "2024-02-01T12:34:56+00:00",
+            }
+        ]
+
+        status._display_rich(repos, thaw_requests, buckets=[], ilm_policies=[])
+
+        output = status.console.export_text()
+        assert "2024-01-01 - 2024-01-31" in output
+        assert "2024-02-01 12:34" in output
+        assert "2024-01-01 00:00:00+00:00" not in output
+        assert "2024-02-01 12:34:56+00:00" not in output
+
+    def test_status_rich_output_with_time(self):
+        """Test Status rich output shows full datetime when show_time is True"""
+        status = Status(
+            client=MagicMock(),
+            porcelain=False,
+            show_repos=True,
+            show_thawed=True,
+            show_buckets=False,
+            show_ilm=False,
+            show_config=False,
+            show_time=True,
+        )
+        status.console = Console(stderr=True, record=True, width=200)
+
+        repos = [
+            {
+                "name": "repo-1",
+                "bucket": "bucket-1",
+                "base_path": "path",
+                "start": "2024-01-01T00:00:00+00:00",
+                "end": "2024-01-31T23:59:59+00:00",
+                "is_mounted": True,
+                "thaw_state": "frozen",
+                "storage_tier": "Archive",
+            }
+        ]
+        thaw_requests = [
+            {
+                "request_id": "req-1",
+                "status": "completed",
+                "start_date": "2024-01-01T00:00:00+00:00",
+                "end_date": "2024-01-31T23:59:59+00:00",
+                "repos": ["repo-1"],
+                "created_at": "2024-02-01T12:34:56+00:00",
+            }
+        ]
+
+        status._display_rich(repos, thaw_requests, buckets=[], ilm_policies=[])
+
+        output = status.console.export_text()
+        assert "2024-01-01 00:00:00+00:00 - 2024-01-31 23:59:59+00:00" in output
+        assert "2024-02-01 12:34:56+00:00" in output
 
     def test_status_porcelain_mode(self):
         """Test Status with porcelain=True produces machine-readable output"""
