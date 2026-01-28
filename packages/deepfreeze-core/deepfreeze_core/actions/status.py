@@ -247,7 +247,6 @@ class Status:
                             policies.append(
                                 {
                                     "name": policy_name,
-                                    "phase": phase_name,
                                     "repository": snapshot_repo,
                                     "indices_count": len(in_use_by.get("indices", [])),
                                     "data_streams_count": len(
@@ -440,7 +439,6 @@ class Status:
             if ilm_policies:
                 table = Table(title="ILM Policies (referencing deepfreeze)")
                 table.add_column("Policy Name", style="cyan")
-                table.add_column("Phase", style="yellow")
                 table.add_column("Repository", style="green")
                 table.add_column("Indices", style="white")
                 table.add_column("Data Streams", style="white")
@@ -449,7 +447,6 @@ class Status:
                 for policy in sorted(ilm_policies, key=lambda x: x["name"]):
                     table.add_row(
                         policy["name"],
-                        policy["phase"],
                         policy["repository"],
                         str(policy["indices_count"]),
                         str(policy["data_streams_count"]),
