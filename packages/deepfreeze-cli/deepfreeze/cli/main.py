@@ -13,11 +13,7 @@ import click
 from deepfreeze_core import ActionError, DeepfreezeException, create_es_client
 
 from deepfreeze import __version__
-from deepfreeze.config import (
-    configure_logging,
-    get_elasticsearch_config,
-    load_config,
-)
+from deepfreeze.config import configure_logging, get_elasticsearch_config, load_config
 
 today = datetime.today()
 
@@ -653,14 +649,14 @@ def refreeze(
     "--start-date",
     type=str,
     default=None,
-    help="Start of date range in ISO 8601 format (e.g., 2025-01-15T00:00:00Z)",
+    help="Start of date range. Format: ISO 8601 date-time (e.g. 2025-01-15T00:00:00Z)",
 )
 @click.option(
     "-e",
     "--end-date",
     type=str,
     default=None,
-    help="End of date range in ISO 8601 format (e.g., 2025-01-31T23:59:59Z)",
+    help="End of date range. Format: ISO 8601 date-time (e.g. 2025-01-31T23:59:59Z)",
 )
 @click.option(
     "--sync/--async",
@@ -734,6 +730,9 @@ def thaw(
     """
     Thaw repositories from Glacier storage for a specified date range,
     or check status of existing thaw requests.
+
+    Date range (--start-date / --end-date) must be ISO 8601 date-time,
+    e.g. 2025-01-01T00:00:00Z or 2025-01-15T23:59:59+00:00.
 
     \b
     Four modes of operation:

@@ -235,7 +235,7 @@ deepfreeze --config config.yaml --dry-run rotate
 Retrieve data from Glacier storage:
 
 ```bash
-# Thaw repositories for a date range
+# Thaw repositories for a date range (dates in ISO 8601 date-time, e.g. YYYY-MM-DDTHH:MM:SSZ)
 deepfreeze --config config.yaml thaw \
   --start-date 2024-01-01T00:00:00Z \
   --end-date 2024-06-30T23:59:59Z
