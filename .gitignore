@@ -98,3 +98,4 @@ Thumbs.db
 .env.local
 deepfreeze-blog-post.md
 examples/config.yml
+deepfreeze.code-workspace
