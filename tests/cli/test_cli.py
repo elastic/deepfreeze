@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
-
 from deepfreeze.cli.main import cli
 
 
@@ -114,6 +113,22 @@ class TestCLIOptionParsing:
             result = runner.invoke(cli, ["-c", temp_config_file, "thaw"])
             assert result.exit_code != 0
             assert "Must specify one of" in result.output
+
+    def test_thaw_check_status_without_argument_accepted(
+        self, runner, temp_config_file
+    ):
+        """Test that thaw --check-status (or -k) without argument is allowed (check all)."""
+        with patch("deepfreeze.cli.main.get_client_from_context"):
+            with patch("deepfreeze_core.actions.Thaw") as mock_thaw_class:
+                result = runner.invoke(
+                    cli, ["-c", temp_config_file, "thaw", "--check-status"]
+                )
+                # Should not fail with "requires an argument" (Click would use exit 2)
+                assert "requires an argument" not in result.output, result.output
+                # Should have invoked Thaw with request_id=None (check all)
+                mock_thaw_class.assert_called_once()
+                call_kwargs = mock_thaw_class.call_args[1]
+                assert call_kwargs.get("request_id") is None
 
     def test_thaw_date_range_requires_both_dates(self, runner, temp_config_file):
         """Test that thaw with date range requires both start and end dates."""

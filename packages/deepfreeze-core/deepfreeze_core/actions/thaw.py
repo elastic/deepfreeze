@@ -247,13 +247,39 @@ class Thaw:
                 for repo in repo_objs:
                     mount_repo(self.client, repo)
 
-                # Mount indices
-                start_date = decode_date(request.get("start_date"))
-                end_date = decode_date(request.get("end_date"))
+                # Mount indices: use request date range, or infer from repos if missing
+                start_date = request.get("start_date")
+                end_date = request.get("end_date")
+                if start_date is not None and end_date is not None:
+                    start_date = decode_date(start_date)
+                    end_date = decode_date(end_date)
+                else:
+                    # Legacy or incomplete request: infer range from repos so we mount
+                    # all indices in the thawed repos (no date-based unmounting).
+                    if repo_objs:
+                        starts = [r.start for r in repo_objs if r.start is not None]
+                        ends = [r.end for r in repo_objs if r.end is not None]
+                        if starts and ends:
+                            start_date = min(starts)
+                            end_date = max(ends)
+                            self.loggit.info(
+                                "Request missing start_date/end_date; using repo range %s to %s",
+                                start_date.isoformat(),
+                                end_date.isoformat(),
+                            )
+                        else:
+                            self.loggit.warning(
+                                "Request has no start_date/end_date and repos have no date range; "
+                                "skipping index mount (repositories are already mounted)"
+                            )
+                            start_date = end_date = None
+                    else:
+                        start_date = end_date = None
 
-                find_and_mount_indices_in_date_range(
-                    self.client, repo_objs, start_date, end_date
-                )
+                if start_date is not None and end_date is not None:
+                    find_and_mount_indices_in_date_range(
+                        self.client, repo_objs, start_date, end_date
+                    )
 
                 # Update request status
                 update_thaw_request(

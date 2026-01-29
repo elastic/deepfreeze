@@ -686,12 +686,11 @@ def refreeze(
     "-k",
     "--check-status",
     "check_status",
-    type=str,
-    is_flag=False,
-    flag_value="",  # Empty string when used without a value
-    default=None,
-    help="Check status of thaw request(s). Provide ID for specific request, or no value to check all",
+    is_flag=True,
+    default=False,
+    help="Check status of thaw request(s). Use alone to check all, or with REQUEST_ID to check one",
 )
+@click.argument("request_id", required=False)
 @click.option(
     "-l",
     "--list",
@@ -718,6 +717,7 @@ def refreeze(
 @click.pass_context
 def thaw(
     ctx,
+    request_id,
     start_date,
     end_date,
     sync,
@@ -738,8 +738,8 @@ def thaw(
     \b
     Four modes of operation:
     1. Create new thaw: Requires --start-date and --end-date
-    2. Check specific request: Use --check-status <thaw-id> (mounts if ready)
-    3. Check all requests: Use --check-status (without value, mounts if ready)
+    2. Check specific request: Use --check-status REQUEST_ID (mounts if ready)
+    3. Check all requests: Use --check-status with no argument (mounts if ready)
     4. List requests: Use --list (shows summary table)
 
     \b
@@ -758,7 +758,7 @@ def thaw(
       deepfreeze thaw --check-status <thaw-id>
       deepfreeze thaw -k <thaw-id>
 
-      # Check status of ALL thaw requests and mount if ready
+      # Check status of ALL thaw requests and mount if ready (no argument)
 
       deepfreeze thaw --check-status
       deepfreeze thaw -k
@@ -778,9 +778,9 @@ def thaw(
     from deepfreeze_core.actions import Thaw
 
     # Validate mutual exclusivity
-    # Note: check_status can be None (not provided), "" (flag without value), or a string ID
+    # check_status is a flag; request_id is the optional argument when -k is used
     modes_active = sum(
-        [bool(start_date or end_date), check_status is not None, bool(list_requests)]
+        [bool(start_date or end_date), check_status, bool(list_requests)]
     )
 
     if modes_active == 0:
@@ -805,6 +805,9 @@ def thaw(
         )
         ctx.exit(1)
 
+    # Pass request_id to Thaw only when --check-status (-k) is used
+    request_id_for_action = request_id if check_status else None
+
     # Parse dates if provided
     parsed_start_date = None
     parsed_end_date = None
@@ -819,16 +822,11 @@ def thaw(
 
     client = get_client_from_context(ctx)
 
-    # Determine request_id from check_status
-    request_id = None
-    if check_status is not None and check_status != "":
-        request_id = check_status
-
     action = Thaw(
         client=client,
         start_date=parsed_start_date,
         end_date=parsed_end_date,
-        request_id=request_id,
+        request_id=request_id_for_action,
         list_requests=list_requests,
         restore_days=duration,
         retrieval_tier=retrieval_tier,
