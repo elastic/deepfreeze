@@ -440,7 +440,15 @@ def rotate(
 )
 @click.option(
     "-t",
+    "--time",
+    "show_time",
+    is_flag=True,
+    default=False,
+    help="Include full date+time in repository (and thaw request) tables",
+)
+@click.option(
     "--thawed",
+    "thawed",
     is_flag=True,
     default=False,
     help="Show thawed repositories section only",
@@ -474,31 +482,24 @@ def rotate(
     default=False,
     help="Output plain text without formatting (suitable for scripting)",
 )
-@click.option(
-    "-rt",
-    "--time",
-    "show_time",
-    is_flag=True,
-    default=False,
-    help="Show full date+time in tables",
-)
 @click.pass_context
 def status(
     ctx,
     limit,
     repos,
+    show_time,
     thawed,
     buckets,
     ilm,
     show_config_flag,
     porcelain,
-    show_time,
 ):
     """
     Show the status of deepfreeze
 
-    By default, all sections are displayed. Use section flags (-r, -t, -b, -i, -c) to show specific sections only.
-    Multiple section flags can be combined.
+    By default, all sections are displayed. Use section flags (-r, -b, -i, -c, --thawed)
+    to show specific sections only. Use -t/--time to include full date+time in the
+    repository and thaw request tables.
     """
     from deepfreeze_core.actions import Status
 

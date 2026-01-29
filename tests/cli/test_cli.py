@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
+
 from deepfreeze.cli.main import cli
 
 
@@ -198,6 +199,7 @@ class TestCLICommandRegistration:
         assert "--repos" in result.output
         assert "--porcelain" in result.output
         assert "--time" in result.output
+        assert "--thawed" in result.output
 
     def test_rotate_command_options(self, runner):
         """Test that rotate command has expected options."""
