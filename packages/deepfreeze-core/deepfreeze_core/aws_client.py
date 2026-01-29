@@ -7,8 +7,8 @@ AWS S3 client implementation for the deepfreeze package.
 import logging
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
-
 from deepfreeze_core.exceptions import ActionError
 from deepfreeze_core.s3client import S3Client
 
@@ -68,7 +68,11 @@ Then restart Elasticsearch to apply the keystore changes."""
         try:
             # Build session/client kwargs based on provided credentials
             session_kwargs = {}
-            client_kwargs = {}
+            # Use a larger connection pool so concurrent restore-status checks
+            # (ThreadPoolExecutor in check_restore_status, up to 15 workers per repo)
+            # don't hit "pool full" warnings. 100 covers many repos if we ever check
+            # them in parallel; current code checks repos sequentially (peak 15).
+            client_kwargs = {"config": Config(max_pool_connections=100)}
 
             if profile:
                 session_kwargs["profile_name"] = profile
@@ -83,7 +87,7 @@ Then restart Elasticsearch to apply the keystore changes."""
                 session_kwargs["aws_secret_access_key"] = secret_access_key
                 self.loggit.debug("Using explicit AWS credentials (source: config)")
 
-            # Create session and client
+            # Create session and client (config with max_pool_connections in client_kwargs)
             if session_kwargs:
                 session = boto3.Session(**session_kwargs)
                 self.client = session.client("s3", **client_kwargs)
