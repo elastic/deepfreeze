@@ -521,7 +521,7 @@ class Thaw:
                     f"Restore Duration: {self.restore_days} days\n"
                     f"Expires At: {expires_at.isoformat()}\n\n"
                     f"[bold]Next steps:[/bold]\n"
-                    f"  - Check status: [yellow]deepfreeze thaw --request-id {request_id}[/yellow]\n"
+                    f"  - Check status: [yellow]deepfreeze thaw --check-status {request_id}[/yellow]\n"
                     f"  - Depending on retrieval tier, data should be available in:\n"
                     f"    - Expedited: 1-5 minutes\n"
                     f"    - Standard: 3-5 hours\n"
@@ -626,7 +626,7 @@ class Thaw:
                     print("ERROR\tmissing_parameters\tProvide date range or request ID")
                 else:
                     self.console.print(
-                        "[red]Error: Provide either --start-date/--end-date or --request-id[/red]"
+                        "[red]Error: Provide either --start-date/--end-date or --check-status[/red]"
                     )
 
         except (MissingIndexError, MissingSettingsError) as e:
@@ -675,7 +675,7 @@ class Thaw:
                             "[bold]Missing required parameters[/bold]\n\n"
                             "Provide either:\n"
                             "  - [yellow]--start-date[/yellow] and [yellow]--end-date[/yellow] to initiate a new thaw\n"
-                            "  - [yellow]--request-id[/yellow] to check status of an existing request\n"
+                            "  - [yellow]--check-status <id>[/yellow] to check status of an existing request\n"
                             "  - [yellow]--list[/yellow] to list all thaw requests",
                             title="[bold red]Invalid Parameters[/bold red]",
                             border_style="red",
