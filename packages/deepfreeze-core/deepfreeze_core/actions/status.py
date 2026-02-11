@@ -440,9 +440,7 @@ class Status:
             if not gather_completed.wait(5.0):  # Wait 5 seconds
                 if not status_message_shown.is_set() and not self.porcelain:
                     status_message_shown.set()
-                    # Create a fresh Console instance for thread-safe output
-                    thread_console = Console(stderr=True, force_terminal=True)
-                    thread_console.print("[dim]Gathering status...[/dim]")
+                    self.console.print("[dim]Gathering status...[/dim]")
         
         # Start the delayed message timer
         timer_thread = threading.Thread(target=show_status_message, daemon=True)
@@ -458,7 +456,7 @@ class Status:
             # Clear the status message if it was shown
             if status_message_shown.is_set() and not self.porcelain:
                 # Move cursor up one line and clear it to remove the "Gathering status..." message
-                self.console.print("\033[1A\033[2K", end="")
+                self.console.print("\033[1A\033[K", end="")
 
             # Display output
             if self.porcelain:
@@ -480,7 +478,7 @@ class Status:
             else:
                 # Clear status message if shown
                 if status_message_shown.is_set():
-                    self.console.print("\033[1A\033[2K", end="")
+                    self.console.print("\033[1A\033[K", end="")
                 self.console.print(
                     Panel(
                         f"[bold]Status index [cyan]{STATUS_INDEX}[/cyan] does not exist.[/bold]\n\n"
@@ -507,7 +505,7 @@ class Status:
             else:
                 # Clear status message if shown
                 if status_message_shown.is_set():
-                    self.console.print("\033[1A\033[2K", end="")
+                    self.console.print("\033[1A\033[K", end="")
                 self.console.print(
                     Panel(
                         "[bold]Settings document not found in status index.[/bold]\n\n"
@@ -529,7 +527,7 @@ class Status:
             else:
                 # Clear status message if shown
                 if status_message_shown.is_set():
-                    self.console.print("\033[1A\033[2K", end="")
+                    self.console.print("\033[1A\033[K", end="")
                 self.console.print(
                     Panel(
                         f"[bold]An unexpected error occurred[/bold]\n\n"
