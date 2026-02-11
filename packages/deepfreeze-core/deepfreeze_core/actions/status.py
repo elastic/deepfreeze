@@ -4,8 +4,6 @@
 
 import json
 import logging
-import threading
-import time
 
 from elasticsearch8 import Elasticsearch
 from rich.console import Console
@@ -403,60 +401,24 @@ class Status:
         self.loggit.info("DRY-RUN MODE.  No changes will be made.")
         self.do_action()
 
-    def _gather_status_info(self):
-        """
-        Gather all status information. This method contains the potentially slow operations.
-        
-        :return: tuple of (repos, thaw_requests, buckets, ilm_policies)
-        :rtype: tuple
-        """
-        # Load settings
-        self._load_settings()
-
-        # Gather all status information
-        repos = self._get_repositories_status()
-        thaw_requests = self._get_thaw_requests()
-        buckets = self._get_buckets_info()
-        ilm_policies = self._get_ilm_policies()
-        
-        return repos, thaw_requests, buckets, ilm_policies
-
     def do_action(self) -> None:
         """
         Display status information about deepfreeze.
-        Shows a "Gathering status..." message if the operation takes longer than 5 seconds.
 
         :return: None
         :rtype: None
         """
         self.loggit.debug("Starting Status action")
 
-        # Setup for delayed status message
-        status_message_shown = threading.Event()
-        gather_completed = threading.Event()
-        
-        def show_status_message():
-            """Show gathering message if operation takes too long."""
-            if not gather_completed.wait(5.0):  # Wait 5 seconds
-                if not status_message_shown.is_set() and not self.porcelain:
-                    status_message_shown.set()
-                    self.console.print("[dim]Gathering status...[/dim]")
-        
-        # Start the delayed message timer
-        timer_thread = threading.Thread(target=show_status_message, daemon=True)
-        timer_thread.start()
-
         try:
-            # Gather all status information (potentially slow operations)
-            repos, thaw_requests, buckets, ilm_policies = self._gather_status_info()
-            
-            # Signal that gathering is complete
-            gather_completed.set()
-            
-            # Clear the status message if it was shown
-            if status_message_shown.is_set() and not self.porcelain:
-                # Move cursor up one line and clear it to remove the "Gathering status..." message
-                self.console.print("\033[1A\033[K", end="")
+            # Load settings
+            self._load_settings()
+
+            # Gather all status information
+            repos = self._get_repositories_status()
+            thaw_requests = self._get_thaw_requests()
+            buckets = self._get_buckets_info()
+            ilm_policies = self._get_ilm_policies()
 
             # Display output
             if self.porcelain:
@@ -465,7 +427,6 @@ class Status:
                 self._display_rich(repos, thaw_requests, buckets, ilm_policies)
 
         except MissingIndexError:
-            gather_completed.set()  # Make sure to signal completion even on error
             if self.porcelain:
                 print(
                     json.dumps(
@@ -476,9 +437,6 @@ class Status:
                     )
                 )
             else:
-                # Clear status message if shown
-                if status_message_shown.is_set():
-                    self.console.print("\033[1A\033[K", end="")
                 self.console.print(
                     Panel(
                         f"[bold]Status index [cyan]{STATUS_INDEX}[/cyan] does not exist.[/bold]\n\n"
@@ -492,7 +450,6 @@ class Status:
             raise
 
         except MissingSettingsError:
-            gather_completed.set()  # Make sure to signal completion even on error
             if self.porcelain:
                 print(
                     json.dumps(
@@ -503,9 +460,6 @@ class Status:
                     )
                 )
             else:
-                # Clear status message if shown
-                if status_message_shown.is_set():
-                    self.console.print("\033[1A\033[K", end="")
                 self.console.print(
                     Panel(
                         "[bold]Settings document not found in status index.[/bold]\n\n"
@@ -521,13 +475,9 @@ class Status:
             raise
 
         except Exception as e:
-            gather_completed.set()  # Make sure to signal completion even on error
             if self.porcelain:
                 print(json.dumps({"error": "unexpected", "message": str(e)}))
             else:
-                # Clear status message if shown
-                if status_message_shown.is_set():
-                    self.console.print("\033[1A\033[K", end="")
                 self.console.print(
                     Panel(
                         f"[bold]An unexpected error occurred[/bold]\n\n"
