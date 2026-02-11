@@ -76,6 +76,7 @@ class Thaw:
         end_date: datetime = None,
         request_id: str = None,
         check_status: str = None,  # Alias for request_id (curator CLI uses this name)
+        check_all: bool = False,  # Check all open requests (--check-status without argument)
         list_requests: bool = False,
         restore_days: int = 7,
         duration: int = None,  # Alias for restore_days (curator CLI uses this name)
@@ -96,6 +97,7 @@ class Thaw:
         self.end_date = end_date
         # Accept either request_id or check_status (curator CLI uses check_status)
         self.request_id = request_id or check_status
+        self.check_all = check_all
         self.list_requests = list_requests
         # Accept either restore_days or duration (curator CLI uses duration)
         self.restore_days = duration if duration is not None else restore_days
@@ -185,6 +187,39 @@ class Thaw:
             )
 
         self.console.print(table)
+
+    def _check_all_requests(self) -> None:
+        """Check status of all open thaw requests and mount if ready."""
+        requests = list_thaw_requests(self.client)
+
+        # Filter to only in_progress requests
+        open_requests = [
+            r for r in requests if r.get("status") == THAW_STATUS_IN_PROGRESS
+        ]
+
+        if not open_requests:
+            if self.porcelain:
+                print("INFO\tno_open_requests\tNo open thaw requests found")
+            else:
+                self.console.print("[dim]No open thaw requests to check[/dim]")
+            return
+
+        if not self.porcelain:
+            self.console.print(
+                f"[bold]Checking {len(open_requests)} open thaw request(s)...[/bold]\n"
+            )
+
+        for req in open_requests:
+            request_id = req.get("request_id", req.get("id"))
+            if not request_id:
+                continue
+
+            # Check and potentially mount this request
+            updated_request = self._check_request_status(request_id)
+            if updated_request:
+                self._display_request_status(updated_request)
+                if not self.porcelain:
+                    self.console.print()  # Blank line between requests
 
     def _check_request_status(self, request_id: str) -> dict:
         """
@@ -615,6 +650,8 @@ class Thaw:
 
             if self.list_requests:
                 self._list_all_requests()
+            elif self.check_all:
+                self._check_all_requests()
             elif self.request_id:
                 request = self._check_request_status(self.request_id)
                 if request:
@@ -650,6 +687,8 @@ class Thaw:
 
             if self.list_requests:
                 self._list_all_requests()
+            elif self.check_all:
+                self._check_all_requests()
             elif self.request_id:
                 request = self._check_request_status(self.request_id)
                 if request:

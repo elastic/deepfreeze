@@ -805,8 +805,10 @@ def thaw(
         )
         ctx.exit(1)
 
-    # Pass request_id to Thaw only when --check-status (-k) is used
+    # Pass request_id to Thaw only when --check-status (-k) is used with an ID
+    # check_all is True when --check-status is used without an ID
     request_id_for_action = request_id if check_status else None
+    check_all = check_status and not request_id
 
     # Parse dates if provided
     parsed_start_date = None
@@ -827,6 +829,7 @@ def thaw(
         start_date=parsed_start_date,
         end_date=parsed_end_date,
         request_id=request_id_for_action,
+        check_all=check_all,
         list_requests=list_requests,
         restore_days=duration,
         retrieval_tier=retrieval_tier,
