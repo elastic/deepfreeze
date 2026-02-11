@@ -10,7 +10,9 @@ import time
 
 from elasticsearch8 import Elasticsearch
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
+from rich.spinner import Spinner
 from rich.table import Table
 
 from deepfreeze_core.constants import STATUS_INDEX
@@ -520,35 +522,31 @@ class Status:
         """
         self.loggit.debug("Starting Status action")
 
-        # Setup for delayed status message
-        status_message_shown = threading.Event()
+        # Setup for delayed spinner display
         gather_completed = threading.Event()
+        live_display = None
         
-        def show_status_message():
-            """Show gathering message if operation takes too long."""
+        def show_spinner():
+            """Show spinner if operation takes too long."""
+            nonlocal live_display
             if not gather_completed.wait(5.0):  # Wait 5 seconds
-                if not status_message_shown.is_set() and not self.porcelain:
-                    status_message_shown.set()
-                    # Create a fresh Console instance for thread-safe output
-                    thread_console = Console(stderr=True, force_terminal=True)
-                    thread_console.print("[dim]...still gathering status, please be patient...[/dim]")
+                if not self.porcelain:
+                    spinner = Spinner("dots", text="[dim]...still gathering status, please be patient...[/dim]")
+                    live_display = Live(spinner, console=Console(stderr=True, force_terminal=True), refresh_per_second=10)
+                    live_display.start()
         
-        # Start the delayed message timer
-        timer_thread = threading.Thread(target=show_status_message, daemon=True)
+        # Start the delayed spinner timer
+        timer_thread = threading.Thread(target=show_spinner, daemon=True)
         timer_thread.start()
 
         try:
             # Gather all status information (potentially slow operations)
             repos, thaw_requests, buckets, ilm_policies = self._gather_status_info()
             
-            # Signal that gathering is complete
+            # Signal that gathering is complete and stop spinner if running
             gather_completed.set()
-            
-            # Clear the status message if it was shown
-            if status_message_shown.is_set() and not self.porcelain:
-                # Move cursor up one line and clear it (bypass Rich for raw ANSI codes)
-                sys.stderr.write("\033[1A\033[2K")
-                sys.stderr.flush()
+            if live_display is not None:
+                live_display.stop()
 
             # Display output
             if self.porcelain:
@@ -558,6 +556,8 @@ class Status:
 
         except MissingIndexError:
             gather_completed.set()  # Make sure to signal completion even on error
+            if live_display is not None:
+                live_display.stop()
             if self.porcelain:
                 print(
                     json.dumps(
@@ -568,9 +568,6 @@ class Status:
                     )
                 )
             else:
-                # Clear status message if shown
-                if status_message_shown.is_set():
-                    sys.stderr.write("\033[1A\033[2K"); sys.stderr.flush()
                 self.console.print(
                     Panel(
                         f"[bold]Status index [cyan]{STATUS_INDEX}[/cyan] does not exist.[/bold]\n\n"
@@ -585,6 +582,8 @@ class Status:
 
         except MissingSettingsError:
             gather_completed.set()  # Make sure to signal completion even on error
+            if live_display is not None:
+                live_display.stop()
             if self.porcelain:
                 print(
                     json.dumps(
@@ -595,9 +594,6 @@ class Status:
                     )
                 )
             else:
-                # Clear status message if shown
-                if status_message_shown.is_set():
-                    sys.stderr.write("\033[1A\033[2K"); sys.stderr.flush()
                 self.console.print(
                     Panel(
                         "[bold]Settings document not found in status index.[/bold]\n\n"
@@ -614,12 +610,11 @@ class Status:
 
         except Exception as e:
             gather_completed.set()  # Make sure to signal completion even on error
+            if live_display is not None:
+                live_display.stop()
             if self.porcelain:
                 print(json.dumps({"error": "unexpected", "message": str(e)}))
             else:
-                # Clear status message if shown
-                if status_message_shown.is_set():
-                    sys.stderr.write("\033[1A\033[2K"); sys.stderr.flush()
                 self.console.print(
                     Panel(
                         f"[bold]An unexpected error occurred[/bold]\n\n"
