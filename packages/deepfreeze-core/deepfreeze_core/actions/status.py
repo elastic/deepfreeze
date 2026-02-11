@@ -532,7 +532,7 @@ class Status:
             if not gather_completed.wait(5.0):  # Wait 5 seconds
                 if not self.porcelain:
                     spinner = Spinner("dots", text="[dim]...still gathering status, please be patient...[/dim]")
-                    live_display = Live(spinner, console=Console(stderr=True, force_terminal=True), refresh_per_second=10)
+                    live_display = Live(spinner, console=Console(stderr=True, force_terminal=True), refresh_per_second=10, transient=True)
                     live_display.start()
         
         # Start the delayed spinner timer
