@@ -512,7 +512,7 @@ class Status:
     def do_action(self) -> None:
         """
         Display status information about deepfreeze.
-        Shows a "Gathering status..." message if the operation takes longer than 5 seconds.
+        Shows a status message if the operation takes longer than 5 seconds.
 
         :return: None
         :rtype: None
@@ -530,7 +530,7 @@ class Status:
                     status_message_shown.set()
                     # Create a fresh Console instance for thread-safe output
                     thread_console = Console(stderr=True, force_terminal=True)
-                    thread_console.print("[dim]Gathering status...[/dim]")
+                    thread_console.print("[dim]...still gathering status, please be patient...[/dim]")
         
         # Start the delayed message timer
         timer_thread = threading.Thread(target=show_status_message, daemon=True)
