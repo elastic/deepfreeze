@@ -5,7 +5,7 @@ from textual.widgets import Header, Footer, Static, TabbedContent, TabPane
 from textual.containers import Vertical
 from textual.reactive import reactive
 
-from deepfreeze_service import DeepfreezeService
+from deepfreeze_service import DeepfreezeService, PollingConfig
 
 # Import screens
 from .screens.overview import OverviewScreen
@@ -86,10 +86,10 @@ class DeepfreezeApp(App):
         try:
             self.service = DeepfreezeService(
                 config_path=self.config_path,
-                polling_config={
-                    "enabled": True,
-                    "interval_seconds": self.refresh_interval,
-                },
+                polling_config=PollingConfig(
+                    enabled=True,
+                    interval_seconds=self.refresh_interval,
+                ),
             )
             self.connection_status = "connected"
             self.update_connection_status()
