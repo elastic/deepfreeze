@@ -29,13 +29,6 @@ interface ActionCard {
 
 const actionCards: ActionCard[] = [
   {
-    id: 'rotate',
-    title: 'Rotate',
-    description: 'Rotate indices into snapshot repositories and freeze them according to the configured schedule.',
-    icon: 'sortRight',
-    color: 'primary',
-  },
-  {
     id: 'thaw',
     title: 'Thaw',
     description: 'Create a thaw request to restore frozen indices for a specified date range.',
@@ -50,6 +43,13 @@ const actionCards: ActionCard[] = [
     color: 'accent',
   },
   {
+    id: 'refreeze',
+    title: 'Refreeze',
+    description: 'Refreeze thawed indices, unmount snapshots, and mark thaw requests as complete.',
+    icon: 'snowflake',
+    color: 'danger',
+  },
+  {
     id: 'repair',
     title: 'Fix / Repair',
     description: 'Detect and repair inconsistencies in snapshot registrations and state tracking.',
@@ -57,11 +57,11 @@ const actionCards: ActionCard[] = [
     color: 'success',
   },
   {
-    id: 'refreeze',
-    title: 'Refreeze',
-    description: 'Refreeze thawed indices, unmount snapshots, and mark thaw requests as complete.',
-    icon: 'snowflake',
-    color: 'danger',
+    id: 'rotate',
+    title: 'Rotate',
+    description: 'Rotate indices into snapshot repositories and freeze them according to the configured schedule.',
+    icon: 'sortRight',
+    color: 'primary',
   },
 ];
 
