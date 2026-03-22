@@ -1,356 +1,123 @@
-/* Deepfreeze TUI - Elastic Dark Theme */
+/* Deepfreeze TUI - lazygit-style dark theme */
 
-/* Color palette based on Elastic EUI dark theme */
-$elastic-bg: #1a1c21;
-$elastic-fg: #dfe5ef;
-$elastic-primary: #0b64dd;
-$elastic-success: #008a5e;
-$elastic-warning: #facb3d;
-$elastic-danger: #c61e25;
-$elastic-teal: #008b87;
-$elastic-gray: #7b7b7b;
-$elastic-border: #343842;
-$elastic-hover: #252830;
+/* -- Color tokens -- */
+$df-bg: #1a1c21;
+$df-fg: #dfe5ef;
+$df-border: #343842;
+$df-active: #008a5e;
+$df-dim: #7b7b7b;
+$df-primary: #0b64dd;
+$df-danger: #c61e25;
 
-/* Base styles */
+/* -- Base -- */
 Screen {
-    background: $elastic-bg;
-    color: $elastic-fg;
+    background: $df-bg;
+    color: $df-fg;
+}
+
+/* -- Main layout -- */
+#main {
+    layout: horizontal;
+    height: 1fr;
     width: 100%;
-    height: 100%;
 }
 
-Screen > Vertical {
-    width: 100%;
-    height: 100%;
+#left-col {
+    width: 45;
+    min-width: 35;
+    max-width: 60;
+    layout: vertical;
 }
 
-/* Header */
-Header {
-    background: $elastic-bg;
-    color: $elastic-fg;
-    height: 3;
-    border-bottom: solid $elastic-border;
+#right-col {
+    width: 1fr;
+    layout: vertical;
 }
 
-Header .header-title {
-    text-style: bold;
-    color: $elastic-primary;
-}
-
-/* Footer */
-Footer {
-    background: $elastic-bg;
-    color: $elastic-fg;
-    border-top: solid $elastic-border;
-}
-
-Footer .footer-key {
-    color: $elastic-primary;
-    text-style: bold;
-}
-
-/* Status bar */
-.status-bar {
+/* -- Status bar at top -- */
+#status-bar {
     height: 1;
-    background: $elastic-hover;
-    border-bottom: solid $elastic-border;
-}
-
-.connection-status {
-    padding: 0 2;
-}
-
-/* Screen titles */
-.screen-title {
-    text-style: bold;
-    color: $elastic-primary;
-    padding: 1 0;
-}
-
-.section-title {
-    text-style: bold;
-    color: $elastic-fg;
-    padding: 1 0;
-}
-
-/* Health badges */
-HealthBadge {
+    background: #252830;
+    color: $df-fg;
     padding: 0 1;
-}
-
-/* Stats grid */
-.stats-grid {
-    grid-size: 3;
-    grid-gutter: 1;
-    margin: 1 0;
-}
-
-.stat-title {
-    color: $elastic-gray;
-}
-
-.stat-value {
-    color: $elastic-fg;
-    text-style: bold;
-}
-
-.stat-subtitle {
-    color: $elastic-gray;
-}
-
-/* Filter row */
-.filter-row {
-    height: 3;
-    margin: 1 0;
-}
-
-.state-filters {
-    margin-left: 2;
-}
-
-/* Repository table */
-#repo-table {
-    height: 1fr;
-    border: solid $elastic-border;
-}
-
-#repo-table:focus {
-    border: solid $elastic-primary;
-}
-
-/* Detail panels */
-.detail-panel {
-    border: solid $elastic-border;
-    padding: 1;
-    height: 10;
-    margin-top: 1;
-}
-
-.detail-placeholder {
-    color: $elastic-gray;
-    content-align: center middle;
-}
-
-.detail-title {
-    text-style: bold;
-    color: $elastic-primary;
-    margin-bottom: 1;
-}
-
-.detail-actions {
-    margin-top: 1;
-    height: 3;
-}
-
-/* State badges */
-StateBadge, ThawStatusBadge {
-    width: auto;
-    padding: 0 1;
-}
-
-/* Forms */
-.form-container {
-    padding: 1;
-}
-
-.form-title {
-    text-style: bold;
-    color: $elastic-primary;
-    margin-bottom: 1;
-}
-
-.form-grid {
-    grid-size: 2;
-    grid-gutter: 1;
-    margin: 1 0;
-}
-
-.form-options {
-    margin: 1 0;
-    height: auto;
-}
-
-.form-actions {
-    margin-top: 2;
-    height: 3;
-}
-
-/* Output panel */
-.output-panel {
-    border-top: solid $elastic-border;
-    height: 15;
-    margin-top: 1;
-}
-
-/* DataTable styling */
-DataTable {
-    background: $elastic-bg;
-    color: $elastic-fg;
-    border: solid $elastic-border;
     width: 100%;
 }
 
-DataTable > .datatable--header {
-    background: $elastic-hover;
-    color: $elastic-fg;
-    text-style: bold;
-}
-
-DataTable > .datatable--cursor {
-    background: $elastic-primary;
-    color: white;
-}
-
-DataTable > .datatable--hover {
-    background: $elastic-hover;
-}
-
-/* Buttons */
-Button {
-    background: $elastic-primary;
-    color: white;
-    border: none;
-    padding: 0 2;
-}
-
-Button:hover {
-    background: #0d74ff;
-}
-
-Button:focus {
-    background: #0d74ff;
-    text-style: bold;
-}
-
-Button.variant-warning {
-    background: $elastic-warning;
-    color: black;
-}
-
-Button.variant-warning:hover {
-    background: #fce38e;
-}
-
-/* Input fields */
-Input {
-    background: $elastic-hover;
-    border: solid $elastic-border;
-    color: $elastic-fg;
-}
-
-Input:focus {
-    border: solid $elastic-primary;
-}
-
-/* Checkboxes */
-Checkbox {
-    color: $elastic-fg;
-}
-
-/* TabbedContent */
-TabbedContent {
+/* -- Panels (all OptionLists and DetailPanel) -- */
+.panel {
+    border: solid $df-border;
+    border-title-color: $df-dim;
+    border-title-style: bold;
+    border-title-align: left;
+    border-subtitle-color: $df-dim;
+    border-subtitle-align: right;
+    background: $df-bg;
     height: 1fr;
 }
 
-TabPane {
-    padding: 1;
+/* Active panel gets green border */
+.panel:focus {
+    border: solid $df-active;
+    border-title-color: $df-active;
 }
 
-TabbedContent Tabs {
-    background: $elastic-hover;
-    color: $elastic-fg;
+.panel:focus-within {
+    border: solid $df-active;
+    border-title-color: $df-active;
 }
 
-TabbedContent Tabs Tab {
-    color: $elastic-gray;
-    padding: 0 2;
+/* -- OptionList item styling -- */
+OptionList > .option-list--option-highlighted {
+    background: #252830;
+    color: $df-fg;
 }
 
-TabbedContent Tabs Tab.active {
-    color: $elastic-primary;
+OptionList:focus > .option-list--option-highlighted {
+    background: $df-primary;
+    color: white;
+}
+
+OptionList > .option-list--option {
+    padding: 0 1;
+}
+
+/* -- Detail content -- */
+#detail-content {
+    padding: 1 2;
+}
+
+/* -- Footer -- */
+Footer {
+    background: #252830;
+    color: $df-fg;
+}
+
+Footer > .footer--key {
+    color: $df-active;
     text-style: bold;
-    background: $elastic-bg;
-    border-top: solid $elastic-primary;
 }
 
-TabbedContent Tabs:focus Tab.active {
-    background: $elastic-bg;
+Footer > .footer--description {
+    color: $df-dim;
 }
 
-/* RadioSet */
-RadioSet {
-    border: solid $elastic-border;
-    padding: 0 1;
+/* -- Repo panel gets more space -- */
+#repos {
+    height: 2fr;
 }
 
-RadioSet:focus {
-    border: solid $elastic-primary;
+/* -- Thaw panel -- */
+#thaw-requests {
+    height: 1fr;
 }
 
-RadioSet RadioButton {
-    color: $elastic-fg;
+/* -- Buckets and ILM are smaller -- */
+#buckets {
+    height: 1fr;
+    max-height: 8;
 }
 
-/* RichLog */
-RichLog {
-    background: $elastic-hover;
-    border: solid $elastic-border;
-    color: $elastic-fg;
-    padding: 0 1;
-}
-
-/* Quick actions */
-.quick-actions {
-    margin-top: 1;
-    height: 3;
-}
-
-.quick-actions Button {
-    margin-right: 1;
-}
-
-/* Refresh indicator */
-.refresh-time {
-    color: $elastic-gray;
-    text-align: right;
-}
-
-/* Header row */
-.header-row {
-    height: auto;
-    width: 100%;
-    margin-bottom: 1;
-}
-
-/* Health row */
-.health-row {
-    height: auto;
-    width: 100%;
-    margin: 1 0;
-}
-
-/* Stats grid */
-.stats-grid {
-    grid-size: 3;
-    grid-gutter: 1;
-    width: 100%;
-    margin: 1 0;
-}
-
-/* Quick actions */
-.quick-actions {
-    width: 100%;
-    margin-top: 1;
-    height: 3;
-}
-
-/* Health row */
-.health-row {
-    height: auto;
-    margin: 1 0;
-}
-
-.health-row > * {
-    margin-right: 2;
+#ilm-policies {
+    height: 1fr;
+    max-height: 8;
 }

@@ -1,87 +1,79 @@
-"""Main Textual app for deepfreeze TUI."""
+"""Main Textual app for deepfreeze TUI - lazygit style."""
 
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Static, TabbedContent, TabPane
-from textual.containers import Vertical
-from textual.reactive import reactive
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Footer, Static, OptionList
 
 from deepfreeze_service import DeepfreezeService, PollingConfig
 
-# Import screens
-from .screens.overview import OverviewScreen
-from .screens.repositories import RepositoriesScreen
-from .screens.thaw import ThawScreen
-from .screens.operations import OperationsScreen
-from .screens.configuration import ConfigurationScreen
-from .screens.logs import LogsScreen
+from .widgets.panels import (
+    BucketPanel,
+    DetailPanel,
+    ILMPanel,
+    RepoPanel,
+    ThawPanel,
+)
 
 
 class DeepfreezeApp(App):
-    """Main Textual application for deepfreeze."""
+    """Lazygit-style TUI for deepfreeze."""
 
-    # CSS path for styling
     CSS_PATH = "styles/theme.tcss"
+    TITLE = "deepfreeze"
 
-    # Enable textual's built-in command palette
-    ENABLE_COMMAND_PALETTE = True
-
-    # Screen navigation bindings
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("r", "refresh", "Refresh"),
-        ("?", "help", "Help"),
-        ("1", "goto_overview", "Overview"),
-        ("2", "goto_repositories", "Repositories"),
-        ("3", "goto_thaw", "Thaw"),
-        ("4", "goto_operations", "Operations"),
-        ("5", "goto_configuration", "Configuration"),
-        ("6", "goto_logs", "Logs"),
+        Binding("q", "quit", "Quit"),
+        Binding("question_mark", "show_help", "Help", key_display="?"),
+        Binding("ctrl+r", "refresh", "Refresh"),
+        Binding("1", "focus_panel('repos')", "Repos", show=False),
+        Binding("2", "focus_panel('thaw-requests')", "Thaw", show=False),
+        Binding("3", "focus_panel('buckets')", "Buckets", show=False),
+        Binding("4", "focus_panel('ilm-policies')", "ILM", show=False),
+        Binding("5", "focus_panel('detail-scroll')", "Detail", show=False),
     ]
-
-    # Reactive properties
-    current_screen_id = reactive("overview")
-    connection_status = reactive("connecting")
-
-    SCREENS = {
-        "overview": OverviewScreen,
-        "repositories": RepositoriesScreen,
-        "thaw": ThawScreen,
-        "operations": OperationsScreen,
-        "configuration": ConfigurationScreen,
-        "logs": LogsScreen,
-    }
 
     def __init__(self, config_path=None, refresh_interval=30):
         super().__init__()
         self.config_path = config_path
         self.refresh_interval = refresh_interval
-        self.service: DeepfreezeService = None
-        self._refresh_timer = None
+        self.service: DeepfreezeService | None = None
+        self._status_data: dict = {}
 
     def compose(self) -> ComposeResult:
-        """Compose the app layout."""
-        yield Header(show_clock=True)
+        """Compose the lazygit-style layout."""
+        # Status bar
+        yield Static(
+            "[bold]deepfreeze[/bold]  [dim]connecting...[/dim]",
+            id="status-bar",
+        )
 
-        # Connection status bar
-        with Vertical(classes="status-bar"):
-            yield Static(
-                "[yellow]⚡ Connecting to Elasticsearch...[/yellow]",
-                id="connection-status",
-                classes="connection-status",
-            )
+        with Horizontal(id="main"):
+            # Left column: stacked list panels
+            with Vertical(id="left-col"):
+                yield RepoPanel()
+                yield ThawPanel()
+                yield BucketPanel()
+                yield ILMPanel()
 
-        # Main content area - will show the current screen
-        yield Static(id="main-content")
+            # Right column: detail view
+            with Vertical(id="right-col"):
+                yield DetailPanel()
 
         yield Footer()
 
-    def on_mount(self):
-        """Initialize the app on mount."""
-        self.initialize_service()
-        self.push_screen("overview")
-        self.start_refresh_timer()
+    def on_mount(self) -> None:
+        """Initialize service and start data loading."""
+        self._init_service()
+        # Focus repos panel on startup
+        self.query_one("#repos").focus()
+        # Load initial data
+        self.run_worker(self._load_data())
+        # Start auto-refresh
+        if self.refresh_interval > 0:
+            self.set_interval(self.refresh_interval, self._load_data)
 
-    def initialize_service(self):
+    def _init_service(self) -> None:
         """Initialize the deepfreeze service."""
         try:
             self.service = DeepfreezeService(
@@ -91,110 +83,129 @@ class DeepfreezeApp(App):
                     interval_seconds=self.refresh_interval,
                 ),
             )
-            self.connection_status = "connected"
-            self.update_connection_status()
         except Exception as e:
-            self.connection_status = f"error: {e}"
-            self.update_connection_status()
+            self._update_status_bar(error=str(e))
 
-    def update_connection_status(self):
-        """Update the connection status display."""
-        status_widget = self.query_one("#connection-status", Static)
-        if self.connection_status == "connected":
-            status_widget.update("[green]✓ Connected to Elasticsearch[/green]")
-        elif self.connection_status == "connecting":
-            status_widget.update("[yellow]⚡ Connecting to Elasticsearch...[/yellow]")
-        else:
-            status_widget.update(f"[red]✗ {self.connection_status}[/red]")
-
-    def start_refresh_timer(self):
-        """Start the auto-refresh timer."""
-        if self.refresh_interval > 0:
-            self._refresh_timer = self.set_interval(
-                self.refresh_interval, self.refresh_status
-            )
-
-    async def refresh_status(self):
-        """Refresh current screen's status data from the service."""
+    async def _load_data(self) -> None:
+        """Fetch status data and populate all panels."""
         if not self.service:
-            self.notify("Service not initialized", severity="error")
             return
 
         try:
-            # Get the current screen and fetch real data
-            current = self.screen
+            status = await self.service.get_status(force_refresh=True)
+            self._status_data = status.model_dump()
 
-            # Fetch status from service
-            status = await self.service.get_status()
+            # Update all panels
+            repos = self._status_data.get("repositories", [])
+            thaw_reqs = self._status_data.get("thaw_requests", [])
+            buckets = self._status_data.get("buckets", [])
+            ilm = self._status_data.get("ilm_policies", [])
 
-            # Push data to current screen if it has update_data method
-            if hasattr(current, "update_data"):
-                # Convert SystemStatus to dict for the screen
-                status_dict = status.model_dump()
-                current.update_data(status_dict)
+            self.query_one(RepoPanel).update_repos(repos)
+            self.query_one(ThawPanel).update_requests(thaw_reqs)
+            self.query_one(BucketPanel).update_buckets(buckets)
+            self.query_one(ILMPanel).update_policies(ilm)
 
-            # Update connection status on success
-            if status.cluster and status.cluster.status == "red":
-                self.connection_status = "error: Cluster health is red"
-            else:
-                self.connection_status = "connected"
-            self.update_connection_status()
+            # Update status bar
+            cluster = self._status_data.get("cluster", {})
+            cluster_name = (
+                cluster.get("name", "?") if isinstance(cluster, dict) else "?"
+            )
+            health = cluster.get("status", "?") if isinstance(cluster, dict) else "?"
+            health_color = {"green": "green", "yellow": "yellow", "red": "red"}.get(
+                health, "dim"
+            )
+            errors = self._status_data.get("errors", [])
+
+            status_text = (
+                f"[bold]deepfreeze[/bold]  "
+                f"cluster:[{health_color}]{cluster_name}[/{health_color}]  "
+                f"repos:{len(repos)}  thaw:{len(thaw_reqs)}  "
+                f"buckets:{len(buckets)}  ilm:{len(ilm)}"
+            )
+            if errors:
+                status_text += f"  [red]errors:{len(errors)}[/red]"
+
+            self._update_status_bar(text=status_text)
+
+            # Show system summary in detail panel if nothing selected yet
+            detail = self.query_one(DetailPanel)
+            detail.show_status_summary(self._status_data)
 
         except Exception as e:
-            error_msg = f"Failed to refresh status: {str(e)}"
-            self.connection_status = f"error: {str(e)}"
-            self.update_connection_status()
-            self.notify(error_msg, severity="error", title="Connection Error")
+            self._update_status_bar(error=str(e))
 
-    def action_refresh(self):
-        """Manually refresh status."""
-        self.refresh_status()
+    def _update_status_bar(self, text: str = None, error: str = None) -> None:
+        """Update the status bar."""
+        bar = self.query_one("#status-bar", Static)
+        if error:
+            safe = error.replace("[", "\\[").replace("]", "\\]")
+            bar.update(f"[bold]deepfreeze[/bold]  [red]{safe}[/red]")
+        elif text:
+            bar.update(text)
 
-    def action_help(self):
-        """Show help dialog."""
-        # Could show a modal with keyboard shortcuts
+    # -- Selection handlers: update detail panel --
+
+    def on_option_list_option_highlighted(
+        self, event: OptionList.OptionHighlighted
+    ) -> None:
+        """Update detail panel when user navigates lists."""
+        source_id = event.option_list.id
+        detail = self.query_one(DetailPanel)
+
+        if source_id == "repos":
+            repo = self.query_one(RepoPanel).get_selected_repo()
+            if repo:
+                detail.show_repo_detail(repo)
+        elif source_id == "thaw-requests":
+            req = self.query_one(ThawPanel).get_selected_request()
+            if req:
+                detail.show_thaw_detail(req)
+        elif source_id == "buckets":
+            bucket = self.query_one(BucketPanel).get_selected_bucket()
+            if bucket:
+                detail.show_bucket_detail(bucket)
+        elif source_id == "ilm-policies":
+            policy = self.query_one(ILMPanel).get_selected_policy()
+            if policy:
+                detail.show_ilm_detail(policy)
+
+    # -- Actions (keybinding targets) --
+
+    def action_focus_panel(self, panel_id: str) -> None:
+        """Focus a specific panel by ID."""
+        try:
+            self.query_one(f"#{panel_id}").focus()
+        except Exception:
+            pass
+
+    def action_refresh(self) -> None:
+        """Manual refresh."""
+        self.run_worker(self._load_data())
+        self.notify("Refreshing...", timeout=2)
+
+    def action_show_help(self) -> None:
+        """Show help."""
         self.notify(
-            "Keyboard Shortcuts:\n"
-            "1-6: Switch screens\n"
-            "r: Refresh\n"
-            "q: Quit\n"
-            "?: Show this help",
-            title="Help",
-            severity="information",
+            "Keys: 1-4=panels Tab=next q=quit Ctrl+R=refresh  "
+            "In Repos: r=rotate t=thaw c=cleanup R=repair  "
+            "In Thaw: f=refreeze",
+            timeout=10,
         )
 
-    # Screen navigation actions
-    def action_goto_overview(self):
-        """Navigate to overview screen."""
-        self.current_screen_id = "overview"
-        self.push_screen("overview")
+    # -- Action stubs (called from panel keybindings) --
 
-    def action_goto_repositories(self):
-        """Navigate to repositories screen."""
-        self.current_screen_id = "repositories"
-        self.push_screen("repositories")
+    def action_do_rotate(self) -> None:
+        self.notify("Rotate: not yet implemented", timeout=5)
 
-    def action_goto_thaw(self):
-        """Navigate to thaw screen."""
-        self.current_screen_id = "thaw"
-        self.push_screen("thaw")
+    def action_do_thaw(self) -> None:
+        self.notify("Thaw: not yet implemented", timeout=5)
 
-    def action_goto_operations(self):
-        """Navigate to operations screen."""
-        self.current_screen_id = "operations"
-        self.push_screen("operations")
+    def action_do_cleanup(self) -> None:
+        self.notify("Cleanup: not yet implemented", timeout=5)
 
-    def action_goto_configuration(self):
-        """Navigate to configuration screen."""
-        self.current_screen_id = "configuration"
-        self.push_screen("configuration")
+    def action_do_repair(self) -> None:
+        self.notify("Repair: not yet implemented", timeout=5)
 
-    def action_goto_logs(self):
-        """Navigate to logs screen."""
-        self.current_screen_id = "logs"
-        self.push_screen("logs")
-
-    def watch_current_screen_id(self, screen_id: str):
-        """Watch for screen changes to update UI."""
-        # Could update header or breadcrumb here
-        pass
+    def action_do_refreeze(self) -> None:
+        self.notify("Refreeze: not yet implemented", timeout=5)
