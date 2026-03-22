@@ -192,7 +192,27 @@ class DeepfreezeApp(App):
         focused_id = ""
         if focused is not None:
             focused_id = focused.id or ""
-        self.push_screen(HelpModal(focused_panel_id=focused_id))
+        self.push_screen(
+            HelpModal(focused_panel_id=focused_id),
+            callback=self._handle_help_action,
+        )
+
+    def _handle_help_action(self, action: str | None) -> None:
+        """Execute an action selected from the help modal."""
+        if not action:
+            return
+        action_method = (
+            f"action_do_{action}"
+            if not action.startswith("do_")
+            else f"action_{action}"
+        )
+        # Check if it's a simple action name (quit, refresh)
+        if action == "quit":
+            self.action_quit()
+        elif action == "refresh":
+            self.action_refresh()
+        elif hasattr(self, f"action_do_{action}"):
+            getattr(self, f"action_do_{action}")()
 
     # -- Action stubs (called from panel keybindings) --
 

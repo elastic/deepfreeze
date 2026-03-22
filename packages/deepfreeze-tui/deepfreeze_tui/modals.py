@@ -2,41 +2,44 @@
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Static
+from textual.widgets import OptionList, Static
+from textual.widgets.option_list import Option, Separator
 
 
 # -- Binding definitions by context --
+# Each tuple: (key, description, action_name_or_None)
+# action_name is used for executing when clicked/entered; None = info only
 
 GLOBAL_BINDINGS = [
-    ("tab", "Switch panel"),
-    ("1-5", "Jump to panel"),
-    ("ctrl+r", "Refresh data"),
-    ("?", "Open keybindings menu"),
-    ("q", "Quit"),
+    ("tab", "Switch panel", None),
+    ("1-5", "Jump to panel", None),
+    ("ctrl+r", "Refresh data", "refresh"),
+    ("?", "Open keybindings menu", None),
+    ("q", "Quit", "quit"),
 ]
 
 REPOS_BINDINGS = [
-    ("r", "Rotate"),
-    ("t", "Thaw"),
-    ("c", "Cleanup"),
-    ("f", "Fix (repair metadata)"),
+    ("r", "Rotate", "do_rotate"),
+    ("t", "Thaw", "do_thaw"),
+    ("c", "Cleanup", "do_cleanup"),
+    ("f", "Fix (repair metadata)", "do_repair"),
 ]
 
 THAW_BINDINGS = [
-    ("f", "Refreeze"),
+    ("f", "Refreeze", "do_refreeze"),
 ]
 
-BUCKET_BINDINGS: list[tuple[str, str]] = []
+BUCKET_BINDINGS: list[tuple[str, str, str | None]] = []
 
-ILM_BINDINGS: list[tuple[str, str]] = []
+ILM_BINDINGS: list[tuple[str, str, str | None]] = []
 
 NAV_BINDINGS = [
-    ("j / down", "Move cursor down"),
-    ("k / up", "Move cursor up"),
-    ("enter", "Select item"),
-    ("esc", "Cancel / close"),
+    ("j / down", "Move cursor down", None),
+    ("k / up", "Move cursor up", None),
+    ("enter", "Select item", None),
+    ("esc", "Cancel / close", None),
 ]
 
 # Map panel IDs to their context bindings
@@ -49,23 +52,28 @@ PANEL_BINDINGS = {
 }
 
 
-class HelpModal(ModalScreen[None]):
-    """Centered help modal showing context-sensitive keybindings."""
+def _format_line(key: str, desc: str) -> str:
+    """Format a keybinding line for display."""
+    return f"[bold #008a5e]{key:>14}[/bold #008a5e] {desc}"
+
+
+class HelpModal(ModalScreen[str | None]):
+    """Centered help modal showing context-sensitive keybindings.
+
+    Overlays on top of the app without dimming the background.
+    Each item is navigable via keyboard and clickable via mouse.
+    Selecting an actionable item dismisses the modal and runs the action.
+    """
 
     BINDINGS = [
-        Binding("escape", "dismiss", "Close", show=False),
-        Binding("question_mark", "dismiss", "Close", show=False),
+        Binding("escape", "dismiss_modal", "Close", show=False),
+        Binding("question_mark", "dismiss_modal", "Close", show=False),
     ]
 
     DEFAULT_CSS = """
     HelpModal {
         align: center middle;
-    }
-
-    #help-overlay {
-        width: 100%;
-        height: 100%;
-        align: center middle;
+        background: transparent;
     }
 
     #help-container {
@@ -76,70 +84,112 @@ class HelpModal(ModalScreen[None]):
         border-title-style: bold;
         border-title-align: center;
         background: #1a1c21;
+        padding: 0;
+    }
+
+    #help-list {
+        background: #1a1c21;
+        width: 100%;
+        height: auto;
+        max-height: 100%;
+    }
+
+    #help-list > .option-list--option-highlighted {
+        background: #008a5e;
+        color: white;
+    }
+
+    #help-list > .option-list--option {
         padding: 0 1;
     }
 
-    .help-section-header {
-        width: 100%;
-        text-align: center;
+    #help-list > .option-list--separator {
         color: #7b7b7b;
-        text-style: bold;
-        margin-top: 1;
     }
 
-    .help-line {
+    #help-footer {
         width: 100%;
         height: 1;
-    }
-
-    .help-footer {
-        width: 100%;
         text-align: center;
         color: #7b7b7b;
-        text-style: italic;
-        margin-top: 1;
-        padding-bottom: 1;
+        background: #252830;
     }
     """
 
     def __init__(self, focused_panel_id: str = "") -> None:
         super().__init__()
         self.focused_panel_id = focused_panel_id
+        # Map option IDs to action names
+        self._action_map: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="help-container") as container:
             container.border_title = "Keybindings"
+
+            options: list[Option | Separator] = []
+            idx = 0
 
             # Panel-specific bindings
             panel_name, panel_binds = PANEL_BINDINGS.get(
                 self.focused_panel_id, ("", [])
             )
             if panel_binds:
-                yield Static(f"--- {panel_name} ---", classes="help-section-header")
-                for key, desc in panel_binds:
-                    yield Static(
-                        f"[bold #008a5e]{key:>14}[/bold #008a5e] {desc}",
-                        classes="help-line",
+                options.append(Separator())
+                options.append(
+                    Option(
+                        f"[bold #7b7b7b]{'--- ' + panel_name + ' ---':^56}[/bold #7b7b7b]",
+                        disabled=True,
                     )
+                )
+                for key, desc, action in panel_binds:
+                    opt_id = f"help-{idx}"
+                    options.append(Option(_format_line(key, desc), id=opt_id))
+                    if action:
+                        self._action_map[opt_id] = action
+                    idx += 1
 
             # Navigation
-            yield Static("--- Navigation ---", classes="help-section-header")
-            for key, desc in NAV_BINDINGS:
-                yield Static(
-                    f"[bold #008a5e]{key:>14}[/bold #008a5e] {desc}",
-                    classes="help-line",
+            options.append(Separator())
+            options.append(
+                Option(
+                    f"[bold #7b7b7b]{'--- Navigation ---':^56}[/bold #7b7b7b]",
+                    disabled=True,
                 )
+            )
+            for key, desc, action in NAV_BINDINGS:
+                opt_id = f"help-{idx}"
+                options.append(Option(_format_line(key, desc), id=opt_id))
+                if action:
+                    self._action_map[opt_id] = action
+                idx += 1
 
             # Global
-            yield Static("--- Global ---", classes="help-section-header")
-            for key, desc in GLOBAL_BINDINGS:
-                yield Static(
-                    f"[bold #008a5e]{key:>14}[/bold #008a5e] {desc}",
-                    classes="help-line",
+            options.append(Separator())
+            options.append(
+                Option(
+                    f"[bold #7b7b7b]{'--- Global ---':^56}[/bold #7b7b7b]",
+                    disabled=True,
                 )
+            )
+            for key, desc, action in GLOBAL_BINDINGS:
+                opt_id = f"help-{idx}"
+                options.append(Option(_format_line(key, desc), id=opt_id))
+                if action:
+                    self._action_map[opt_id] = action
+                idx += 1
 
-            yield Static("Close: <esc> or <?>", classes="help-footer")
+            yield OptionList(*options, id="help-list")
+            yield Static("Execute: <enter> | Close: <esc>", id="help-footer")
 
-    def on_click(self) -> None:
-        """Close on background click."""
-        self.dismiss()
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Execute the action when an item is selected (enter or click)."""
+        opt_id = event.option.id
+        if opt_id and opt_id in self._action_map:
+            self.dismiss(self._action_map[opt_id])
+        else:
+            # Non-actionable item, just close
+            self.dismiss(None)
+
+    def action_dismiss_modal(self) -> None:
+        """Close the modal."""
+        self.dismiss(None)
