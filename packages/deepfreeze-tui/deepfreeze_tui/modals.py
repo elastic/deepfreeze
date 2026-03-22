@@ -5,7 +5,13 @@ from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static
-from textual.widgets.option_list import Option, Separator
+from textual.widgets.option_list import Option
+
+try:
+    from textual.widgets.option_list import Separator
+except ImportError:
+    # Older Textual versions don't have Separator; use a disabled Option instead
+    Separator = None  # type: ignore[assignment, misc]
 
 
 # -- Binding definitions by context --
@@ -55,6 +61,14 @@ PANEL_BINDINGS = {
 def _format_line(key: str, desc: str) -> str:
     """Format a keybinding line for display."""
     return f"[bold #008a5e]{key:>14}[/bold #008a5e] {desc}"
+
+
+def _make_separator() -> Option:
+    """Create a separator element compatible with all Textual versions."""
+    if Separator is not None:
+        return Separator()
+    # Fallback: a disabled blank option
+    return Option("", disabled=True)
 
 
 class HelpModal(ModalScreen[str | None]):
@@ -126,7 +140,7 @@ class HelpModal(ModalScreen[str | None]):
         with VerticalScroll(id="help-container") as container:
             container.border_title = "Keybindings"
 
-            options: list[Option | Separator] = []
+            options: list[Option] = []
             idx = 0
 
             # Panel-specific bindings
@@ -134,7 +148,7 @@ class HelpModal(ModalScreen[str | None]):
                 self.focused_panel_id, ("", [])
             )
             if panel_binds:
-                options.append(Separator())
+                options.append(_make_separator())
                 options.append(
                     Option(
                         f"[bold #7b7b7b]{'--- ' + panel_name + ' ---':^56}[/bold #7b7b7b]",
@@ -149,7 +163,7 @@ class HelpModal(ModalScreen[str | None]):
                     idx += 1
 
             # Navigation
-            options.append(Separator())
+            options.append(_make_separator())
             options.append(
                 Option(
                     f"[bold #7b7b7b]{'--- Navigation ---':^56}[/bold #7b7b7b]",
@@ -164,7 +178,7 @@ class HelpModal(ModalScreen[str | None]):
                 idx += 1
 
             # Global
-            options.append(Separator())
+            options.append(_make_separator())
             options.append(
                 Option(
                     f"[bold #7b7b7b]{'--- Global ---':^56}[/bold #7b7b7b]",
