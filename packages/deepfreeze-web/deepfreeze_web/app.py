@@ -57,9 +57,9 @@ def create_app(
     if serving_frontend:
         app.mount("/", StaticFiles(directory=str(frontend_build), html=True))
 
-    # CORS — needed when frontend is served from a different origin (dev mode).
-    # In production (serving built frontend), same-origin so CORS not required.
-    if cors_origins is None and not serving_frontend:
+    # CORS — default to allowing all origins (no auth in this app).
+    # Override with --cors-origin to restrict, or pass [] to disable.
+    if cors_origins is None:
         cors_origins = ["*"]
     if cors_origins:
         app.add_middleware(
