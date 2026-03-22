@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "deepfreeze-web"
+version = "1.0.0"
+description = "Web UI for deepfreeze - FastAPI backend + React/EUI frontend"
+requires-python = ">=3.10"
+dependencies = [
+    "deepfreeze-core",
+    "deepfreeze-service",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.20",
+    "pydantic>=2.0",
+    "elasticsearch8",
+]
+
+[project.scripts]
+deepfreeze-web = "deepfreeze_web.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["deepfreeze_web"]

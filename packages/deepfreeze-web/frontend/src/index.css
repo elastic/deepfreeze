@@ -1,0 +1,10 @@
+/* Global styles for deepfreeze web UI */
+body {
+  margin: 0;
+  padding: 0;
+  background: #1d1e24;
+}
+
+#root {
+  min-height: 100vh;
+}
