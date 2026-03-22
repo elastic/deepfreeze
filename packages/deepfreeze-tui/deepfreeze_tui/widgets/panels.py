@@ -191,10 +191,8 @@ class DetailPanel(Vertical):
     """
 
     BINDINGS = [
-        ("left", "prev_tab", "Prev tab"),
-        ("right", "next_tab", "Next tab"),
-        ("h", "prev_tab", "Prev tab"),
-        ("l", "next_tab", "Next tab"),
+        ("left_square_bracket", "prev_tab", "Prev tab"),
+        ("right_square_bracket", "next_tab", "Next tab"),
     ]
 
     can_focus = True
@@ -207,7 +205,8 @@ class DetailPanel(Vertical):
         super().__init__(id="detail-panel", classes="panel", **kwargs)
         self._active_tab = self.TAB_SELECTED
         self._all_repos: list[dict[str, Any]] = []
-        self._context = "repos"  # tracks which left panel is active
+        self._panel_context = "repos"
+        self._populating = False  # guard against events during data load
 
     def compose(self):
         # Tab 0: Selected item detail (scrollable)
@@ -227,7 +226,7 @@ class DetailPanel(Vertical):
 
     def _update_title(self) -> None:
         """Update border title to show tabs like lazygit."""
-        if self._context == "repos":
+        if self._panel_context == "repos":
             parts = []
             for i, name in enumerate(self.TAB_NAMES):
                 if i == self._active_tab:
@@ -242,7 +241,7 @@ class DetailPanel(Vertical):
         """Show only the active tab's widget."""
         selected = self.query_one("#detail-selected")
         all_repos = self.query_one("#detail-all-repos")
-        if self._context == "repos" and self._active_tab == self.TAB_ALL_REPOS:
+        if self._panel_context == "repos" and self._active_tab == self.TAB_ALL_REPOS:
             selected.styles.display = "none"
             all_repos.styles.display = "block"
         else:
@@ -251,20 +250,20 @@ class DetailPanel(Vertical):
 
     def set_context(self, context: str) -> None:
         """Set which left panel is active. Resets to Selected tab for non-repos."""
-        self._context = context
+        self._panel_context = context
         if context != "repos":
             self._active_tab = self.TAB_SELECTED
         self._update_title()
         self._show_active_tab()
 
     def action_next_tab(self) -> None:
-        if self._context == "repos":
+        if self._panel_context == "repos":
             self._active_tab = (self._active_tab + 1) % len(self.TAB_NAMES)
             self._update_title()
             self._show_active_tab()
 
     def action_prev_tab(self) -> None:
-        if self._context == "repos":
+        if self._panel_context == "repos":
             self._active_tab = (self._active_tab - 1) % len(self.TAB_NAMES)
             self._update_title()
             self._show_active_tab()
@@ -277,23 +276,27 @@ class DetailPanel(Vertical):
 
     def update_all_repos(self, repos: list[dict[str, Any]]) -> None:
         """Populate the All Repos tab."""
-        self._all_repos = sorted(repos, key=lambda r: r.get("name", ""))
-        all_repos_list = self.query_one("#detail-all-repos", OptionList)
-        all_repos_list.clear_options()
-        for repo in self._all_repos:
-            name = repo.get("name", "?")
-            state = repo.get("thaw_state", "?")
-            color = STATE_COLORS.get(state, "white")
-            mounted = "M" if repo.get("is_mounted") else " "
-            start = repo.get("start", "")
-            end = repo.get("end", "")
-            date_range = f"{start}..{end}" if start and end else ""
-            all_repos_list.add_option(
-                Option(
-                    f"{mounted} {name}  [{color}]{state:<8}[/{color}] {date_range}",
-                    id=name,
+        self._populating = True
+        try:
+            self._all_repos = sorted(repos, key=lambda r: r.get("name", ""))
+            all_repos_list = self.query_one("#detail-all-repos", OptionList)
+            all_repos_list.clear_options()
+            for repo in self._all_repos:
+                name = repo.get("name", "?")
+                state = repo.get("thaw_state", "?")
+                color = STATE_COLORS.get(state, "white")
+                mounted = "M" if repo.get("is_mounted") else " "
+                start = repo.get("start", "")
+                end = repo.get("end", "")
+                date_range = f"{start}..{end}" if start and end else ""
+                all_repos_list.add_option(
+                    Option(
+                        f"{mounted} {name}  [{color}]{state:<8}[/{color}] {date_range}",
+                        id=name,
+                    )
                 )
-            )
+        finally:
+            self._populating = False
 
     def get_all_repos_selected(self) -> dict[str, Any] | None:
         """Get the repo selected in the All Repos tab."""

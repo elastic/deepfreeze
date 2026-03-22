@@ -10,6 +10,7 @@ from deepfreeze_service import DeepfreezeService, PollingConfig
 from .dialogs import ConfirmDialog, ThawDialog
 from .modals import HelpPanel
 from .widgets.panels import (
+    STATE_COLORS,
     BucketPanel,
     CommandLog,
     DetailPanel,
@@ -169,16 +170,22 @@ class DeepfreezeApp(App):
         source_id = event.option_list.id
         detail = self.query_one(DetailPanel)
 
+        # Ignore events fired during data population
+        if detail._populating:
+            return
+
         if source_id == "repos":
             detail.set_context("repos")
             repo = self.query_one(RepoPanel).get_selected_repo()
             if repo:
                 detail.show_repo_detail(repo)
         elif source_id == "detail-all-repos":
-            # Selection in the All Repos tab -> switch to Selected view
+            # Browsing All Repos tab - update Selected content but don't switch tab
             repo = detail.get_all_repos_selected()
             if repo:
-                detail.show_repo_detail(repo)
+                # Update the selected content silently (no tab switch)
+                content = detail.query_one("#detail-content", Static)
+                self._render_repo_detail(content, repo)
         elif source_id == "thaw-requests":
             detail.set_context("thaw")
             req = self.query_one(ThawPanel).get_selected_request()
@@ -194,6 +201,52 @@ class DeepfreezeApp(App):
             policy = self.query_one(ILMPanel).get_selected_policy()
             if policy:
                 detail.show_ilm_detail(policy)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Handle Enter/click on an option list item."""
+        source_id = event.option_list.id
+        detail = self.query_one(DetailPanel)
+
+        if source_id == "detail-all-repos":
+            # Explicit select in All Repos -> switch to Selected tab
+            repo = detail.get_all_repos_selected()
+            if repo:
+                detail.show_repo_detail(repo)
+        elif source_id == "repos":
+            repo = self.query_one(RepoPanel).get_selected_repo()
+            if repo:
+                detail.show_repo_detail(repo)
+
+    @staticmethod
+    def _render_repo_detail(content: Static, repo: dict) -> None:
+        """Render repo detail into a Static widget without switching tabs."""
+        name = repo.get("name", "?")
+        state = repo.get("thaw_state", "?")
+        color = STATE_COLORS.get(state, "white")
+        mounted = "Yes" if repo.get("is_mounted") else "No"
+        bucket = repo.get("bucket", "?")
+        base_path = repo.get("base_path", "?")
+        tier = repo.get("storage_tier", "?")
+        start = repo.get("start", "?")
+        end = repo.get("end", "?")
+        thawed_at = repo.get("thawed_at", None)
+        expires_at = repo.get("expires_at", None)
+
+        lines = [
+            f"[bold]Repository:[/bold] {name}",
+            "",
+            f"  State:        [{color}]{state}[/{color}]",
+            f"  Mounted:      {mounted}",
+            f"  Bucket:       {bucket}",
+            f"  Base Path:    {base_path}",
+            f"  Storage Tier: {tier}",
+            f"  Date Range:   {start or '?'} .. {end or '?'}",
+        ]
+        if thawed_at:
+            lines.append(f"  Thawed At:    {thawed_at}")
+        if expires_at:
+            lines.append(f"  Expires At:   {expires_at}")
+        content.update("\n".join(lines))
 
     # -- Actions (keybinding targets) --
 
