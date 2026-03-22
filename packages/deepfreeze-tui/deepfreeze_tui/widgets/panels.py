@@ -42,7 +42,7 @@ class RepoPanel(OptionList):
 
     def on_mount(self) -> None:
         self.border_title = "Repositories"
-        self.border_subtitle = "[r]otate [t]haw [c]leanup [f]ix"
+        self.border_subtitle = "\\[r]otate \\[t]haw \\[c]leanup \\[f]ix"
 
     def update_repos(self, repos: list[dict[str, Any]]) -> None:
         """Replace all repos in the list."""
@@ -91,7 +91,7 @@ class ThawPanel(OptionList):
 
     def on_mount(self) -> None:
         self.border_title = "Thaw Requests"
-        self.border_subtitle = "[f]reeze"
+        self.border_subtitle = "\\[f]reeze"
 
     def update_requests(self, requests: list[dict[str, Any]]) -> None:
         """Replace all thaw requests."""
