@@ -5,8 +5,11 @@ actions and provides async, structured interfaces for the TUI and Web UI.
 """
 
 import asyncio
+import json
 import logging
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
+from io import StringIO
 from typing import Any, Optional
 
 from elasticsearch8 import Elasticsearch
@@ -243,17 +246,27 @@ class DeepfreezeService:
                 limit=limit,
             )
 
-            # Run in thread pool
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, action.do_action)
+            # Capture stdout to get the JSON output
+            f = StringIO()
+            with redirect_stdout(f):
+                # Run in thread pool
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, action.do_action)
 
-            # Parse the porcelain output (this is a simplified version)
-            # In reality, we'd capture stdout and parse the JSON
-            # For now, return a basic status structure
+            # Parse the JSON output
+            output = f.getvalue()
+            data = json.loads(output)
 
+            # Convert to SystemStatus
             status = SystemStatus(
                 cluster=self._get_cluster_health(),
-                initialized=True,
+                initialized=data.get("initialized", True),
+                repositories=data.get("repositories", []),
+                thaw_requests=data.get("thaw_requests", []),
+                buckets=data.get("buckets", []),
+                ilm_policies=data.get("ilm_policies", []),
+                settings=data.get("settings"),
+                errors=[],
                 timestamp=datetime.now(timezone.utc),
             )
 
