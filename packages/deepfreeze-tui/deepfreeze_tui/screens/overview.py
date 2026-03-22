@@ -83,32 +83,27 @@ class OverviewScreen(Screen):
 
             # Health badges row
             with Horizontal(classes="health-row"):
-                yield HealthBadge("ES Cluster", "unknown").data_bind(
-                    OverviewScreen.cluster_health
-                )
-                yield HealthBadge("S3 Storage", "unknown")
-                yield HealthBadge("ILM Policies", "unknown")
+                self.health_badge_es = HealthBadge("ES Cluster", "unknown")
+                yield self.health_badge_es
+                self.health_badge_s3 = HealthBadge("S3 Storage", "unknown")
+                yield self.health_badge_s3
+                self.health_badge_ilm = HealthBadge("ILM Policies", "unknown")
+                yield self.health_badge_ilm
 
             # Stats grid
             with Grid(classes="stats-grid"):
-                yield StatCard("Active Repos", "0", "Ready for writes").data_bind(
-                    value=OverviewScreen.repo_counts
-                )
-                yield StatCard("Frozen Repos", "0", "In cold storage").data_bind(
-                    value=OverviewScreen.repo_counts
-                )
-                yield StatCard("Thawing", "0", "Restore in progress").data_bind(
-                    value=OverviewScreen.repo_counts
-                )
-                yield StatCard("Thawed", "0", "Currently mounted").data_bind(
-                    value=OverviewScreen.repo_counts
-                )
-                yield StatCard("Expired", "0", "Ready for cleanup").data_bind(
-                    value=OverviewScreen.repo_counts
-                )
-                yield StatCard("Thaw Requests", "0", "Active/completed").data_bind(
-                    value=OverviewScreen.thaw_count
-                )
+                self.stat_active = StatCard("Active Repos", "0", "Ready for writes")
+                yield self.stat_active
+                self.stat_frozen = StatCard("Frozen Repos", "0", "In cold storage")
+                yield self.stat_frozen
+                self.stat_thawing = StatCard("Thawing", "0", "Restore in progress")
+                yield self.stat_thawing
+                self.stat_thawed = StatCard("Thawed", "0", "Currently mounted")
+                yield self.stat_thawed
+                self.stat_expired = StatCard("Expired", "0", "Ready for cleanup")
+                yield self.stat_expired
+                self.stat_requests = StatCard("Thaw Requests", "0", "Active/completed")
+                yield self.stat_requests
 
             # Recent activity table
             yield Label("Recent Activity", classes="section-title")
@@ -136,7 +131,18 @@ class OverviewScreen(Screen):
 
     def action_refresh(self):
         """Refresh status data."""
-        self.app.refresh_status()
+        # In real implementation, would fetch from service
+        # For now, just update with sample data
+        self.update_data(
+            {
+                "cluster": {"status": "green", "name": "production"},
+                "repositories": [
+                    {"state": "active", "name": "deepfreeze-000001"},
+                    {"state": "frozen", "name": "deepfreeze-000002"},
+                ],
+                "thaw_requests": [{"id": "req-001"}],
+            }
+        )
 
     def action_switch_repos(self):
         """Switch to repositories screen."""
@@ -172,12 +178,16 @@ class OverviewScreen(Screen):
 
     def update_data(self, status_data: dict):
         """Update screen with new status data."""
-        if "cluster" in status_data:
-            self.cluster_health = status_data["cluster"]
+        # Update health badges
+        if "cluster" in status_data and hasattr(self, "health_badge_es"):
+            cluster = status_data["cluster"]
+            self.health_badge_es.status = cluster.get("status", "unknown")
+            self.health_badge_es.update_badge()
 
+        # Update stat cards
         if "repositories" in status_data:
             repos = status_data["repositories"]
-            self.repo_counts = {
+            counts = {
                 "active": len([r for r in repos if r.get("state") == "active"]),
                 "frozen": len([r for r in repos if r.get("state") == "frozen"]),
                 "thawing": len([r for r in repos if r.get("state") == "thawing"]),
@@ -185,8 +195,20 @@ class OverviewScreen(Screen):
                 "expired": len([r for r in repos if r.get("state") == "expired"]),
             }
 
-        if "thaw_requests" in status_data:
-            self.thaw_count = len(status_data["thaw_requests"])
+            if hasattr(self, "stat_active"):
+                self.stat_active.value = str(counts["active"])
+            if hasattr(self, "stat_frozen"):
+                self.stat_frozen.value = str(counts["frozen"])
+            if hasattr(self, "stat_thawing"):
+                self.stat_thawing.value = str(counts["thawing"])
+            if hasattr(self, "stat_thawed"):
+                self.stat_thawed.value = str(counts["thawed"])
+            if hasattr(self, "stat_expired"):
+                self.stat_expired.value = str(counts["expired"])
+
+        # Update thaw requests count
+        if "thaw_requests" in status_data and hasattr(self, "stat_requests"):
+            self.stat_requests.value = str(len(status_data["thaw_requests"]))
 
         # Update refresh time
         from datetime import datetime
