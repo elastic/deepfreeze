@@ -7,6 +7,7 @@ from textual.widgets import Footer, Static, OptionList
 
 from deepfreeze_service import DeepfreezeService, PollingConfig
 
+from .modals import HelpModal
 from .widgets.panels import (
     BucketPanel,
     DetailPanel,
@@ -185,13 +186,13 @@ class DeepfreezeApp(App):
         self.notify("Refreshing...", timeout=2)
 
     def action_show_help(self) -> None:
-        """Show help."""
-        self.notify(
-            "Keys: 1-4=panels Tab=next q=quit Ctrl+R=refresh  "
-            "In Repos: r=rotate t=thaw c=cleanup R=repair  "
-            "In Thaw: f=refreeze",
-            timeout=10,
-        )
+        """Show context-sensitive help modal."""
+        # Determine which panel currently has focus
+        focused = self.focused
+        focused_id = ""
+        if focused is not None:
+            focused_id = focused.id or ""
+        self.push_screen(HelpModal(focused_panel_id=focused_id))
 
     # -- Action stubs (called from panel keybindings) --
 

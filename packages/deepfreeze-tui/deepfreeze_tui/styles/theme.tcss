@@ -45,8 +45,8 @@ Screen {
 
 /* -- Panels (all OptionLists and DetailPanel) -- */
 .panel {
-    border: solid $df-border;
-    border-title-color: $df-dim;
+    border: solid $df-fg;
+    border-title-color: $df-fg;
     border-title-style: bold;
     border-title-align: left;
     border-subtitle-color: $df-dim;

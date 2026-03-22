@@ -31,7 +31,7 @@ class RepoPanel(OptionList):
         ("r", "rotate", "Rotate"),
         ("t", "thaw", "Thaw"),
         ("c", "cleanup", "Cleanup"),
-        ("R", "repair", "Repair"),
+        ("f", "repair", "Fix"),
     ]
 
     can_focus = True
@@ -42,7 +42,7 @@ class RepoPanel(OptionList):
 
     def on_mount(self) -> None:
         self.border_title = "Repositories"
-        self.border_subtitle = "[r]otate [t]haw [c]leanup"
+        self.border_subtitle = "[r]otate [t]haw [c]leanup [f]ix"
 
     def update_repos(self, repos: list[dict[str, Any]]) -> None:
         """Replace all repos in the list."""
