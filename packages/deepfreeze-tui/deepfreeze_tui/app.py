@@ -11,6 +11,7 @@ from .dialogs import ConfirmDialog, ThawDialog
 from .modals import HelpPanel
 from .widgets.panels import (
     BucketPanel,
+    CommandLog,
     DetailPanel,
     ILMPanel,
     RepoPanel,
@@ -58,9 +59,10 @@ class DeepfreezeApp(App):
                 yield BucketPanel()
                 yield ILMPanel()
 
-            # Right column: detail view
+            # Right column: detail view + command log
             with Vertical(id="right-col"):
                 yield DetailPanel()
+                yield CommandLog()
 
         yield Footer()
 
@@ -99,6 +101,10 @@ class DeepfreezeApp(App):
             return
 
         try:
+            try:
+                self.query_one(CommandLog).log_command("status", "refreshing...")
+            except Exception:
+                pass  # CommandLog may not be mounted yet on first call
             status = await self.service.get_status(force_refresh=True)
             self._status_data = status.model_dump()
 
@@ -215,7 +221,7 @@ class DeepfreezeApp(App):
     def _on_rotate_confirmed(self, confirmed: bool) -> None:
         if not confirmed:
             return
-        self.notify("Running rotate...", timeout=3)
+        self.query_one(CommandLog).log_command("rotate")
         self.run_worker(self._exec_rotate())
 
     async def _exec_rotate(self) -> None:
@@ -233,7 +239,9 @@ class DeepfreezeApp(App):
         """Handle thaw dialog result."""
         if not self.service:
             return
-        self.notify("Creating thaw request...", timeout=3)
+        self.query_one(CommandLog).log_command(
+            "thaw", f"{params['start_date']} to {params['end_date']}"
+        )
         self.run_worker(self._exec_thaw(params))
 
     async def _exec_thaw(self, params: dict) -> None:
@@ -263,7 +271,7 @@ class DeepfreezeApp(App):
     def _on_cleanup_confirmed(self, confirmed: bool) -> None:
         if not confirmed:
             return
-        self.notify("Running cleanup...", timeout=3)
+        self.query_one(CommandLog).log_command("cleanup")
         self.run_worker(self._exec_cleanup())
 
     async def _exec_cleanup(self) -> None:
@@ -275,7 +283,7 @@ class DeepfreezeApp(App):
         if not self.service:
             self.notify("Service not initialized", severity="error")
             return
-        self.notify("Running metadata repair...", timeout=3)
+        self.query_one(CommandLog).log_command("repair-metadata")
         self.run_worker(self._exec_repair())
 
     async def _exec_repair(self) -> None:
@@ -310,7 +318,8 @@ class DeepfreezeApp(App):
         req_id = getattr(self, "_pending_refreeze_id", None)
         if not req_id:
             return
-        self.notify(f"Refreezing {req_id[-8:]}...", timeout=3)
+        short_id = req_id[-8:] if len(req_id) > 8 else req_id
+        self.query_one(CommandLog).log_command("refreeze", short_id)
         self.run_worker(self._exec_refreeze(req_id))
 
     async def _exec_refreeze(self, request_id: str) -> None:
@@ -362,6 +371,15 @@ class DeepfreezeApp(App):
                     lines.append(f"    [red]- {msg}[/red]")
 
         content.update("\n".join(lines))
+
+        # Log to command log
+        self.query_one(CommandLog).log_result(
+            action_name.lower(),
+            result.success,
+            result.summary,
+            result.duration_ms,
+        )
+
         # Also notify briefly
         safe_summary = result.summary.replace("[", "\\[").replace("]", "\\]")
         self.notify(f"{action_name}: {safe_summary}", severity=severity, timeout=5)

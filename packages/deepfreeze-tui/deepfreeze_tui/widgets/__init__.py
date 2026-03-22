@@ -2,6 +2,7 @@
 
 from .panels import (
     BucketPanel,
+    CommandLog,
     DetailPanel,
     ILMPanel,
     RepoPanel,
@@ -14,4 +15,5 @@ __all__ = [
     "BucketPanel",
     "ILMPanel",
     "DetailPanel",
+    "CommandLog",
 ]

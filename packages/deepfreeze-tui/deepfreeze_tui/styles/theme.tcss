@@ -82,9 +82,24 @@ OptionList > .option-list--option {
     padding: 0 1;
 }
 
+/* -- Detail panel gets more space than command log -- */
+#detail-scroll {
+    height: 2fr;
+}
+
 /* -- Detail content -- */
 #detail-content {
     padding: 1 2;
+}
+
+/* -- Command log at bottom right -- */
+#command-log {
+    height: 1fr;
+    max-height: 12;
+}
+
+#log-content {
+    padding: 0 1;
 }
 
 /* -- Footer -- */

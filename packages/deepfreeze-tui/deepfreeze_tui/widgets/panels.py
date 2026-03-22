@@ -347,3 +347,64 @@ class DetailPanel(VerticalScroll):
                 lines.append(f"  [red]- {msg}[/red]")
 
         content.update("\n".join(lines))
+
+
+class CommandLog(VerticalScroll):
+    """Command log panel showing action history, like lazygit's command log.
+
+    Displays timestamped entries of commands run and their outcomes.
+    Most recent entries appear at the bottom.
+    """
+
+    can_focus = True
+
+    MAX_ENTRIES = 200
+
+    def __init__(self, **kwargs):
+        super().__init__(id="command-log", classes="panel", **kwargs)
+        self._entries: list[str] = []
+
+    def compose(self):
+        yield Static("[dim]No commands yet[/dim]", id="log-content")
+
+    def on_mount(self) -> None:
+        self.border_title = "Command Log"
+
+    def log_command(self, action: str, detail: str = "") -> None:
+        """Log a command being started."""
+        from datetime import datetime
+
+        ts = datetime.now().strftime("%H:%M:%S")
+        entry = f"[dim]{ts}[/dim] [bold]{action}[/bold]"
+        if detail:
+            safe = detail.replace("[", "\\[").replace("]", "\\]")
+            entry += f" {safe}"
+        self._entries.append(entry)
+        self._trim_and_render()
+
+    def log_result(
+        self, action: str, success: bool, summary: str, duration_ms: int = 0
+    ) -> None:
+        """Log the result of a completed command."""
+        from datetime import datetime
+
+        ts = datetime.now().strftime("%H:%M:%S")
+        if success:
+            status = "[green]OK[/green]"
+        else:
+            status = "[red]FAIL[/red]"
+        safe_summary = summary.replace("[", "\\[").replace("]", "\\]")
+        entry = f"[dim]{ts}[/dim] {status} [bold]{action}[/bold] {safe_summary}"
+        if duration_ms > 0:
+            entry += f" [dim]({duration_ms}ms)[/dim]"
+        self._entries.append(entry)
+        self._trim_and_render()
+
+    def _trim_and_render(self) -> None:
+        """Keep entries under MAX_ENTRIES and update display."""
+        if len(self._entries) > self.MAX_ENTRIES:
+            self._entries = self._entries[-self.MAX_ENTRIES :]
+        content = self.query_one("#log-content", Static)
+        content.update("\n".join(self._entries))
+        # Auto-scroll to bottom
+        self.scroll_end(animate=False)
