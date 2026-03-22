@@ -415,10 +415,16 @@ class DeepfreezeService:
         request_id: Optional[str] = None,
         dry_run: bool = False,
     ) -> CommandResult:
-        """Refreeze thawed data."""
+        """Refreeze thawed data.
+
+        Args:
+            request_id: Specific thaw request to refreeze. If None, refreezes all completed requests.
+            dry_run: If True, show what would happen without making changes.
+        """
         action = Refreeze(
             client=self.client,
             request_id=request_id,
+            all_requests=(request_id is None),
             porcelain=True,
             audit=self._get_audit(),
         )

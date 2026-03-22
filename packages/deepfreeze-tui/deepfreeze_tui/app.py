@@ -196,19 +196,143 @@ class DeepfreezeApp(App):
             focused_id = focused.id or ""
         self.query_one(HelpPanel).toggle(focused_panel_id=focused_id)
 
-    # -- Action stubs (called from panel keybindings) --
+    # -- Real action implementations --
 
     def action_do_rotate(self) -> None:
-        self.notify("Rotate: not yet implemented", timeout=5)
+        """Execute rotate action."""
+        if not self.service:
+            self.notify("Service not initialized", severity="error")
+            return
+        self.notify("Running rotate...", timeout=3)
+        self.run_worker(self._exec_rotate())
+
+    async def _exec_rotate(self) -> None:
+        result = await self.service.rotate()
+        self._show_result("Rotate", result)
 
     def action_do_thaw(self) -> None:
-        self.notify("Thaw: not yet implemented", timeout=5)
+        """Prompt for thaw parameters and execute."""
+        if not self.service:
+            self.notify("Service not initialized", severity="error")
+            return
+        # Show thaw input dialog
+        from .dialogs import ThawDialog
+
+        self.push_screen(ThawDialog(), callback=self._handle_thaw_input)
+
+    def _handle_thaw_input(self, params: dict | None) -> None:
+        """Handle thaw dialog result."""
+        if not params or not self.service:
+            return
+        self.notify("Creating thaw request...", timeout=3)
+        self.run_worker(self._exec_thaw(params))
+
+    async def _exec_thaw(self, params: dict) -> None:
+        from datetime import datetime
+
+        start = datetime.fromisoformat(params["start_date"])
+        end = datetime.fromisoformat(params["end_date"])
+        duration = params.get("duration", 7)
+        result = await self.service.thaw_create(
+            start_date=start,
+            end_date=end,
+            duration=duration,
+        )
+        self._show_result("Thaw", result)
 
     def action_do_cleanup(self) -> None:
-        self.notify("Cleanup: not yet implemented", timeout=5)
+        """Execute cleanup action."""
+        if not self.service:
+            self.notify("Service not initialized", severity="error")
+            return
+        self.notify("Running cleanup...", timeout=3)
+        self.run_worker(self._exec_cleanup())
+
+    async def _exec_cleanup(self) -> None:
+        result = await self.service.cleanup()
+        self._show_result("Cleanup", result)
 
     def action_do_repair(self) -> None:
-        self.notify("Repair: not yet implemented", timeout=5)
+        """Execute repair metadata action."""
+        if not self.service:
+            self.notify("Service not initialized", severity="error")
+            return
+        self.notify("Running metadata repair...", timeout=3)
+        self.run_worker(self._exec_repair())
+
+    async def _exec_repair(self) -> None:
+        result = await self.service.repair_metadata()
+        self._show_result("Repair", result)
 
     def action_do_refreeze(self) -> None:
-        self.notify("Refreeze: not yet implemented", timeout=5)
+        """Refreeze the selected thaw request."""
+        if not self.service:
+            self.notify("Service not initialized", severity="error")
+            return
+        # Get selected thaw request
+        req = self.query_one(ThawPanel).get_selected_request()
+        if not req:
+            self.notify("No thaw request selected", severity="warning")
+            return
+        req_id = req.get("id", req.get("request_id"))
+        if not req_id:
+            self.notify("Could not determine request ID", severity="error")
+            return
+        self.notify(f"Refreezing {req_id[-8:]}...", timeout=3)
+        self.run_worker(self._exec_refreeze(req_id))
+
+    async def _exec_refreeze(self, request_id: str) -> None:
+        result = await self.service.refreeze(request_id=request_id)
+        self._show_result("Refreeze", result)
+
+    def _show_result(self, action_name: str, result) -> None:
+        """Display action result in the detail panel and as notification."""
+        detail = self.query_one(DetailPanel)
+        content = detail.query_one("#detail-content", Static)
+
+        if result.success:
+            severity = "information"
+            lines = [
+                f"[bold green]{action_name} completed successfully[/bold green]",
+                "",
+                f"  Duration: {result.duration_ms}ms",
+                f"  Summary:  {result.summary}",
+            ]
+            if result.details:
+                lines.extend(["", "  Details:"])
+                for d in result.details:
+                    target = (
+                        d.get("target", "?")
+                        if isinstance(d, dict)
+                        else getattr(d, "target", "?")
+                    )
+                    status = (
+                        d.get("status", "")
+                        if isinstance(d, dict)
+                        else getattr(d, "status", "")
+                    )
+                    lines.append(f"    - {target}: {status}")
+        else:
+            severity = "error"
+            lines = [
+                f"[bold red]{action_name} failed[/bold red]",
+                "",
+                f"  Summary: {result.summary}",
+            ]
+            if result.errors:
+                lines.extend(["", "  Errors:"])
+                for e in result.errors:
+                    msg = (
+                        e.get("message", str(e))
+                        if isinstance(e, dict)
+                        else getattr(e, "message", str(e))
+                    )
+                    lines.append(f"    [red]- {msg}[/red]")
+
+        content.update("\n".join(lines))
+        # Also notify briefly
+        safe_summary = result.summary.replace("[", "\\[").replace("]", "\\]")
+        self.notify(f"{action_name}: {safe_summary}", severity=severity, timeout=5)
+
+        # Refresh data after action
+        self.run_worker(self._load_data())
