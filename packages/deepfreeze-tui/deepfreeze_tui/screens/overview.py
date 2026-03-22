@@ -37,15 +37,28 @@ class StatCard(Static):
     def __init__(self, title: str, value: str, subtitle: str = ""):
         super().__init__()
         self.title = title
-        self.value = value
+        self._value = value
         self.subtitle = subtitle
 
     def compose(self):
         with Vertical():
             yield Label(self.title, classes="stat-title")
-            yield Label(self.value, classes="stat-value")
+            yield Label(
+                self._value,
+                id=f"val-{self.title.lower().replace(' ', '-')}",
+                classes="stat-value",
+            )
             if self.subtitle:
                 yield Label(self.subtitle, classes="stat-subtitle")
+
+    def set_value(self, new_value: str):
+        """Update the displayed value."""
+        self._value = new_value
+        try:
+            value_label = self.query_one(".stat-value", Label)
+            value_label.update(new_value)
+        except Exception:
+            pass
 
 
 class OverviewScreen(Screen):
@@ -250,19 +263,19 @@ class OverviewScreen(Screen):
             }
 
             if hasattr(self, "stat_active"):
-                self.stat_active.value = str(counts["active"])
+                self.stat_active.set_value(str(counts["active"]))
             if hasattr(self, "stat_frozen"):
-                self.stat_frozen.value = str(counts["frozen"])
+                self.stat_frozen.set_value(str(counts["frozen"]))
             if hasattr(self, "stat_thawing"):
-                self.stat_thawing.value = str(counts["thawing"])
+                self.stat_thawing.set_value(str(counts["thawing"]))
             if hasattr(self, "stat_thawed"):
-                self.stat_thawed.value = str(counts["thawed"])
+                self.stat_thawed.set_value(str(counts["thawed"]))
             if hasattr(self, "stat_expired"):
-                self.stat_expired.value = str(counts["expired"])
+                self.stat_expired.set_value(str(counts["expired"]))
 
         # Update thaw requests count
         if "thaw_requests" in status_data and hasattr(self, "stat_requests"):
-            self.stat_requests.value = str(len(status_data["thaw_requests"]))
+            self.stat_requests.set_value(str(len(status_data["thaw_requests"])))
 
         # Update refresh time
         from datetime import datetime
