@@ -181,25 +181,133 @@ class ILMPanel(OptionList):
         return None
 
 
-class DetailPanel(VerticalScroll):
-    """Right-side detail panel showing info about the selected item."""
+class DetailPanel(Vertical):
+    """Right-side detail panel with tabbed views, like lazygit.
+
+    When repos panel is focused, shows two tabs in the border title:
+      [Selected] - All Repos
+    Switching tabs toggles between single-repo detail and all-repos list.
+    Other panel contexts (thaw, bucket, ilm) show their own detail.
+    """
+
+    BINDINGS = [
+        ("left", "prev_tab", "Prev tab"),
+        ("right", "next_tab", "Next tab"),
+        ("h", "prev_tab", "Prev tab"),
+        ("l", "next_tab", "Next tab"),
+    ]
 
     can_focus = True
 
+    TAB_SELECTED = 0
+    TAB_ALL_REPOS = 1
+    TAB_NAMES = ["Selected", "All Repos"]
+
     def __init__(self, **kwargs):
-        super().__init__(id="detail-scroll", classes="panel", **kwargs)
+        super().__init__(id="detail-panel", classes="panel", **kwargs)
+        self._active_tab = self.TAB_SELECTED
+        self._all_repos: list[dict[str, Any]] = []
+        self._context = "repos"  # tracks which left panel is active
 
     def compose(self):
-        yield Static(
-            "[dim]Select an item to view details[/dim]",
-            id="detail-content",
+        # Tab 0: Selected item detail (scrollable)
+        yield VerticalScroll(
+            Static(
+                "[dim]Select an item to view details[/dim]",
+                id="detail-content",
+            ),
+            id="detail-selected",
         )
+        # Tab 1: All repos list
+        yield OptionList(id="detail-all-repos")
 
     def on_mount(self) -> None:
-        self.border_title = "Detail"
+        self._update_title()
+        self._show_active_tab()
+
+    def _update_title(self) -> None:
+        """Update border title to show tabs like lazygit."""
+        if self._context == "repos":
+            parts = []
+            for i, name in enumerate(self.TAB_NAMES):
+                if i == self._active_tab:
+                    parts.append(f"[bold green]{name}[/bold green]")
+                else:
+                    parts.append(f"[dim]{name}[/dim]")
+            self.border_title = " - ".join(parts)
+        else:
+            self.border_title = "Detail"
+
+    def _show_active_tab(self) -> None:
+        """Show only the active tab's widget."""
+        selected = self.query_one("#detail-selected")
+        all_repos = self.query_one("#detail-all-repos")
+        if self._context == "repos" and self._active_tab == self.TAB_ALL_REPOS:
+            selected.styles.display = "none"
+            all_repos.styles.display = "block"
+        else:
+            selected.styles.display = "block"
+            all_repos.styles.display = "none"
+
+    def set_context(self, context: str) -> None:
+        """Set which left panel is active. Resets to Selected tab for non-repos."""
+        self._context = context
+        if context != "repos":
+            self._active_tab = self.TAB_SELECTED
+        self._update_title()
+        self._show_active_tab()
+
+    def action_next_tab(self) -> None:
+        if self._context == "repos":
+            self._active_tab = (self._active_tab + 1) % len(self.TAB_NAMES)
+            self._update_title()
+            self._show_active_tab()
+
+    def action_prev_tab(self) -> None:
+        if self._context == "repos":
+            self._active_tab = (self._active_tab - 1) % len(self.TAB_NAMES)
+            self._update_title()
+            self._show_active_tab()
+
+    def switch_to_selected(self) -> None:
+        """Switch to the Selected tab."""
+        self._active_tab = self.TAB_SELECTED
+        self._update_title()
+        self._show_active_tab()
+
+    def update_all_repos(self, repos: list[dict[str, Any]]) -> None:
+        """Populate the All Repos tab."""
+        self._all_repos = sorted(repos, key=lambda r: r.get("name", ""))
+        all_repos_list = self.query_one("#detail-all-repos", OptionList)
+        all_repos_list.clear_options()
+        for repo in self._all_repos:
+            name = repo.get("name", "?")
+            state = repo.get("thaw_state", "?")
+            color = STATE_COLORS.get(state, "white")
+            mounted = "M" if repo.get("is_mounted") else " "
+            start = repo.get("start", "")
+            end = repo.get("end", "")
+            date_range = f"{start}..{end}" if start and end else ""
+            all_repos_list.add_option(
+                Option(
+                    f"{mounted} {name}  [{color}]{state:<8}[/{color}] {date_range}",
+                    id=name,
+                )
+            )
+
+    def get_all_repos_selected(self) -> dict[str, Any] | None:
+        """Get the repo selected in the All Repos tab."""
+        all_repos_list = self.query_one("#detail-all-repos", OptionList)
+        if all_repos_list.highlighted is not None and all_repos_list.highlighted < len(
+            self._all_repos
+        ):
+            return self._all_repos[all_repos_list.highlighted]
+        return None
+
+    # -- Show methods (always update the Selected tab content) --
 
     def show_repo_detail(self, repo: dict[str, Any]) -> None:
-        """Display repository details."""
+        """Display repository details and switch to Selected tab."""
         content = self.query_one("#detail-content", Static)
         name = repo.get("name", "?")
         state = repo.get("thaw_state", "?")
@@ -229,6 +337,7 @@ class DetailPanel(VerticalScroll):
             lines.append(f"  Expires At:   {expires_at}")
 
         content.update("\n".join(lines))
+        self.switch_to_selected()
 
     def show_thaw_detail(self, req: dict[str, Any]) -> None:
         """Display thaw request details."""
@@ -302,7 +411,6 @@ class DetailPanel(VerticalScroll):
         ilm = status_data.get("ilm_policies", [])
         errors = status_data.get("errors", [])
 
-        # Count states
         state_counts = {}
         for r in repos:
             s = r.get("thaw_state", "unknown")

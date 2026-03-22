@@ -33,7 +33,7 @@ class DeepfreezeApp(App):
         Binding("2", "focus_panel('thaw-requests')", "Thaw", show=False),
         Binding("3", "focus_panel('buckets')", "Buckets", show=False),
         Binding("4", "focus_panel('ilm-policies')", "ILM", show=False),
-        Binding("5", "focus_panel('detail-scroll')", "Detail", show=False),
+        Binding("5", "focus_panel('detail-panel')", "Detail", show=False),
     ]
 
     def __init__(self, config_path=None, refresh_interval=30):
@@ -119,6 +119,9 @@ class DeepfreezeApp(App):
             self.query_one(BucketPanel).update_buckets(buckets)
             self.query_one(ILMPanel).update_policies(ilm)
 
+            # Also populate the All Repos tab in the detail panel
+            self.query_one(DetailPanel).update_all_repos(repos)
+
             # Update status bar
             cluster = self._status_data.get("cluster", {})
             cluster_name = (
@@ -167,18 +170,27 @@ class DeepfreezeApp(App):
         detail = self.query_one(DetailPanel)
 
         if source_id == "repos":
+            detail.set_context("repos")
             repo = self.query_one(RepoPanel).get_selected_repo()
             if repo:
                 detail.show_repo_detail(repo)
+        elif source_id == "detail-all-repos":
+            # Selection in the All Repos tab -> switch to Selected view
+            repo = detail.get_all_repos_selected()
+            if repo:
+                detail.show_repo_detail(repo)
         elif source_id == "thaw-requests":
+            detail.set_context("thaw")
             req = self.query_one(ThawPanel).get_selected_request()
             if req:
                 detail.show_thaw_detail(req)
         elif source_id == "buckets":
+            detail.set_context("buckets")
             bucket = self.query_one(BucketPanel).get_selected_bucket()
             if bucket:
                 detail.show_bucket_detail(bucket)
         elif source_id == "ilm-policies":
+            detail.set_context("ilm")
             policy = self.query_one(ILMPanel).get_selected_policy()
             if policy:
                 detail.show_ilm_detail(policy)
