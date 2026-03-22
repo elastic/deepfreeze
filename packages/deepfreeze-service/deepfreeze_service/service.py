@@ -300,8 +300,19 @@ class DeepfreezeService:
                 timestamp=datetime.now(timezone.utc),
             )
 
+            self.loggit.info(
+                "Status fetched successfully: %d repos, %d thaw requests",
+                len(status.repositories),
+                len(status.thaw_requests),
+            )
+
         except Exception as e:
             error = map_exception_to_error(e)
+            self.loggit.error("Failed to get status: %s", str(e))
+            self.loggit.error("Error type: %s", type(e).__name__)
+            import traceback
+
+            self.loggit.error("Traceback: %s", traceback.format_exc())
             status = SystemStatus(
                 cluster=self._get_cluster_health(),
                 initialized=False,

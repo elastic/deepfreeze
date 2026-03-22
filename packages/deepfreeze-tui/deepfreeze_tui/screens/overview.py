@@ -203,11 +203,26 @@ class OverviewScreen(Screen):
 
     def update_data(self, status_data: dict):
         """Update screen with new status data."""
+        # Check for errors first
+        errors = status_data.get("errors", [])
+        if errors:
+            # Show error notification
+            for error in errors[:3]:  # Show up to 3 errors
+                msg = error.get("message", "Unknown error")
+                self.notify(f"Error: {msg}", severity="error", timeout=10)
+
+            # Update health badge to show error state
+            if hasattr(self, "health_badge_es"):
+                self.health_badge_es.status = "red"
+                self.health_badge_es.update_badge()
+
         # Update health badges
         if "cluster" in status_data and hasattr(self, "health_badge_es"):
             cluster = status_data["cluster"]
-            self.health_badge_es.status = cluster.get("status", "unknown")
-            self.health_badge_es.update_badge()
+            # Only update if we don't already have an error state
+            if not errors:
+                self.health_badge_es.status = cluster.get("status", "unknown")
+                self.health_badge_es.update_badge()
 
         # Update stat cards
         if "repositories" in status_data:
