@@ -58,7 +58,6 @@ Footer .footer-key {
 .screen-title {
     text-style: bold;
     color: $elastic-primary;
-    text-size: 2;
     padding: 1 0;
 }
 
@@ -82,18 +81,15 @@ HealthBadge {
 
 .stat-title {
     color: $elastic-gray;
-    text-size: 1;
 }
 
 .stat-value {
     color: $elastic-fg;
     text-style: bold;
-    text-size: 3;
 }
 
 .stat-subtitle {
     color: $elastic-gray;
-    text-size: 1;
 }
 
 /* Filter row */
@@ -153,7 +149,6 @@ StateBadge, ThawStatusBadge {
 
 .form-title {
     text-style: bold;
-    text-size: 2;
     color: $elastic-primary;
     margin-bottom: 1;
 }
