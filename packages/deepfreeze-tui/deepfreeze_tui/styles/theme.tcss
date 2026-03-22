@@ -13,7 +13,6 @@ $df-danger: #c61e25;
 Screen {
     background: $df-bg;
     color: $df-fg;
-    layers: default overlay;
 }
 
 /* -- Main layout -- */

@@ -7,7 +7,7 @@ from textual.widgets import Footer, Static, OptionList
 
 from deepfreeze_service import DeepfreezeService, PollingConfig
 
-from .modals import HelpOverlay
+from .modals import HelpModal
 from .widgets.panels import (
     BucketPanel,
     DetailPanel,
@@ -62,9 +62,6 @@ class DeepfreezeApp(App):
                 yield DetailPanel()
 
         yield Footer()
-
-        # Help overlay (hidden by default, floats on top via layer)
-        yield HelpOverlay()
 
     def on_mount(self) -> None:
         """Initialize service and start data loading."""
@@ -189,16 +186,26 @@ class DeepfreezeApp(App):
         self.notify("Refreshing...", timeout=2)
 
     def action_show_help(self) -> None:
-        """Toggle context-sensitive help overlay."""
-        help_overlay = self.query_one(HelpOverlay)
-        if help_overlay.is_visible:
-            help_overlay.hide()
-        else:
-            focused = self.focused
-            focused_id = ""
-            if focused is not None:
-                focused_id = focused.id or ""
-            help_overlay.show(focused_panel_id=focused_id)
+        """Show context-sensitive help modal."""
+        focused = self.focused
+        focused_id = ""
+        if focused is not None:
+            focused_id = focused.id or ""
+        self.push_screen(
+            HelpModal(focused_panel_id=focused_id),
+            callback=self._handle_help_action,
+        )
+
+    def _handle_help_action(self, action: str | None) -> None:
+        """Execute an action selected from the help modal."""
+        if not action:
+            return
+        if action == "quit":
+            self.action_quit()
+        elif action == "refresh":
+            self.action_refresh()
+        elif hasattr(self, f"action_do_{action}"):
+            getattr(self, f"action_do_{action}")()
 
     # -- Action stubs (called from panel keybindings) --
 

@@ -1,12 +1,13 @@
-"""Help overlay widget for deepfreeze TUI.
+"""Help modal for deepfreeze TUI.
 
-Uses a docked widget with `display: none` toggled on/off instead of a
-ModalScreen, so the underlying panels remain visible behind it.
+Uses ModalScreen with a translucent background so the panels
+underneath show through, per Textual's screen opacity documentation.
 """
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Container
+from textual.containers import Vertical
+from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
@@ -71,20 +72,22 @@ def _make_separator() -> Option:
     return Option("", disabled=True)
 
 
-class HelpOverlay(Container):
-    """A floating help overlay that sits on top of the app layout.
+class HelpModal(ModalScreen[str | None]):
+    """Centered help modal with translucent background.
 
-    Toggled visible/hidden. Does not replace the screen underneath.
+    The ModalScreen background is set with alpha so the panels
+    underneath show through (per Textual docs on screen opacity).
     """
 
+    BINDINGS = [
+        Binding("escape", "dismiss_modal", "Close", show=False),
+        Binding("question_mark", "dismiss_modal", "Close", show=False),
+    ]
+
     DEFAULT_CSS = """
-    HelpOverlay {
-        display: none;
-        dock: top;
-        layer: overlay;
-        width: 100%;
-        height: 100%;
+    HelpModal {
         align: center middle;
+        background: #1a1c21 80%;
     }
 
     #help-box {
@@ -123,107 +126,78 @@ class HelpOverlay(Container):
     }
     """
 
-    BINDINGS = [
-        Binding("escape", "close_help", "Close", show=False),
-        Binding("question_mark", "close_help", "Close", show=False),
-    ]
-
-    can_focus = False
-
-    def __init__(self) -> None:
-        super().__init__(id="help-overlay")
+    def __init__(self, focused_panel_id: str = "") -> None:
+        super().__init__()
+        self.focused_panel_id = focused_panel_id
         self._action_map: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
-        with Container(id="help-box") as box:
+        with Vertical(id="help-box") as box:
             box.border_title = "Keybindings"
-            yield OptionList(id="help-list")
-            yield Static("Execute: <enter> | Close: <esc>", id="help-footer")
 
-    def show(self, focused_panel_id: str = "") -> None:
-        """Show the help overlay with context-sensitive bindings."""
-        self._action_map.clear()
-        option_list = self.query_one("#help-list", OptionList)
-        option_list.clear_options()
+            options: list[Option] = []
+            idx = 0
 
-        idx = 0
+            # Panel-specific bindings
+            panel_name, panel_binds = PANEL_BINDINGS.get(
+                self.focused_panel_id, ("", [])
+            )
+            if panel_binds:
+                options.append(_make_separator())
+                options.append(
+                    Option(
+                        f"[bold #7b7b7b]{'--- ' + panel_name + ' ---':^56}[/bold #7b7b7b]",
+                        disabled=True,
+                    )
+                )
+                for key, desc, action in panel_binds:
+                    opt_id = f"help-{idx}"
+                    options.append(Option(_format_line(key, desc), id=opt_id))
+                    if action:
+                        self._action_map[opt_id] = action
+                    idx += 1
 
-        # Panel-specific bindings
-        panel_name, panel_binds = PANEL_BINDINGS.get(focused_panel_id, ("", []))
-        if panel_binds:
-            option_list.add_option(_make_separator())
-            option_list.add_option(
+            # Navigation
+            options.append(_make_separator())
+            options.append(
                 Option(
-                    f"[bold #7b7b7b]{'--- ' + panel_name + ' ---':^56}[/bold #7b7b7b]",
+                    f"[bold #7b7b7b]{'--- Navigation ---':^56}[/bold #7b7b7b]",
                     disabled=True,
                 )
             )
-            for key, desc, action in panel_binds:
+            for key, desc, action in NAV_BINDINGS:
                 opt_id = f"help-{idx}"
-                option_list.add_option(Option(_format_line(key, desc), id=opt_id))
+                options.append(Option(_format_line(key, desc), id=opt_id))
                 if action:
                     self._action_map[opt_id] = action
                 idx += 1
 
-        # Navigation
-        option_list.add_option(_make_separator())
-        option_list.add_option(
-            Option(
-                f"[bold #7b7b7b]{'--- Navigation ---':^56}[/bold #7b7b7b]",
-                disabled=True,
+            # Global
+            options.append(_make_separator())
+            options.append(
+                Option(
+                    f"[bold #7b7b7b]{'--- Global ---':^56}[/bold #7b7b7b]",
+                    disabled=True,
+                )
             )
-        )
-        for key, desc, action in NAV_BINDINGS:
-            opt_id = f"help-{idx}"
-            option_list.add_option(Option(_format_line(key, desc), id=opt_id))
-            if action:
-                self._action_map[opt_id] = action
-            idx += 1
+            for key, desc, action in GLOBAL_BINDINGS:
+                opt_id = f"help-{idx}"
+                options.append(Option(_format_line(key, desc), id=opt_id))
+                if action:
+                    self._action_map[opt_id] = action
+                idx += 1
 
-        # Global
-        option_list.add_option(_make_separator())
-        option_list.add_option(
-            Option(
-                f"[bold #7b7b7b]{'--- Global ---':^56}[/bold #7b7b7b]",
-                disabled=True,
-            )
-        )
-        for key, desc, action in GLOBAL_BINDINGS:
-            opt_id = f"help-{idx}"
-            option_list.add_option(Option(_format_line(key, desc), id=opt_id))
-            if action:
-                self._action_map[opt_id] = action
-            idx += 1
-
-        # Show and focus
-        self.styles.display = "block"
-        option_list.focus()
-
-    def hide(self) -> None:
-        """Hide the help overlay."""
-        self.styles.display = "none"
-
-    @property
-    def is_visible(self) -> bool:
-        """Check if help overlay is currently shown."""
-        return self.styles.display != "none"
-
-    def action_close_help(self) -> None:
-        """Close the help overlay."""
-        self.hide()
+            yield OptionList(*options, id="help-list")
+            yield Static("Execute: <enter> | Close: <esc>", id="help-footer")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Execute the action when an item is selected."""
         opt_id = event.option.id
-        action_name = self._action_map.get(opt_id or "") if opt_id else None
-        self.hide()
-        if action_name:
-            # Dispatch to app
-            if action_name == "quit":
-                self.app.action_quit()
-            elif action_name == "refresh":
-                self.app.action_refresh()
-            elif hasattr(self.app, f"action_do_{action_name}"):
-                getattr(self.app, f"action_do_{action_name}")()
-            elif hasattr(self.app, f"action_{action_name}"):
-                getattr(self.app, f"action_{action_name}")()
+        if opt_id and opt_id in self._action_map:
+            self.dismiss(self._action_map[opt_id])
+        else:
+            self.dismiss(None)
+
+    def action_dismiss_modal(self) -> None:
+        """Close the modal."""
+        self.dismiss(None)
