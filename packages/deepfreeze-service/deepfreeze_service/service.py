@@ -24,7 +24,21 @@ from deepfreeze_core import (
     Thaw,
 )
 from deepfreeze_core.audit import AuditLogger
-from deepfreeze_core.esclient import create_es_client_from_config
+from deepfreeze_core.esclient import create_es_client
+
+# Import config loading from CLI module (same as deepfreeze CLI)
+try:
+    from deepfreeze.config import get_elasticsearch_config, load_config
+except ImportError:
+    # Fallback if deepfreeze CLI not installed
+    from deepfreeze_core.esclient import create_es_client_from_config
+
+    def load_config(path):
+        return {}
+
+    def get_elasticsearch_config(config):
+        return {}
+
 
 from .errors import map_exception_to_error
 from .models import (
@@ -89,7 +103,10 @@ class DeepfreezeService:
         """Get or create Elasticsearch client."""
         if self._client is None:
             if self.config_path:
-                self._client = create_es_client_from_config(self.config_path)
+                # Load config the same way as CLI
+                config = load_config(self.config_path)
+                es_config = get_elasticsearch_config(config)
+                self._client = create_es_client(**es_config)
             else:
                 raise ValueError("Either config_path or client must be provided")
             self._client_owned = True
