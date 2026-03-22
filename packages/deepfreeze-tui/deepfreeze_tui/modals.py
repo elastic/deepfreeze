@@ -79,7 +79,7 @@ class HelpPanel(Vertical):
     DEFAULT_CSS = """
     HelpPanel {
         display: none;
-        position: absolute;
+        layer: overlay;
         width: 60;
         height: auto;
         max-height: 80%;
