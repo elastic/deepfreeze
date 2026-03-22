@@ -217,8 +217,11 @@ class DetailPanel(Vertical):
             ),
             id="detail-selected",
         )
-        # Tab 1: All repos list
-        yield OptionList(id="detail-all-repos")
+        # Tab 1: All repos columnar view (scrollable)
+        yield VerticalScroll(
+            Static("[dim]Loading...[/dim]", id="all-repos-content"),
+            id="detail-all-repos",
+        )
 
     def on_mount(self) -> None:
         self._update_title()
@@ -274,38 +277,66 @@ class DetailPanel(Vertical):
         self._update_title()
         self._show_active_tab()
 
+    def show_all_repos_tab(self) -> None:
+        """Switch to the All Repos tab."""
+        self._active_tab = self.TAB_ALL_REPOS
+        self._update_title()
+        self._show_active_tab()
+
     def update_all_repos(self, repos: list[dict[str, Any]]) -> None:
-        """Populate the All Repos tab."""
+        """Populate the All Repos tab with a columnar table view."""
         self._populating = True
         try:
             self._all_repos = sorted(repos, key=lambda r: r.get("name", ""))
-            all_repos_list = self.query_one("#detail-all-repos", OptionList)
-            all_repos_list.clear_options()
+            content = self.query_one("#all-repos-content", Static)
+
+            if not self._all_repos:
+                content.update("[dim]No repositories found[/dim]")
+                return
+
+            # Column header
+            lines = [
+                "[bold]"
+                f"{'Name':<20} {'Bucket':<20} {'Base Path':<22} "
+                f"{'Date Range':<25} {'Mnt':>3} {'State':<8} {'Tier':<8}"
+                "[/bold]",
+                "[dim]" + "─" * 110 + "[/dim]",
+            ]
+
+            tier_colors = {
+                "Archive": "blue",
+                "Hot": "green",
+                "Cool": "cyan",
+                "Mixed": "yellow",
+                "Empty": "dim",
+                "N/A": "dim",
+            }
+
             for repo in self._all_repos:
                 name = repo.get("name", "?")
-                state = repo.get("thaw_state", "?")
-                color = STATE_COLORS.get(state, "white")
-                mounted = "M" if repo.get("is_mounted") else " "
+                bucket = repo.get("bucket", "N/A")
+                base_path = repo.get("base_path", "N/A")
                 start = repo.get("start", "")
                 end = repo.get("end", "")
-                date_range = f"{start}..{end}" if start and end else ""
-                all_repos_list.add_option(
-                    Option(
-                        f"{mounted} {name}  [{color}]{state:<8}[/{color}] {date_range}",
-                        id=name,
-                    )
+                date_range = f"{start} - {end}" if start and end else ""
+                mounted = (
+                    "[green]Yes[/green]" if repo.get("is_mounted") else "[red]No[/red] "
                 )
+                state = repo.get("thaw_state", "?")
+                state_color = STATE_COLORS.get(state, "white")
+                tier = repo.get("storage_tier", "N/A")
+                tier_color = tier_colors.get(tier, "white")
+
+                lines.append(
+                    f"{name:<20} {bucket:<20} {base_path:<22} "
+                    f"{date_range:<25} {mounted:>3} "
+                    f"[{state_color}]{state:<8}[/{state_color}] "
+                    f"[{tier_color}]{tier:<8}[/{tier_color}]"
+                )
+
+            content.update("\n".join(lines))
         finally:
             self._populating = False
-
-    def get_all_repos_selected(self) -> dict[str, Any] | None:
-        """Get the repo selected in the All Repos tab."""
-        all_repos_list = self.query_one("#detail-all-repos", OptionList)
-        if all_repos_list.highlighted is not None and all_repos_list.highlighted < len(
-            self._all_repos
-        ):
-            return self._all_repos[all_repos_list.highlighted]
-        return None
 
     # -- Show methods (always update the Selected tab content) --
 

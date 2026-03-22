@@ -97,18 +97,8 @@ OptionList > .option-list--option {
     background: #1a1c21;
 }
 
-#detail-all-repos > .option-list--option {
+#all-repos-content {
     padding: 0 1;
-}
-
-#detail-all-repos > .option-list--option-highlighted {
-    background: #252830;
-    color: #dfe5ef;
-}
-
-#detail-all-repos:focus > .option-list--option-highlighted {
-    background: #0b64dd;
-    color: white;
 }
 
 /* -- Detail content -- */
