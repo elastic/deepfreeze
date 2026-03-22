@@ -140,3 +140,100 @@ class ThawDialog(Vertical):
 
     def action_cancel(self) -> None:
         self._cancel()
+
+
+class ConfirmDialog(Vertical):
+    """Reusable confirmation overlay dialog.
+
+    Floats on the 'overlay' layer like HelpPanel and ThawDialog.
+    Shows a message and Yes/No buttons. Calls back with True or False.
+    """
+
+    DEFAULT_CSS = """
+    ConfirmDialog {
+        display: none;
+        layer: overlay;
+        width: 50;
+        height: auto;
+        border: solid #008a5e;
+        border-title-color: #008a5e;
+        border-title-style: bold;
+        border-title-align: center;
+        background: #1a1c21;
+        padding: 1 2;
+    }
+
+    ConfirmDialog #confirm-message {
+        margin: 1 0;
+        color: #dfe5ef;
+        text-align: center;
+    }
+
+    ConfirmDialog .dialog-buttons {
+        height: 3;
+        margin-top: 1;
+        align: center middle;
+    }
+
+    ConfirmDialog Button {
+        margin: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", show=False, priority=True),
+        Binding("y", "confirm_yes", "Yes", show=False, priority=True),
+        Binding("n", "cancel", "No", show=False, priority=True),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__(id="confirm-dialog")
+        self._callback = None
+
+    def compose(self) -> ComposeResult:
+        self.border_title = "Confirm"
+        yield Label("Are you sure?", id="confirm-message")
+        with Horizontal(classes="dialog-buttons"):
+            yield Button("[Y]es", variant="success", id="btn-yes")
+            yield Button("[N]o", variant="default", id="btn-no")
+
+    def show(self, message: str, title: str = "Confirm", callback=None) -> None:
+        """Show the confirmation dialog."""
+        self._callback = callback
+        self.border_title = title
+        self.query_one("#confirm-message", Label).update(message)
+        self.styles.display = "block"
+        try:
+            screen_w = self.app.size.width
+            screen_h = self.app.size.height
+            panel_w = 50
+            self.styles.offset = (
+                max(0, (screen_w - panel_w) // 2),
+                max(0, (screen_h - 10) // 2),
+            )
+        except Exception:
+            pass
+        self.query_one("#btn-yes", Button).focus()
+
+    def hide(self) -> None:
+        self.styles.display = "none"
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-yes":
+            self.hide()
+            if self._callback:
+                self._callback(True)
+        else:
+            self.hide()
+            if self._callback:
+                self._callback(False)
+
+    def action_confirm_yes(self) -> None:
+        self.hide()
+        if self._callback:
+            self._callback(True)
+
+    def action_cancel(self) -> None:
+        self.hide()
+        if self._callback:
+            self._callback(False)

@@ -7,7 +7,7 @@ from textual.widgets import Footer, Static, OptionList
 
 from deepfreeze_service import DeepfreezeService, PollingConfig
 
-from .dialogs import ThawDialog
+from .dialogs import ConfirmDialog, ThawDialog
 from .modals import HelpPanel
 from .widgets.panels import (
     BucketPanel,
@@ -67,6 +67,7 @@ class DeepfreezeApp(App):
         # Overlay panels - float over layout when toggled visible
         yield HelpPanel()
         yield ThawDialog()
+        yield ConfirmDialog()
 
     def on_mount(self) -> None:
         """Initialize service and start data loading."""
@@ -201,9 +202,18 @@ class DeepfreezeApp(App):
     # -- Real action implementations --
 
     def action_do_rotate(self) -> None:
-        """Execute rotate action."""
+        """Execute rotate action after confirmation."""
         if not self.service:
             self.notify("Service not initialized", severity="error")
+            return
+        self.query_one(ConfirmDialog).show(
+            message="Rotate will create a new repository and archive old ones.\nProceed?",
+            title="Confirm Rotate",
+            callback=self._on_rotate_confirmed,
+        )
+
+    def _on_rotate_confirmed(self, confirmed: bool) -> None:
+        if not confirmed:
             return
         self.notify("Running rotate...", timeout=3)
         self.run_worker(self._exec_rotate())
@@ -240,9 +250,18 @@ class DeepfreezeApp(App):
         self._show_result("Thaw", result)
 
     def action_do_cleanup(self) -> None:
-        """Execute cleanup action."""
+        """Execute cleanup action after confirmation."""
         if not self.service:
             self.notify("Service not initialized", severity="error")
+            return
+        self.query_one(ConfirmDialog).show(
+            message="Cleanup will unmount expired repos and delete old thaw requests.\nProceed?",
+            title="Confirm Cleanup",
+            callback=self._on_cleanup_confirmed,
+        )
+
+    def _on_cleanup_confirmed(self, confirmed: bool) -> None:
+        if not confirmed:
             return
         self.notify("Running cleanup...", timeout=3)
         self.run_worker(self._exec_cleanup())
@@ -264,7 +283,7 @@ class DeepfreezeApp(App):
         self._show_result("Repair", result)
 
     def action_do_refreeze(self) -> None:
-        """Refreeze the selected thaw request."""
+        """Refreeze the selected thaw request after confirmation."""
         if not self.service:
             self.notify("Service not initialized", severity="error")
             return
@@ -276,6 +295,20 @@ class DeepfreezeApp(App):
         req_id = req.get("id", req.get("request_id"))
         if not req_id:
             self.notify("Could not determine request ID", severity="error")
+            return
+        short_id = req_id[-8:] if len(req_id) > 8 else req_id
+        self._pending_refreeze_id = req_id
+        self.query_one(ConfirmDialog).show(
+            message=f"Refreeze will unmount indices and refreeze request {short_id}.\nProceed?",
+            title="Confirm Refreeze",
+            callback=self._on_refreeze_confirmed,
+        )
+
+    def _on_refreeze_confirmed(self, confirmed: bool) -> None:
+        if not confirmed:
+            return
+        req_id = getattr(self, "_pending_refreeze_id", None)
+        if not req_id:
             return
         self.notify(f"Refreezing {req_id[-8:]}...", timeout=3)
         self.run_worker(self._exec_refreeze(req_id))
