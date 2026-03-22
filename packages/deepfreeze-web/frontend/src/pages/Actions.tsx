@@ -15,7 +15,6 @@ import {
   EuiSwitch,
   EuiGlobalToastList,
   EuiIcon,
-  type EuiToastProps,
 } from '@elastic/eui';
 import moment, { type Moment } from 'moment';
 import { api, type CommandResult } from '../api/client';
@@ -66,7 +65,12 @@ const actionCards: ActionCard[] = [
   },
 ];
 
-type Toast = EuiToastProps & { id: string };
+interface Toast {
+  id: string;
+  title: string;
+  color: 'success' | 'danger' | 'warning';
+  text?: string;
+}
 
 export default function Actions() {
   const [activeAction, setActiveAction] = useState<string | null>(null);

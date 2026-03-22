@@ -26,7 +26,7 @@ export default function Activity() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortField, setSortField] = useState<string>('timestamp');
+  const [sortField, setSortField] = useState<keyof AuditEntry>('timestamp');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState(25);
@@ -52,8 +52,8 @@ export default function Activity() {
   }, [fetchAudit]);
 
   const sorted = [...entries].sort((a, b) => {
-    const aVal = String((a as Record<string, unknown>)[sortField] ?? '');
-    const bVal = String((b as Record<string, unknown>)[sortField] ?? '');
+    const aVal = String(a[sortField] ?? '');
+    const bVal = String(b[sortField] ?? '');
     return sortDirection === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
   });
 
@@ -135,7 +135,7 @@ export default function Activity() {
       setPageSize(page.size);
     }
     if (sort) {
-      setSortField(sort.field as string);
+      setSortField(sort.field as keyof AuditEntry);
       setSortDirection(sort.direction);
     }
   };
