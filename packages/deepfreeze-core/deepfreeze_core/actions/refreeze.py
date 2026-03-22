@@ -10,6 +10,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
+from deepfreeze_core.audit import AuditLogger
 from deepfreeze_core.constants import (
     STATUS_INDEX,
     THAW_STATUS_COMPLETED,
@@ -62,6 +63,7 @@ class Refreeze:
         thaw_request_id: str = None,  # Alias for request_id (curator CLI uses this name)
         all_requests: bool = False,
         porcelain: bool = False,
+        audit: AuditLogger = None,
         **kwargs,  # Accept extra kwargs for compatibility with curator CLI
     ) -> None:
         self.loggit = logging.getLogger("deepfreeze.actions.refreeze")
@@ -75,6 +77,7 @@ class Refreeze:
         self.request_id = request_id or thaw_request_id
         self.all_requests = all_requests
         self.porcelain = porcelain
+        self.audit = audit
 
         # Will be loaded during action
         self.settings = None
@@ -237,6 +240,17 @@ class Refreeze:
         """
         self.loggit.info("DRY-RUN MODE.  No changes will be made.")
 
+        tracker = None
+        if self.audit:
+            tracker = self.audit.start_tracking(
+                action="refreeze",
+                dry_run=True,
+                parameters={
+                    "request_id": self.request_id,
+                    "all_requests": self.all_requests,
+                },
+            )
+
         try:
             self._load_settings()
 
@@ -249,7 +263,33 @@ class Refreeze:
                         print(f"ERROR\t{result['error']}")
                     else:
                         self.console.print(f"[red]Error: {result['error']}[/red]")
+                    if tracker:
+                        tracker.add_error(
+                            {"code": "REQUEST_ERROR", "message": result["error"]}
+                        )
                     return
+
+                if tracker:
+                    tracker.add_result(
+                        {
+                            "type": "thaw_request",
+                            "action": "would_refreeze",
+                            "target": self.request_id,
+                            "status": "dry_run",
+                        }
+                    )
+                    for r in result.get("results", []):
+                        tracker.add_result(
+                            {
+                                "type": "repository",
+                                "action": "would_refreeze",
+                                "target": r["repo"],
+                                "status": "dry_run",
+                            }
+                        )
+                    tracker.set_summary(
+                        {"requests": 1, "repositories": len(result.get("results", []))}
+                    )
 
                 if self.porcelain:
                     print(f"DRY_RUN\trefreeze_request\t{self.request_id}")
@@ -279,7 +319,28 @@ class Refreeze:
                         self.console.print(
                             "[dim]No completed thaw requests to refreeze[/dim]"
                         )
+                    if tracker:
+                        tracker.set_summary({"requests": 0, "repositories": 0})
                     return
+
+                if tracker:
+                    for req in completed:
+                        tracker.add_result(
+                            {
+                                "type": "thaw_request",
+                                "action": "would_refeeze",
+                                "target": req.get("request_id"),
+                                "status": "dry_run",
+                            }
+                        )
+                    tracker.set_summary(
+                        {
+                            "requests": len(completed),
+                            "repositories": sum(
+                                len(req.get("repos", [])) for req in completed
+                            ),
+                        }
+                    )
 
                 if self.porcelain:
                     for req in completed:
@@ -319,13 +380,25 @@ class Refreeze:
                     self.console.print(
                         "[red]Error: Provide either --request-id or --all[/red]"
                     )
+                if tracker:
+                    tracker.add_error(
+                        {
+                            "code": "MISSING_PARAMS",
+                            "message": "Provide --request-id or --all",
+                        }
+                    )
 
         except (MissingIndexError, MissingSettingsError) as e:
             if self.porcelain:
                 print(f"ERROR\t{type(e).__name__}\t{str(e)}")
             else:
                 self.console.print(f"[red]Error: {e}[/red]")
+            if tracker:
+                tracker.add_error({"code": type(e).__name__, "message": str(e)})
             raise
+        finally:
+            if tracker and self.audit:
+                self.audit.commit(tracker)
 
     def do_action(self) -> None:
         """
@@ -335,6 +408,17 @@ class Refreeze:
         :rtype: None
         """
         self.loggit.debug("Starting Refreeze action")
+
+        tracker = None
+        if self.audit:
+            tracker = self.audit.start_tracking(
+                action="refreeze",
+                dry_run=False,
+                parameters={
+                    "request_id": self.request_id,
+                    "all_requests": self.all_requests,
+                },
+            )
 
         try:
             self._load_settings()
@@ -355,12 +439,60 @@ class Refreeze:
                                 expand=False,
                             )
                         )
+                    if tracker:
+                        tracker.add_error(
+                            {"code": "REQUEST_ERROR", "message": result["error"]}
+                        )
                     return
+
+                # Track the request refrozen
+                if tracker:
+                    tracker.add_result(
+                        {
+                            "type": "thaw_request",
+                            "action": "refrozen",
+                            "target": self.request_id,
+                            "status": "success",
+                        }
+                    )
 
                 # Display results
                 results = result.get("results", [])
                 successful = [r for r in results if r["success"]]
                 failed = [r for r in results if not r["success"]]
+
+                # Track repository refreezes
+                if tracker:
+                    for r in results:
+                        if r["success"]:
+                            tracker.add_result(
+                                {
+                                    "type": "repository",
+                                    "action": "refrozen",
+                                    "target": r["repo"],
+                                    "status": "success",
+                                    "indices_removed": len(
+                                        r.get("deleted_indices", [])
+                                    ),
+                                }
+                            )
+                        else:
+                            tracker.add_result(
+                                {
+                                    "type": "repository",
+                                    "action": "refrozen",
+                                    "target": r["repo"],
+                                    "status": "failed",
+                                    "error": r.get("error"),
+                                }
+                            )
+                    tracker.set_summary(
+                        {
+                            "requests_refrozen": 1,
+                            "repositories_refrozen": len(successful),
+                            "repositories_failed": len(failed),
+                        }
+                    )
 
                 if self.porcelain:
                     for r in results:
@@ -412,9 +544,17 @@ class Refreeze:
                         self.console.print(
                             "[dim]No completed thaw requests to refreeze[/dim]"
                         )
+                    if tracker:
+                        tracker.set_summary(
+                            {"requests_refrozen": 0, "repositories_refrozen": 0}
+                        )
                     return
 
                 all_results = []
+                requests_refrozen = 0
+                repositories_refrozen = 0
+                repositories_failed = 0
+
                 for req in completed:
                     req_id = req.get("request_id", req.get("id"))
                     if self.porcelain:
@@ -426,6 +566,64 @@ class Refreeze:
 
                     result = self._refreeze_request(req_id)
                     all_results.append(result)
+
+                    # Track results for this request
+                    if tracker:
+                        if not result.get("error"):
+                            tracker.add_result(
+                                {
+                                    "type": "thaw_request",
+                                    "action": "refrozen",
+                                    "target": req_id,
+                                    "status": "success",
+                                }
+                            )
+                            requests_refrozen += 1
+                        else:
+                            tracker.add_result(
+                                {
+                                    "type": "thaw_request",
+                                    "action": "refrozen",
+                                    "target": req_id,
+                                    "status": "failed",
+                                    "error": result.get("error"),
+                                }
+                            )
+
+                        for r in result.get("results", []):
+                            if r["success"]:
+                                tracker.add_result(
+                                    {
+                                        "type": "repository",
+                                        "action": "refrozen",
+                                        "target": r["repo"],
+                                        "status": "success",
+                                        "indices_removed": len(
+                                            r.get("deleted_indices", [])
+                                        ),
+                                    }
+                                )
+                                repositories_refrozen += 1
+                            else:
+                                tracker.add_result(
+                                    {
+                                        "type": "repository",
+                                        "action": "refrozen",
+                                        "target": r["repo"],
+                                        "status": "failed",
+                                        "error": r.get("error"),
+                                    }
+                                )
+                                repositories_failed += 1
+
+                if tracker:
+                    tracker.set_summary(
+                        {
+                            "requests_refrozen": requests_refrozen,
+                            "repositories_refrozen": repositories_refrozen,
+                            "repositories_failed": repositories_failed,
+                        }
+                    )
 
                 # Summary
                 total_repos = sum(len(r.get("results", [])) for r in all_results)
@@ -465,6 +663,13 @@ class Refreeze:
                             expand=False,
                         )
                     )
+                if tracker:
+                    tracker.add_error(
+                        {
+                            "code": "MISSING_PARAMS",
+                            "message": "Provide --request-id or --all",
+                        }
+                    )
 
         except (MissingIndexError, MissingSettingsError) as e:
             if self.porcelain:
@@ -480,6 +685,8 @@ class Refreeze:
                         expand=False,
                     )
                 )
+            if tracker:
+                tracker.add_error({"code": type(e).__name__, "message": str(e)})
             raise
 
         except Exception as e:
@@ -497,4 +704,10 @@ class Refreeze:
                     )
                 )
             self.loggit.error("Refreeze failed: %s", e, exc_info=True)
+            if tracker:
+                tracker.add_error({"code": "UNEXPECTED", "message": str(e)})
             raise
+
+        finally:
+            if tracker and self.audit:
+                self.audit.commit(tracker)

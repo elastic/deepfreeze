@@ -16,6 +16,7 @@ from rich.spinner import Spinner
 from rich.table import Table
 
 from deepfreeze_core.constants import STATUS_INDEX
+from deepfreeze_core.audit import AuditLogger
 from deepfreeze_core.exceptions import (
     ActionError,
     MissingIndexError,
@@ -59,6 +60,8 @@ class Status:
         show_config: bool = False,
         show_time: bool = False,
         limit: int = None,
+        show_audit: int = None,
+        audit: AuditLogger = None,
         **kwargs,  # Accept extra kwargs for compatibility with curator CLI
     ) -> None:
         self.loggit = logging.getLogger("deepfreeze.actions.status")
@@ -71,6 +74,8 @@ class Status:
         self.porcelain = porcelain
         self.limit = limit
         self.show_time = show_time
+        self.show_audit = show_audit
+        self.audit = audit
 
         # Section flags - if none specified, show all
         any_section_specified = (
@@ -166,7 +171,9 @@ class Status:
             else:
                 return "Unknown"
         except Exception as e:
-            self.loggit.debug("Error getting storage tier for %s/%s: %s", bucket, base_path, e)
+            self.loggit.debug(
+                "Error getting storage tier for %s/%s: %s", bucket, base_path, e
+            )
             return "N/A"
 
     def _get_repositories_status(self) -> list:
@@ -483,6 +490,36 @@ class Status:
                 )
                 self.console.print()
 
+    def _display_audit_table(self, entries: list):
+        """Display audit entries in a Rich table."""
+        if not entries:
+            self.console.print("[dim]No recent audit entries found.[/dim]")
+            return
+
+        table = Table(
+            title=f"Recent Audit Log (last {len(entries)} entries)",
+            show_header=True,
+            header_style="bold blue",
+        )
+        table.add_column("Timestamp")
+        table.add_column("Action")
+        table.add_column("Dry Run")
+        table.add_column("Success")
+        table.add_column("Duration")
+        table.add_column("User")
+
+        for entry in entries:
+            table.add_row(
+                entry.get("timestamp", "N/A")[:19],
+                entry.get("action", "N/A"),
+                "Yes" if entry.get("dry_run") else "No",
+                "✓" if entry.get("success") else "✗",
+                f"{entry.get('duration_ms', 0) / 1000:.1f}s",
+                entry.get("user", "unknown"),
+            )
+
+        self.console.print(table)
+
     def do_dry_run(self) -> None:
         """
         Perform a dry-run of the status check.
@@ -497,7 +534,7 @@ class Status:
     def _gather_status_info(self):
         """
         Gather all status information. This method contains the potentially slow operations.
-        
+
         :return: tuple of (repos, thaw_requests, buckets, ilm_policies)
         :rtype: tuple
         """
@@ -509,7 +546,7 @@ class Status:
         thaw_requests = self._get_thaw_requests()
         buckets = self._get_buckets_info()
         ilm_policies = self._get_ilm_policies()
-        
+
         return repos, thaw_requests, buckets, ilm_policies
 
     def do_action(self) -> None:
@@ -525,16 +562,24 @@ class Status:
         # Setup for delayed spinner display
         gather_completed = threading.Event()
         live_display = None
-        
+
         def show_spinner():
             """Show spinner if operation takes too long."""
             nonlocal live_display
             if not gather_completed.wait(5.0):  # Wait 5 seconds
                 if not self.porcelain:
-                    spinner = Spinner("dots", text="[dim]...still gathering status, please be patient...[/dim]")
-                    live_display = Live(spinner, console=Console(stderr=True, force_terminal=True), refresh_per_second=10, transient=True)
+                    spinner = Spinner(
+                        "dots",
+                        text="[dim]...still gathering status, please be patient...[/dim]",
+                    )
+                    live_display = Live(
+                        spinner,
+                        console=Console(stderr=True, force_terminal=True),
+                        refresh_per_second=10,
+                        transient=True,
+                    )
                     live_display.start()
-        
+
         # Start the delayed spinner timer
         timer_thread = threading.Thread(target=show_spinner, daemon=True)
         timer_thread.start()
@@ -542,7 +587,7 @@ class Status:
         try:
             # Gather all status information (potentially slow operations)
             repos, thaw_requests, buckets, ilm_policies = self._gather_status_info()
-            
+
             # Signal that gathering is complete and stop spinner if running
             gather_completed.set()
             if live_display is not None:
@@ -553,6 +598,17 @@ class Status:
                 self._display_porcelain(repos, thaw_requests, buckets, ilm_policies)
             else:
                 self._display_rich(repos, thaw_requests, buckets, ilm_policies)
+
+            # Add audit section if requested
+            if self.show_audit and self.audit:
+                audit_entries = self.audit.get_recent_entries(limit=self.show_audit)
+                if self.porcelain:
+                    # Add to the already printed output - need to handle differently
+                    # For now, just print audit separately
+                    output = {"audit": audit_entries}
+                    print(json.dumps(output, indent=2))
+                else:
+                    self._display_audit_table(audit_entries)
 
         except MissingIndexError:
             gather_completed.set()  # Make sure to signal completion even on error

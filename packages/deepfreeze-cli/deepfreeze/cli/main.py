@@ -10,7 +10,12 @@ from datetime import datetime
 from pathlib import Path
 
 import click
-from deepfreeze_core import ActionError, DeepfreezeException, create_es_client
+from deepfreeze_core import (
+    ActionError,
+    AuditLogger,
+    DeepfreezeException,
+    create_es_client,
+)
 
 from deepfreeze import __version__
 from deepfreeze.config import configure_logging, get_elasticsearch_config, load_config
@@ -116,9 +121,24 @@ def cli(ctx, config_path, dry_run):
         # Client will be created lazily when needed
         ctx.obj["client"] = None
 
+        # AuditLogger will be created lazily when needed
+        ctx.obj["audit"] = None
+
     except ActionError as e:
         click.echo(f"Configuration error: {e}", err=True)
         ctx.exit(1)
+
+
+def get_audit_from_context(ctx):
+    """Get or create an AuditLogger from the CLI context."""
+    if "audit" not in ctx.obj or ctx.obj["audit"] is None:
+        try:
+            client = get_client_from_context(ctx)
+            ctx.obj["audit"] = AuditLogger(client)
+        except Exception:
+            # Audit logging is optional - if ES is not available, proceed without audit
+            ctx.obj["audit"] = None
+    return ctx.obj["audit"]
 
 
 @cli.command()
@@ -295,6 +315,7 @@ def setup(
     from deepfreeze_core.actions import Setup
 
     client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
 
     # Azure container names don't allow underscores - offer to convert them
     if provider == "azure":
@@ -334,6 +355,7 @@ def setup(
 
     action = Setup(
         client=client,
+        audit=audit,
         year=year,
         month=month,
         repo_name_prefix=repo_name_prefix,
@@ -403,9 +425,11 @@ def rotate(
     from deepfreeze_core.actions import Rotate
 
     client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
 
     action = Rotate(
         client=client,
+        audit=audit,
         year=year,
         month=month,
         keep=keep,
@@ -476,6 +500,16 @@ def rotate(
     help="Show configuration section only",
 )
 @click.option(
+    "-a",
+    "--audit",
+    "show_audit",
+    type=int,
+    default=None,
+    is_flag=False,
+    flag_value=25,
+    help="Show recent audit log entries (default: 25, or specify count)",
+)
+@click.option(
     "-p",
     "--porcelain",
     is_flag=True,
@@ -492,6 +526,7 @@ def status(
     buckets,
     ilm,
     show_config_flag,
+    show_audit,
     porcelain,
 ):
     """
@@ -504,6 +539,7 @@ def status(
     from deepfreeze_core.actions import Status
 
     client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
 
     # Create action with all status parameters
     action = Status(
@@ -516,6 +552,8 @@ def status(
         show_ilm=ilm,
         show_config=show_config_flag,
         show_time=show_time,
+        show_audit=show_audit,
+        audit=audit,
     )
 
     try:
@@ -556,9 +594,11 @@ def cleanup(
     from deepfreeze_core.actions import Cleanup
 
     client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
 
     action = Cleanup(
         client=client,
+        audit=audit,
         porcelain=porcelain,
         refrozen_retention_days=refrozen_retention_days,
     )
@@ -622,12 +662,14 @@ def refreeze(
     from deepfreeze_core.actions import Refreeze
 
     client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
 
     # Determine if refreezing all requests
     all_requests = thaw_request_id is None
 
     action = Refreeze(
         client=client,
+        audit=audit,
         request_id=thaw_request_id,
         all_requests=all_requests,
         porcelain=porcelain,
@@ -823,9 +865,11 @@ def thaw(
             ctx.exit(1)
 
     client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
 
     action = Thaw(
         client=client,
+        audit=audit,
         start_date=parsed_start_date,
         end_date=parsed_end_date,
         request_id=request_id_for_action,
@@ -877,9 +921,11 @@ def repair_metadata(ctx, porcelain):
     from deepfreeze_core.actions import RepairMetadata
 
     client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
 
     action = RepairMetadata(
         client=client,
+        audit=audit,
         porcelain=porcelain,
     )
 

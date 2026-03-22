@@ -10,9 +10,11 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
+from deepfreeze_core.audit import AuditLogger
 from deepfreeze_core.constants import (
     STATUS_INDEX,
     THAW_STATE_ACTIVE,
+    THAW_STATE_EXPIRED,
     THAW_STATE_FROZEN,
     THAW_STATE_THAWED,
     THAW_STATE_THAWING,
@@ -52,6 +54,7 @@ class RepairMetadata:
         self,
         client: Elasticsearch,
         porcelain: bool = False,
+        audit: AuditLogger = None,
         **kwargs,  # Accept extra kwargs for compatibility with curator CLI
     ) -> None:
         self.loggit = logging.getLogger("deepfreeze.actions.repair_metadata")
@@ -62,6 +65,7 @@ class RepairMetadata:
 
         self.client = client
         self.porcelain = porcelain
+        self.audit = audit
 
         # Will be loaded during action
         self.settings = None
@@ -209,7 +213,10 @@ class RepairMetadata:
 
             if repo.thaw_state in [THAW_STATE_ACTIVE, THAW_STATE_THAWED]:
                 # These states should have instant-access storage
-                if actual["glacier"] == actual["total_objects"] and actual["total_objects"] > 0:
+                if (
+                    actual["glacier"] == actual["total_objects"]
+                    and actual["total_objects"] > 0
+                ):
                     # All objects in archive - should be frozen
                     is_discrepancy = True
                     suggested_state = THAW_STATE_FROZEN
@@ -221,7 +228,10 @@ class RepairMetadata:
 
             elif repo.thaw_state == THAW_STATE_FROZEN:
                 # This state should have archive storage
-                if actual["instant_access"] == actual["total_objects"] and actual["total_objects"] > 0:
+                if (
+                    actual["instant_access"] == actual["total_objects"]
+                    and actual["total_objects"] > 0
+                ):
                     # All objects accessible - was restored (thawed)
                     is_discrepancy = True
                     suggested_state = THAW_STATE_THAWED
@@ -232,18 +242,27 @@ class RepairMetadata:
 
             elif repo.thaw_state == THAW_STATE_THAWING:
                 # This state should have some objects restoring or all accessible
-                if actual["glacier"] == actual["total_objects"] and actual["total_objects"] > 0:
+                if (
+                    actual["glacier"] == actual["total_objects"]
+                    and actual["total_objects"] > 0
+                ):
                     # All still in archive - thaw failed or not started
                     is_discrepancy = True
                     suggested_state = THAW_STATE_FROZEN
-                elif actual["instant_access"] == actual["total_objects"] and actual["total_objects"] > 0:
+                elif (
+                    actual["instant_access"] == actual["total_objects"]
+                    and actual["total_objects"] > 0
+                ):
                     # All accessible - thaw completed
                     is_discrepancy = True
                     suggested_state = THAW_STATE_THAWED
 
             elif repo.thaw_state == THAW_STATE_EXPIRED:
                 # Expired should have archive storage (restore expired)
-                if actual["instant_access"] == actual["total_objects"] and actual["total_objects"] > 0:
+                if (
+                    actual["instant_access"] == actual["total_objects"]
+                    and actual["total_objects"] > 0
+                ):
                     # Still accessible - not actually expired
                     is_discrepancy = True
                     suggested_state = THAW_STATE_THAWED
@@ -418,7 +437,9 @@ class RepairMetadata:
                     result["error"] = "No timestamp data found in indices"
             except Exception as e:
                 result["error"] = str(e)
-                self.loggit.error("Failed to update date range for %s: %s", repo.name, e)
+                self.loggit.error(
+                    "Failed to update date range for %s: %s", repo.name, e
+                )
 
             results.append(result)
 
@@ -433,6 +454,15 @@ class RepairMetadata:
         """
         self.loggit.info("DRY-RUN MODE.  No changes will be made.")
 
+        # Initialize audit tracking
+        tracker = None
+        if self.audit:
+            tracker = self.audit.start_tracking(
+                action="repair_metadata",
+                dry_run=True,
+                parameters={},
+            )
+
         try:
             self._load_settings()
 
@@ -446,6 +476,44 @@ class RepairMetadata:
             # Also check for missing date ranges on mounted repos
             date_range_updates = self._update_date_ranges(dry_run=True)
 
+            # Record discrepancies in audit log
+            if tracker:
+                for d in discrepancies:
+                    if d.get("error"):
+                        tracker.add_result(
+                            {
+                                "type": "discrepancy",
+                                "repository": d["repo"],
+                                "recorded_state": d["recorded_state"],
+                                "actual_state": None,
+                                "error": d["error"],
+                            }
+                        )
+                    else:
+                        tracker.add_result(
+                            {
+                                "type": "discrepancy",
+                                "repository": d["repo"],
+                                "recorded_state": d["recorded_state"],
+                                "actual_state": d["actual_state"],
+                            }
+                        )
+
+                for u in date_range_updates:
+                    tracker.add_result(
+                        {
+                            "type": "date_range_missing",
+                            "repository": u["repo"],
+                        }
+                    )
+
+                tracker.set_summary(
+                    {
+                        "discrepancies_found": len(discrepancies),
+                        "date_ranges_missing": len(date_range_updates),
+                    }
+                )
+
             if self.porcelain:
                 for d in discrepancies:
                     if d.get("error"):
@@ -457,7 +525,9 @@ class RepairMetadata:
                         )
                 for u in date_range_updates:
                     print(f"DATE_RANGE\t{u['repo']}\tmissing")
-                print(f"SUMMARY\t{len(discrepancies)} discrepancies\t{len(date_range_updates)} missing date ranges")
+                print(
+                    f"SUMMARY\t{len(discrepancies)} discrepancies\t{len(date_range_updates)} missing date ranges"
+                )
                 return
 
             if not discrepancies and not date_range_updates:
@@ -538,11 +608,16 @@ class RepairMetadata:
             )
 
         except (MissingIndexError, MissingSettingsError) as e:
+            if tracker:
+                tracker.add_error({"code": type(e).__name__, "message": str(e)})
             if self.porcelain:
                 print(f"ERROR\t{type(e).__name__}\t{str(e)}")
             else:
                 self.console.print(f"[red]Error: {e}[/red]")
             raise
+        finally:
+            if self.audit and tracker:
+                self.audit.commit(tracker)
 
     def do_action(self) -> None:
         """
@@ -552,6 +627,15 @@ class RepairMetadata:
         :rtype: None
         """
         self.loggit.debug("Starting RepairMetadata action")
+
+        # Initialize audit tracking
+        tracker = None
+        if self.audit:
+            tracker = self.audit.start_tracking(
+                action="repair_metadata",
+                dry_run=False,
+                parameters={},
+            )
 
         try:
             self._load_settings()
@@ -567,6 +651,15 @@ class RepairMetadata:
             date_range_results = self._update_date_ranges(dry_run=False)
 
             if not discrepancies and not date_range_results:
+                if tracker:
+                    tracker.set_summary(
+                        {
+                            "discrepancies_found": 0,
+                            "discrepancies_repaired": 0,
+                            "date_ranges_updated": 0,
+                            "failures": 0,
+                        }
+                    )
                 if self.porcelain:
                     print("COMPLETE\t0 discrepancies\t0 date ranges")
                 else:
@@ -592,21 +685,89 @@ class RepairMetadata:
                     result = self._repair_discrepancy(d)
                     state_results.append(result)
 
+                    # Record state repair result in audit log
+                    if tracker:
+                        if result["success"]:
+                            tracker.add_result(
+                                {
+                                    "type": "state_repair",
+                                    "repository": result["repo"],
+                                    "old_state": result["old_state"],
+                                    "new_state": result["new_state"],
+                                    "action": "repaired",
+                                    "status": "success",
+                                }
+                            )
+                        else:
+                            tracker.add_result(
+                                {
+                                    "type": "state_repair",
+                                    "repository": result["repo"],
+                                    "old_state": result["old_state"],
+                                    "new_state": result["new_state"],
+                                    "action": "repaired",
+                                    "status": "failed",
+                                    "error": result.get("error"),
+                                }
+                            )
+
+            # Record date range results in audit log
+            if tracker:
+                for r in date_range_results:
+                    if r["success"]:
+                        tracker.add_result(
+                            {
+                                "type": "date_range",
+                                "repository": r["repo"],
+                                "start": r.get("new_start"),
+                                "end": r.get("new_end"),
+                                "action": "updated",
+                                "status": "success",
+                            }
+                        )
+                    else:
+                        tracker.add_result(
+                            {
+                                "type": "date_range",
+                                "repository": r["repo"],
+                                "action": "updated",
+                                "status": "failed",
+                                "error": r.get("error"),
+                            }
+                        )
+
             # Display results
             state_success = sum(1 for r in state_results if r["success"])
             state_fail = sum(1 for r in state_results if not r["success"])
             date_success = sum(1 for r in date_range_results if r["success"])
             date_fail = sum(1 for r in date_range_results if not r["success"])
 
+            # Set summary in audit log
+            if tracker:
+                tracker.set_summary(
+                    {
+                        "discrepancies_found": len(discrepancies),
+                        "discrepancies_repaired": state_success,
+                        "date_ranges_updated": date_success,
+                        "failures": state_fail + date_fail,
+                    }
+                )
+
             if self.porcelain:
                 for r in state_results:
                     status = "SUCCESS" if r["success"] else "FAILED"
-                    print(f"STATE\t{status}\t{r['repo']}\t{r['old_state']}\t{r['new_state']}")
+                    print(
+                        f"STATE\t{status}\t{r['repo']}\t{r['old_state']}\t{r['new_state']}"
+                    )
                 for r in date_range_results:
                     status = "SUCCESS" if r["success"] else "FAILED"
                     error_msg = f"\t{r['error']}" if r.get("error") else ""
-                    print(f"DATE_RANGE\t{status}\t{r['repo']}\t{r.get('new_start')}\t{r.get('new_end')}{error_msg}")
-                print(f"COMPLETE\t{state_success + date_success} repaired\t{state_fail + date_fail} failed")
+                    print(
+                        f"DATE_RANGE\t{status}\t{r['repo']}\t{r.get('new_start')}\t{r.get('new_end')}{error_msg}"
+                    )
+                print(
+                    f"COMPLETE\t{state_success + date_success} repaired\t{state_fail + date_fail} failed"
+                )
             else:
                 total_fail = state_fail + date_fail
 
@@ -637,7 +798,9 @@ class RepairMetadata:
                             if r["success"]:
                                 status = "[green]Repaired[/green]"
                             else:
-                                status = f"[red]Failed: {r.get('error', 'Unknown')}[/red]"
+                                status = (
+                                    f"[red]Failed: {r.get('error', 'Unknown')}[/red]"
+                                )
 
                             table.add_row(
                                 r["repo"],
@@ -661,7 +824,9 @@ class RepairMetadata:
                             if r["success"]:
                                 status = "[green]Updated[/green]"
                             else:
-                                status = f"[red]Failed: {r.get('error', 'Unknown')}[/red]"
+                                status = (
+                                    f"[red]Failed: {r.get('error', 'Unknown')}[/red]"
+                                )
 
                             date_table.add_row(
                                 r["repo"],
@@ -693,6 +858,8 @@ class RepairMetadata:
             )
 
         except (MissingIndexError, MissingSettingsError) as e:
+            if tracker:
+                tracker.add_error({"code": type(e).__name__, "message": str(e)})
             if self.porcelain:
                 print(f"ERROR\t{type(e).__name__}\t{str(e)}")
             else:
@@ -709,6 +876,8 @@ class RepairMetadata:
             raise
 
         except Exception as e:
+            if tracker:
+                tracker.add_error({"code": "UNEXPECTED_ERROR", "message": str(e)})
             if self.porcelain:
                 print(f"ERROR\tunexpected\t{str(e)}")
             else:
@@ -724,3 +893,6 @@ class RepairMetadata:
                 )
             self.loggit.error("RepairMetadata failed: %s", e, exc_info=True)
             raise
+        finally:
+            if self.audit and tracker:
+                self.audit.commit(tracker)

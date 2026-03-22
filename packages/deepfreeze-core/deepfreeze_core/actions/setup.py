@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 
+from deepfreeze_core.audit import AuditLogger
 from deepfreeze_core.constants import STATUS_INDEX
 from deepfreeze_core.exceptions import PreconditionError
 from deepfreeze_core.helpers import Settings
@@ -78,6 +79,7 @@ class Setup:
         ilm_policy_name: str = None,
         index_template_name: str = None,
         porcelain: bool = False,
+        audit: AuditLogger = None,
         **kwargs,  # Accept extra kwargs for compatibility with curator CLI
     ) -> None:
         self.loggit = logging.getLogger("deepfreeze.actions.setup")
@@ -88,6 +90,7 @@ class Setup:
 
         self.client = client
         self.porcelain = porcelain
+        self.audit = audit
         self.year = year
         self.month = month
         self.settings = Settings(
@@ -376,19 +379,85 @@ class Setup:
         self.loggit.info("DRY-RUN MODE.  No changes will be made.")
         msg = f"DRY-RUN: deepfreeze setup of {self.new_repo_name} backed by {self.new_bucket_name}, with base path {self.base_path}."
         self.loggit.info(msg)
-        self._check_preconditions()
 
-        self.loggit.info("DRY-RUN: Creating bucket %s", self.new_bucket_name)
-        create_repo(
-            self.client,
-            self.new_repo_name,
-            self.new_bucket_name,
-            self.base_path,
-            self.settings.canned_acl,
-            self.settings.storage_class,
-            provider=self.settings.provider,
-            dry_run=True,
-        )
+        # Initialize audit tracking
+        tracker = None
+        if self.audit:
+            tracker = self.audit.start_tracking(
+                action="setup",
+                dry_run=True,
+                parameters={
+                    "repo_name_prefix": self.settings.repo_name_prefix,
+                    "bucket_name_prefix": self.settings.bucket_name_prefix,
+                    "ilm_policy_name": self.ilm_policy_name,
+                    "index_template_name": self.index_template_name,
+                },
+            )
+
+        try:
+            self._check_preconditions()
+
+            # Record what would be created
+            if tracker:
+                tracker.add_result({"type": "settings_index", "action": "would_create"})
+                tracker.add_result(
+                    {
+                        "type": "bucket",
+                        "name": self.new_bucket_name,
+                        "action": "would_create",
+                    }
+                )
+                tracker.add_result(
+                    {
+                        "type": "repository",
+                        "name": self.new_repo_name,
+                        "bucket": self.new_bucket_name,
+                        "base_path": self.base_path,
+                        "action": "would_create",
+                    }
+                )
+                if self.ilm_policy_name:
+                    tracker.add_result(
+                        {
+                            "type": "ilm_policy",
+                            "name": self.ilm_policy_name,
+                            "action": "would_create_or_update",
+                        }
+                    )
+                if self.index_template_name:
+                    tracker.add_result(
+                        {
+                            "type": "index_template",
+                            "name": self.index_template_name,
+                            "action": "would_update",
+                        }
+                    )
+                tracker.set_summary(
+                    {
+                        "would_create_repository": self.new_repo_name,
+                        "would_create_bucket": self.new_bucket_name,
+                        "would_create_base_path": self.base_path,
+                    }
+                )
+
+            self.loggit.info("DRY-RUN: Creating bucket %s", self.new_bucket_name)
+            create_repo(
+                self.client,
+                self.new_repo_name,
+                self.new_bucket_name,
+                self.base_path,
+                self.settings.canned_acl,
+                self.settings.storage_class,
+                provider=self.settings.provider,
+                dry_run=True,
+            )
+        except Exception as e:
+            if tracker:
+                tracker.add_error({"code": type(e).__name__, "message": str(e)})
+            raise
+        finally:
+            if self.audit and tracker:
+                self.audit.commit(tracker)
 
     def do_action(self) -> None:
         """
@@ -399,15 +468,44 @@ class Setup:
         """
         self.loggit.debug("Starting Setup action")
 
+        # Initialize audit tracking
+        tracker = None
+        if self.audit:
+            tracker = self.audit.start_tracking(
+                action="setup",
+                dry_run=False,
+                parameters={
+                    "repo_name_prefix": self.settings.repo_name_prefix,
+                    "bucket_name_prefix": self.settings.bucket_name_prefix,
+                    "ilm_policy_name": self.ilm_policy_name,
+                    "index_template_name": self.index_template_name,
+                },
+            )
+
         try:
             # Check preconditions
             self._check_preconditions()
+
+            # Create audit index alongside status index (for future use)
+            if self.audit:
+                self.audit.ensure_audit_index()
+                if tracker:
+                    tracker.add_result({"type": "audit_index", "action": "created"})
+            else:
+                # Even without audit logger, ensure the index exists for future use
+                from deepfreeze_core.audit import ensure_audit_index
+
+                ensure_audit_index(self.client)
+                if tracker:
+                    tracker.add_result({"type": "audit_index", "action": "created"})
 
             # Create settings index and save settings
             self.loggit.info("Creating settings index and saving configuration")
             try:
                 ensure_settings_index(self.client, create_if_missing=True)
                 save_settings(self.client, self.settings)
+                if tracker:
+                    tracker.add_result({"type": "settings_index", "action": "created"})
             except Exception as e:
                 if self.porcelain:
                     print(f"ERROR\tsettings_index\t{str(e)}")
@@ -447,6 +545,14 @@ class Setup:
                 self.loggit.info(
                     "Successfully created S3 bucket %s", self.new_bucket_name
                 )
+                if tracker:
+                    tracker.add_result(
+                        {
+                            "type": "bucket",
+                            "name": self.new_bucket_name,
+                            "action": "created",
+                        }
+                    )
             except Exception as e:
                 if self.porcelain:
                     print(f"ERROR\tstorage\t{self.new_bucket_name}\t{str(e)}")
@@ -491,6 +597,16 @@ class Setup:
                 self.loggit.info(
                     "Successfully created repository %s", self.new_repo_name
                 )
+                if tracker:
+                    tracker.add_result(
+                        {
+                            "type": "repository",
+                            "name": self.new_repo_name,
+                            "bucket": self.new_bucket_name,
+                            "base_path": self.base_path,
+                            "action": "created",
+                        }
+                    )
             except Exception as e:
                 if self.porcelain:
                     print(f"ERROR\trepository\t{self.new_repo_name}\t{str(e)}")
@@ -652,6 +768,15 @@ class Setup:
                     self.loggit.warning("Failed to update index template: %s", e)
 
             # Success!
+            if tracker:
+                tracker.set_summary(
+                    {
+                        "repository": self.new_repo_name,
+                        "bucket": self.new_bucket_name,
+                        "base_path": self.base_path,
+                    }
+                )
+
             if self.porcelain:
                 # Machine-readable output: tab-separated values
                 # Format: SUCCESS\t{repo_name}\t{bucket_name}\t{base_path}
@@ -737,9 +862,18 @@ class Setup:
 
         except PreconditionError:
             # Precondition errors are already formatted and displayed, just re-raise
+            if tracker:
+                tracker.add_error(
+                    {
+                        "code": "PRECONDITION_ERROR",
+                        "message": "Precondition check failed",
+                    }
+                )
             raise
         except Exception as e:
             # Catch any unexpected errors
+            if tracker:
+                tracker.add_error({"code": "UNEXPECTED_ERROR", "message": str(e)})
             if self.porcelain:
                 print(f"ERROR\tunexpected\t{str(e)}")
             else:
@@ -760,3 +894,7 @@ class Setup:
                 )
             self.loggit.error("Unexpected error during setup: %s", e, exc_info=True)
             raise
+        finally:
+            # Always commit audit log, even on failure
+            if self.audit and tracker:
+                self.audit.commit(tracker)

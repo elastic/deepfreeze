@@ -18,6 +18,7 @@ from deepfreeze_core.constants import (
     THAW_STATUS_FAILED,
     THAW_STATUS_REFROZEN,
 )
+from deepfreeze_core.audit import AuditLogger
 from deepfreeze_core.exceptions import (
     MissingIndexError,
     MissingSettingsError,
@@ -54,6 +55,7 @@ class Cleanup:
         client: Elasticsearch,
         porcelain: bool = False,
         refrozen_retention_days: int = None,
+        audit: AuditLogger = None,
         **kwargs,  # Accept extra kwargs for compatibility with curator CLI
     ) -> None:
         self.loggit = logging.getLogger("deepfreeze.actions.cleanup")
@@ -65,6 +67,7 @@ class Cleanup:
         self.client = client
         self.porcelain = porcelain
         self.refrozen_retention_days = refrozen_retention_days
+        self.audit = audit
 
         # Will be loaded during action
         self.settings = None
@@ -332,6 +335,18 @@ class Cleanup:
         """
         self.loggit.info("DRY-RUN MODE.  No changes will be made.")
 
+        # Initialize audit tracking
+        tracker = None
+        if self.audit:
+            parameters = {}
+            if self.refrozen_retention_days:
+                parameters["refrozen_retention_days"] = self.refrozen_retention_days
+            tracker = self.audit.start_tracking(
+                action="cleanup",
+                dry_run=True,
+                parameters=parameters if parameters else None,
+            )
+
         try:
             self._load_settings()
 
@@ -339,6 +354,44 @@ class Cleanup:
             expired_repos = self._find_expired_repos()
             old_requests = self._find_old_thaw_requests()
             orphaned_policies = self._find_orphaned_policies()
+
+            # Add audit results for items that would be cleaned
+            if tracker:
+                for repo in expired_repos:
+                    tracker.add_result(
+                        {
+                            "type": "expired_repo",
+                            "name": repo.name,
+                            "action": "would_clean",
+                        }
+                    )
+                for req_info in old_requests:
+                    req = req_info["request"]
+                    tracker.add_result(
+                        {
+                            "type": "old_request",
+                            "request_id": req.get("request_id"),
+                            "status": req.get("status"),
+                            "age_days": req_info["age_days"],
+                            "action": "would_delete",
+                        }
+                    )
+                for policy_info in orphaned_policies:
+                    tracker.add_result(
+                        {
+                            "type": "orphan_policy",
+                            "policy_name": policy_info["policy_name"],
+                            "referenced_repo": policy_info["referenced_repo"],
+                            "action": "would_delete",
+                        }
+                    )
+                tracker.set_summary(
+                    {
+                        "expired_repos": len(expired_repos),
+                        "old_requests": len(old_requests),
+                        "orphan_policies": len(orphaned_policies),
+                    }
+                )
 
             # Display what would be cleaned up
             if self.porcelain:
@@ -441,11 +494,16 @@ class Cleanup:
                     self.console.print("[green]Nothing to clean up![/green]")
 
         except (MissingIndexError, MissingSettingsError) as e:
+            if tracker:
+                tracker.add_error({"code": type(e).__name__, "message": str(e)})
             if self.porcelain:
                 print(f"ERROR\t{type(e).__name__}\t{str(e)}")
             else:
                 self.console.print(f"[red]Error: {e}[/red]")
             raise
+        finally:
+            if self.audit and tracker:
+                self.audit.commit(tracker)
 
     def do_action(self) -> None:
         """
@@ -455,6 +513,18 @@ class Cleanup:
         :rtype: None
         """
         self.loggit.debug("Starting Cleanup action")
+
+        # Initialize audit tracking
+        tracker = None
+        if self.audit:
+            parameters = {}
+            if self.refrozen_retention_days:
+                parameters["refrozen_retention_days"] = self.refrozen_retention_days
+            tracker = self.audit.start_tracking(
+                action="cleanup",
+                dry_run=False,
+                parameters=parameters if parameters else None,
+            )
 
         try:
             self._load_settings()
@@ -468,6 +538,97 @@ class Cleanup:
             repo_results = self._cleanup_expired_repos(expired_repos)
             request_results = self._cleanup_thaw_requests(old_requests)
             policy_results = self._cleanup_orphaned_policies(orphaned_policies)
+
+            # Track audit results
+            if tracker:
+                for r in repo_results:
+                    if r["success"]:
+                        tracker.add_result(
+                            {
+                                "type": "expired_repo",
+                                "name": r["repo"],
+                                "action": "cleaned",
+                                "status": "success",
+                            }
+                        )
+                    else:
+                        tracker.add_result(
+                            {
+                                "type": "expired_repo",
+                                "name": r["repo"],
+                                "action": "cleaned",
+                                "status": "failed",
+                                "error": r.get("error"),
+                            }
+                        )
+
+                for r in request_results:
+                    # Find the original age_days from old_requests
+                    age_days = None
+                    for req_info in old_requests:
+                        req = req_info["request"]
+                        if req.get("request_id") == r["request_id"]:
+                            age_days = req_info["age_days"]
+                            break
+
+                    if r["success"]:
+                        result = {
+                            "type": "old_request",
+                            "request_id": r["request_id"],
+                            "action": "deleted",
+                            "status": "success",
+                        }
+                        if age_days:
+                            result["age_days"] = age_days
+                        tracker.add_result(result)
+                    else:
+                        result = {
+                            "type": "old_request",
+                            "request_id": r["request_id"],
+                            "action": "deleted",
+                            "status": "failed",
+                            "error": r.get("error"),
+                        }
+                        if age_days:
+                            result["age_days"] = age_days
+                        tracker.add_result(result)
+
+                for r in policy_results:
+                    if r["success"]:
+                        tracker.add_result(
+                            {
+                                "type": "orphan_policy",
+                                "policy_name": r["policy_name"],
+                                "action": "deleted",
+                                "status": "success",
+                            }
+                        )
+                    else:
+                        tracker.add_result(
+                            {
+                                "type": "orphan_policy",
+                                "policy_name": r["policy_name"],
+                                "action": "deleted",
+                                "status": "failed",
+                                "error": r.get("error"),
+                            }
+                        )
+
+                repo_success = sum(1 for r in repo_results if r["success"])
+                repo_failed = sum(1 for r in repo_results if not r["success"])
+                request_success = sum(1 for r in request_results if r["success"])
+                request_failed = sum(1 for r in request_results if not r["success"])
+                policy_success = sum(1 for r in policy_results if r["success"])
+                policy_failed = sum(1 for r in policy_results if not r["success"])
+
+                tracker.set_summary(
+                    {
+                        "expired_repos_cleaned": repo_success,
+                        "old_requests_deleted": request_success,
+                        "orphan_policies_deleted": policy_success,
+                        "failures": repo_failed + request_failed + policy_failed,
+                    }
+                )
 
             # Display results
             if self.porcelain:
@@ -574,6 +735,8 @@ class Cleanup:
             )
 
         except (MissingIndexError, MissingSettingsError) as e:
+            if tracker:
+                tracker.add_error({"code": type(e).__name__, "message": str(e)})
             if self.porcelain:
                 print(f"ERROR\t{type(e).__name__}\t{str(e)}")
             else:
@@ -590,6 +753,8 @@ class Cleanup:
             raise
 
         except Exception as e:
+            if tracker:
+                tracker.add_error({"code": "UNEXPECTED_ERROR", "message": str(e)})
             if self.porcelain:
                 print(f"ERROR\tunexpected\t{str(e)}")
             else:
@@ -605,3 +770,6 @@ class Cleanup:
                 )
             self.loggit.error("Cleanup failed: %s", e, exc_info=True)
             raise
+        finally:
+            if self.audit and tracker:
+                self.audit.commit(tracker)
