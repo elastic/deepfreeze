@@ -282,7 +282,6 @@ class TestRotateAction:
                     assert new_suffix == "000006"
                     assert new_repo == "deepfreeze-000006"
 
-
     def test_update_date_ranges_calls_for_each_mounted_repo(self):
         """Test _update_date_ranges calls update_repository_date_range for each mounted repo"""
         mock_client = MagicMock()
@@ -1038,8 +1037,336 @@ class TestCleanupActionAdditional:
 class TestRepairMetadataActionAdditional:
     """Additional tests for RepairMetadata action (Task Group 18)"""
 
-    def test_repair_metadata_porcelain_output(self):
-        """Test RepairMetadata with porcelain output"""
+
+class TestPorcelainJSONOutput:
+    """Tests for JSON porcelain output from all actions (Workstream 1)"""
+
+    def test_setup_porcelain_json_envelope(self):
+        """Test Setup action outputs valid JSON envelope in porcelain mode"""
+        import io
+        import json
+        from contextlib import redirect_stdout
+
+        mock_client = MagicMock()
+        mock_client.indices.exists.return_value = False
+        mock_client.snapshot.get_repository.return_value = {}
+        mock_client.info.return_value = {"version": {"number": "8.10.0"}}
+        mock_client.ilm.get_lifecycle.return_value = {}
+
+        with patch("deepfreeze_core.actions.setup.s3_client_factory") as mock_factory:
+            mock_s3 = MagicMock()
+            mock_s3.bucket_exists.return_value = False
+            mock_s3.STORAGE_TYPE = "S3 Bucket"
+            mock_s3.STORAGE_DELETE_CMD = "aws s3 rb s3://{bucket} --force"
+            mock_s3.STORAGE_CREATION_HELP = "Test help"
+            mock_s3.ES_PLUGIN_NAME = "repository-s3"
+            mock_s3.ES_PLUGIN_DISPLAY_NAME = "S3"
+            mock_s3.ES_PLUGIN_DOC_URL = "https://example.com"
+            mock_s3.ES_KEYSTORE_INSTRUCTIONS = "Test keystore"
+            mock_factory.return_value = mock_s3
+
+            with patch("deepfreeze_core.actions.setup.ensure_settings_index"):
+                with patch("deepfreeze_core.actions.setup.save_settings"):
+                    with patch("deepfreeze_core.actions.setup.create_repo"):
+                        with patch(
+                            "deepfreeze_core.actions.setup.create_or_update_ilm_policy"
+                        ) as mock_ilm:
+                            mock_ilm.return_value = {"action": "created"}
+                            with patch(
+                                "deepfreeze_core.actions.setup.update_index_template_ilm_policy"
+                            ) as mock_template:
+                                mock_template.return_value = {
+                                    "action": "updated",
+                                    "template_type": "composable",
+                                }
+
+                                setup = Setup(
+                                    client=mock_client,
+                                    ilm_policy_name="test-policy",
+                                    index_template_name="test-template",
+                                    porcelain=True,
+                                )
+
+                                # Capture stdout
+                                f = io.StringIO()
+                                with redirect_stdout(f):
+                                    setup.do_action()
+
+                                output = f.getvalue()
+                                data = json.loads(output)
+
+                                # Validate envelope structure
+                                assert "action" in data
+                                assert data["action"] == "setup"
+                                assert "dry_run" in data
+                                assert data["dry_run"] is False
+                                assert "success" in data
+                                assert data["success"] is True
+                                assert "timestamp" in data
+                                assert "results" in data
+                                assert "errors" in data
+                                assert "summary" in data
+
+                                # Check results contain expected types
+                                result_types = [r.get("type") for r in data["results"]]
+                                assert "settings_index" in result_types
+                                assert "bucket" in result_types
+                                assert "repository" in result_types
+                                assert "ilm_policy" in result_types
+                                assert "index_template" in result_types
+
+    def test_setup_dry_run_porcelain_json(self):
+        """Test Setup dry run outputs valid JSON with preconditions"""
+        import io
+        import json
+        from contextlib import redirect_stdout
+
+        mock_client = MagicMock()
+        mock_client.indices.exists.return_value = False
+        mock_client.snapshot.get_repository.return_value = {}
+        mock_client.info.return_value = {"version": {"number": "8.10.0"}}
+
+        with patch("deepfreeze_core.actions.setup.s3_client_factory") as mock_factory:
+            mock_s3 = MagicMock()
+            mock_s3.bucket_exists.return_value = False
+            mock_s3.ES_PLUGIN_NAME = "repository-s3"
+            mock_s3.ES_PLUGIN_DISPLAY_NAME = "S3"
+            mock_s3.ES_PLUGIN_DOC_URL = "https://example.com"
+            mock_factory.return_value = mock_s3
+
+            setup = Setup(
+                client=mock_client,
+                ilm_policy_name="test-policy",
+                index_template_name="test-template",
+                porcelain=True,
+            )
+
+            # Capture stdout
+            f = io.StringIO()
+            with redirect_stdout(f):
+                setup.do_dry_run()
+
+            output = f.getvalue()
+            data = json.loads(output)
+
+            assert data["action"] == "setup"
+            assert data["dry_run"] is True
+            assert data["success"] is True
+            assert "would_create_repository" in data["summary"]
+
+            # Check precondition results
+            precondition_checks = [
+                r for r in data["results"] if r.get("type") == "precondition"
+            ]
+            assert len(precondition_checks) > 0
+
+    def test_rotate_porcelain_json_envelope(self):
+        """Test Rotate action outputs valid JSON envelope"""
+        import io
+        import json
+        from contextlib import redirect_stdout
+
+        mock_client = MagicMock()
+        mock_client.indices.exists.return_value = True
+        mock_client.ilm.get_lifecycle.return_value = {}
+
+        mock_settings = Settings(
+            repo_name_prefix="deepfreeze", ilm_policy_name="test-policy"
+        )
+        mock_settings.last_suffix = "000001"
+
+        with patch("deepfreeze_core.actions.rotate.get_settings") as mock_get:
+            mock_get.return_value = mock_settings
+
+            with patch(
+                "deepfreeze_core.actions.rotate.s3_client_factory"
+            ) as mock_factory:
+                mock_s3 = MagicMock()
+                mock_s3.bucket_exists.return_value = True
+                mock_factory.return_value = mock_s3
+
+                with patch("deepfreeze_core.actions.rotate.create_repo"):
+                    with patch("deepfreeze_core.actions.rotate.save_settings"):
+                        with patch(
+                            "deepfreeze_core.actions.rotate.get_matching_repos"
+                        ) as mock_repos:
+                            mock_repos.return_value = []
+                            with patch(
+                                "deepfreeze_core.actions.rotate.get_matching_repo_names"
+                            ) as mock_names:
+                                mock_names.return_value = []
+
+                                rotate = Rotate(
+                                    client=mock_client, keep=1, porcelain=True
+                                )
+
+                                f = io.StringIO()
+                                with redirect_stdout(f):
+                                    rotate.do_action()
+
+                                output = f.getvalue()
+                                data = json.loads(output)
+
+                                assert data["action"] == "rotate"
+                                assert "dry_run" in data
+                                assert "success" in data
+                                assert "timestamp" in data
+                                assert "results" in data
+                                assert "summary" in data
+
+    def test_thaw_porcelain_json_list_mode(self):
+        """Test Thaw list mode outputs valid JSON"""
+        import io
+        import json
+        from contextlib import redirect_stdout
+
+        mock_client = MagicMock()
+        mock_client.indices.exists.return_value = True
+
+        mock_settings = Settings()
+
+        with patch("deepfreeze_core.actions.thaw.get_settings") as mock_get:
+            mock_get.return_value = mock_settings
+
+            with patch("deepfreeze_core.actions.thaw.list_thaw_requests") as mock_list:
+                mock_list.return_value = [
+                    {
+                        "request_id": "req-001",
+                        "status": "in_progress",
+                        "repos": ["repo-1"],
+                        "start_date": "2023-01-01",
+                        "end_date": "2023-01-31",
+                    }
+                ]
+
+                thaw = Thaw(client=mock_client, list_requests=True, porcelain=True)
+
+                f = io.StringIO()
+                with redirect_stdout(f):
+                    thaw.do_action()
+
+                output = f.getvalue()
+                data = json.loads(output)
+
+                assert data["action"] == "thaw"
+                assert data["mode"] == "list"
+                assert "results" in data
+
+                # Should have at least one thaw_request result
+                request_results = [
+                    r for r in data["results"] if r.get("type") == "thaw_request"
+                ]
+                assert len(request_results) > 0
+
+    def test_refreeze_porcelain_json(self):
+        """Test Refreeze outputs valid JSON"""
+        import io
+        import json
+        from contextlib import redirect_stdout
+
+        mock_client = MagicMock()
+        mock_client.indices.exists.return_value = True
+
+        mock_settings = Settings()
+
+        with patch("deepfreeze_core.actions.refreeze.get_settings") as mock_get:
+            mock_get.return_value = mock_settings
+
+            with patch(
+                "deepfreeze_core.actions.refreeze.s3_client_factory"
+            ) as mock_factory:
+                mock_s3 = MagicMock()
+                mock_factory.return_value = mock_s3
+
+                with patch(
+                    "deepfreeze_core.actions.refreeze.list_thaw_requests"
+                ) as mock_list:
+                    mock_list.return_value = [
+                        {
+                            "request_id": "req-001",
+                            "status": "completed",
+                            "repos": ["repo-1"],
+                        }
+                    ]
+
+                    with patch(
+                        "deepfreeze_core.actions.refreeze.get_thaw_request"
+                    ) as mock_get_req:
+                        mock_get_req.return_value = {
+                            "request_id": "req-001",
+                            "status": "completed",
+                            "repos": ["repo-1"],
+                        }
+
+                        refreeze = Refreeze(
+                            client=mock_client, request_id="req-001", porcelain=True
+                        )
+
+                        f = io.StringIO()
+                        with redirect_stdout(f):
+                            refreeze.do_action()
+
+                        output = f.getvalue()
+                        data = json.loads(output)
+
+                        assert data["action"] == "refreeze"
+                        assert "results" in data
+
+    def test_cleanup_porcelain_json(self):
+        """Test Cleanup outputs valid JSON"""
+        import io
+        import json
+        from contextlib import redirect_stdout
+        from datetime import datetime, timezone
+
+        mock_client = MagicMock()
+        mock_client.indices.exists.return_value = True
+        mock_client.ilm.get_lifecycle.return_value = {}
+
+        mock_settings = Settings()
+
+        with patch("deepfreeze_core.actions.cleanup.get_settings") as mock_get:
+            mock_get.return_value = mock_settings
+
+            with patch(
+                "deepfreeze_core.actions.cleanup.s3_client_factory"
+            ) as mock_factory:
+                mock_s3 = MagicMock()
+                mock_factory.return_value = mock_s3
+
+                with patch(
+                    "deepfreeze_core.actions.cleanup.get_all_repos"
+                ) as mock_repos:
+                    # Create a repo that's expired
+                    expired_repo = MagicMock()
+                    expired_repo.name = "expired-repo"
+                    expired_repo.expires_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+                    mock_repos.return_value = [expired_repo]
+
+                    with patch(
+                        "deepfreeze_core.actions.cleanup.list_thaw_requests"
+                    ) as mock_list:
+                        mock_list.return_value = []
+
+                        cleanup = Cleanup(client=mock_client, porcelain=True)
+
+                        f = io.StringIO()
+                        with redirect_stdout(f):
+                            cleanup.do_action()
+
+                        output = f.getvalue()
+                        data = json.loads(output)
+
+                        assert data["action"] == "cleanup"
+                        assert "summary" in data
+                        assert "expired_repos_cleaned" in data["summary"]
+
+    def test_repair_metadata_porcelain_json(self):
+        """Test RepairMetadata outputs valid JSON"""
+        import io
+        import json
+        from contextlib import redirect_stdout
+
         mock_client = MagicMock()
         mock_client.indices.exists.return_value = True
 
@@ -1052,15 +1379,32 @@ class TestRepairMetadataActionAdditional:
                 "deepfreeze_core.actions.repair_metadata.s3_client_factory"
             ) as mock_factory:
                 mock_s3 = MagicMock()
+                mock_s3.list_objects.return_value = [{"StorageClass": "GLACIER"}]
                 mock_factory.return_value = mock_s3
 
                 with patch(
                     "deepfreeze_core.actions.repair_metadata.get_all_repos"
                 ) as mock_repos:
-                    mock_repos.return_value = []
+                    from deepfreeze_core.helpers import Repository
+                    from deepfreeze_core.constants import THAW_STATE_ACTIVE
+
+                    repo = Repository(
+                        name="test-repo",
+                        bucket="test-bucket",
+                        base_path="path",
+                        thaw_state=THAW_STATE_ACTIVE,
+                    )
+                    mock_repos.return_value = [repo]
 
                     repair = RepairMetadata(client=mock_client, porcelain=True)
 
-                    assert repair.porcelain is True
+                    f = io.StringIO()
+                    with redirect_stdout(f):
+                        repair.do_action()
 
-                    repair.do_action()
+                    output = f.getvalue()
+                    data = json.loads(output)
+
+                    assert data["action"] == "repair_metadata"
+                    assert "summary" in data
+                    assert "discrepancies_found" in data["summary"]

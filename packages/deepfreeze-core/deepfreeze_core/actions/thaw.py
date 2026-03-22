@@ -2,6 +2,7 @@
 
 # pylint: disable=too-many-arguments,too-many-instance-attributes, raise-missing-from
 
+import json
 import logging
 import time
 import uuid
@@ -104,6 +105,9 @@ class Thaw:
         self.retrieval_tier = retrieval_tier
         self.sync = sync
         self.porcelain = porcelain
+        self._results = []
+        self._errors = []
+        self._start_time = None
         self.include_completed = include_completed
 
         # Will be loaded during action
@@ -139,10 +143,15 @@ class Thaw:
 
         if self.porcelain:
             for req in requests:
-                print(
-                    f"REQUEST\t{req.get('request_id')}\t{req.get('status')}\t"
-                    f"{req.get('start_date', 'N/A')}\t{req.get('end_date', 'N/A')}\t"
-                    f"{','.join(req.get('repos', []))}"
+                self._results.append(
+                    {
+                        "type": "thaw_request",
+                        "request_id": req.get("request_id"),
+                        "status": req.get("status"),
+                        "start_date": req.get("start_date", "N/A"),
+                        "end_date": req.get("end_date", "N/A"),
+                        "repositories": req.get("repos", []),
+                    }
                 )
             return
 
@@ -199,7 +208,13 @@ class Thaw:
 
         if not open_requests:
             if self.porcelain:
-                print("INFO\tno_open_requests\tNo open thaw requests found")
+                self._results.append(
+                    {
+                        "type": "info",
+                        "code": "no_open_requests",
+                        "message": "No open thaw requests found",
+                    }
+                )
             else:
                 self.console.print("[dim]No open thaw requests to check[/dim]")
             return
@@ -232,7 +247,9 @@ class Thaw:
             request = get_thaw_request(self.client, request_id)
         except ActionError:
             if self.porcelain:
-                print(f"ERROR\trequest_not_found\t{request_id}")
+                self._errors.append(
+                    {"code": "request_not_found", "message": request_id}
+                )
             else:
                 self.console.print(
                     Panel(
@@ -333,14 +350,25 @@ class Thaw:
     def _display_request_status(self, request: dict) -> None:
         """Display the status of a thaw request."""
         if self.porcelain:
-            print(
-                f"STATUS\t{request.get('request_id')}\t{request.get('status')}\t"
-                f"{request.get('start_date', 'N/A')}\t{request.get('end_date', 'N/A')}"
+            self._results.append(
+                {
+                    "type": "status",
+                    "request_id": request.get("request_id"),
+                    "status": request.get("status"),
+                    "start_date": request.get("start_date", "N/A"),
+                    "end_date": request.get("end_date", "N/A"),
+                }
             )
             for rs in request.get("restore_statuses", []):
-                print(
-                    f"RESTORE\t{rs['repo']}\t{rs['restored']}/{rs['total']}\t"
-                    f"{rs['in_progress']} in_progress\t{rs['not_restored']} not_restored"
+                self._results.append(
+                    {
+                        "type": "restore_progress",
+                        "repository": rs["repo"],
+                        "restored": rs["restored"],
+                        "total": rs["total"],
+                        "in_progress": rs["in_progress"],
+                        "not_restored": rs["not_restored"],
+                    }
                 )
             return
 
@@ -429,7 +457,12 @@ class Thaw:
 
         if not repos:
             if self.porcelain:
-                print(f"ERROR\tno_repos_found\t{start.isoformat()}\t{end.isoformat()}")
+                self._errors.append(
+                    {
+                        "code": "no_repos_found",
+                        "message": f"No repositories found for range {start.isoformat()} to {end.isoformat()}",
+                    }
+                )
             else:
                 self.console.print(
                     Panel(
@@ -452,12 +485,25 @@ class Thaw:
 
         if dry_run:
             if self.porcelain:
-                print(
-                    f"DRY_RUN\tthaw\t{request_id}\t{start.isoformat()}\t{end.isoformat()}"
+                self._results.append(
+                    {
+                        "type": "dry_run_thaw",
+                        "request_id": request_id,
+                        "start_date": start.isoformat(),
+                        "end_date": end.isoformat(),
+                        "restore_days": self.restore_days,
+                        "retrieval_tier": self.retrieval_tier,
+                        "repository_count": len(repos),
+                    }
                 )
                 for repo in repos:
-                    print(
-                        f"DRY_RUN\trepo\t{repo.name}\t{repo.bucket}\t{repo.base_path}"
+                    self._results.append(
+                        {
+                            "type": "dry_run_repo",
+                            "repository": repo.name,
+                            "bucket": repo.bucket,
+                            "base_path": repo.base_path,
+                        }
                     )
             else:
                 repo_list = "\n".join(
@@ -529,8 +575,13 @@ class Thaw:
                 repo.persist(self.client)
 
                 if self.porcelain:
-                    print(
-                        f"INITIATED\t{repo.name}\t{len(objects)} objects\t{repo.bucket}"
+                    self._results.append(
+                        {
+                            "type": "restore_initiated",
+                            "repository": repo.name,
+                            "object_count": len(objects),
+                            "bucket": repo.bucket,
+                        }
                     )
                 else:
                     self.console.print(
@@ -540,7 +591,13 @@ class Thaw:
             except Exception as e:
                 self.loggit.error("Failed to initiate restore for %s: %s", repo.name, e)
                 if self.porcelain:
-                    print(f"ERROR\trestore_failed\t{repo.name}\t{str(e)}")
+                    self._errors.append(
+                        {
+                            "code": "restore_failed",
+                            "repository": repo.name,
+                            "message": str(e),
+                        }
+                    )
                 else:
                     self.console.print(
                         f"  [red]Failed to restore {repo.name}: {escape(str(e))}[/red]"
@@ -585,7 +642,13 @@ class Thaw:
                     THAW_STATUS_COMPLETED,
                     THAW_STATUS_FAILED,
                 ]:
-                    print(f"COMPLETE\t{request_id}\t{request.get('status')}")
+                    self._results.append(
+                        {
+                            "type": "complete",
+                            "request_id": request_id,
+                            "status": request.get("status"),
+                        }
+                    )
                     break
                 time.sleep(60)  # Check every minute
             return
@@ -645,22 +708,49 @@ class Thaw:
         """
         self.loggit.info("DRY-RUN MODE.  No changes will be made.")
 
+        # Initialize tracking for porcelain mode
+        if self.porcelain:
+            self._results = []
+            self._errors = []
+            self._start_time = datetime.now(timezone.utc)
+            self._summary = {}
+
         try:
             self._load_settings()
 
             if self.list_requests:
+                self._thaw_mode = "list"
                 self._list_all_requests()
+                if self.porcelain:
+                    self._emit_porcelain(dry_run=True, success=True)
             elif self.check_all:
+                self._thaw_mode = "check_all"
                 self._check_all_requests()
+                if self.porcelain:
+                    self._emit_porcelain(dry_run=True, success=True)
             elif self.request_id:
+                self._thaw_mode = "check_status"
                 request = self._check_request_status(self.request_id)
                 if request:
                     self._display_request_status(request)
+                if self.porcelain:
+                    self._emit_porcelain(dry_run=True, success=True)
             elif self.start_date and self.end_date:
-                self._initiate_thaw(dry_run=True)
+                self._thaw_mode = "create"
+                request_id = self._initiate_thaw(dry_run=True)
+                if self.porcelain:
+                    self._summary["request_id"] = request_id
+                    self._emit_porcelain(dry_run=True, success=True)
             else:
                 if self.porcelain:
-                    print("ERROR\tmissing_parameters\tProvide date range or request ID")
+                    self._thaw_mode = "unknown"
+                    self._errors.append(
+                        {
+                            "code": "missing_parameters",
+                            "message": "Provide date range or request ID",
+                        }
+                    )
+                    self._emit_porcelain(dry_run=True, success=False)
                 else:
                     self.console.print(
                         "[red]Error: Provide either --start-date/--end-date or --check-status[/red]"
@@ -668,7 +758,8 @@ class Thaw:
 
         except (MissingIndexError, MissingSettingsError) as e:
             if self.porcelain:
-                print(f"ERROR\t{type(e).__name__}\t{str(e)}")
+                self._errors.append({"code": type(e).__name__, "message": str(e)})
+                self._emit_porcelain(dry_run=True, success=False)
             else:
                 self.console.print(f"[red]Error: {e}[/red]")
             raise
@@ -682,14 +773,28 @@ class Thaw:
         """
         self.loggit.debug("Starting Thaw action")
 
+        # Initialize tracking for porcelain mode
+        if self.porcelain:
+            self._results = []
+            self._errors = []
+            self._start_time = datetime.now(timezone.utc)
+            self._summary = {}
+
         try:
             self._load_settings()
 
             if self.list_requests:
+                self._thaw_mode = "list"
                 self._list_all_requests()
+                if self.porcelain:
+                    self._emit_porcelain(dry_run=False, success=True)
             elif self.check_all:
+                self._thaw_mode = "check_all"
                 self._check_all_requests()
+                if self.porcelain:
+                    self._emit_porcelain(dry_run=False, success=True)
             elif self.request_id:
+                self._thaw_mode = "check_status"
                 request = self._check_request_status(self.request_id)
                 if request:
                     self._display_request_status(request)
@@ -697,17 +802,28 @@ class Thaw:
                     # If sync mode and still in progress, wait
                     if self.sync and request.get("status") == THAW_STATUS_IN_PROGRESS:
                         self._wait_for_completion(self.request_id)
-
+                if self.porcelain:
+                    self._emit_porcelain(dry_run=False, success=True)
             elif self.start_date and self.end_date:
+                self._thaw_mode = "create"
                 request_id = self._initiate_thaw()
 
                 # If sync mode, wait for completion
                 if request_id and self.sync:
                     self._wait_for_completion(request_id)
-
+                if self.porcelain:
+                    self._summary["request_id"] = request_id
+                    self._emit_porcelain(dry_run=False, success=True)
             else:
                 if self.porcelain:
-                    print("ERROR\tmissing_parameters\tProvide date range or request ID")
+                    self._thaw_mode = "unknown"
+                    self._errors.append(
+                        {
+                            "code": "missing_parameters",
+                            "message": "Provide date range or request ID",
+                        }
+                    )
+                    self._emit_porcelain(dry_run=False, success=False)
                 else:
                     self.console.print(
                         Panel(
@@ -724,7 +840,8 @@ class Thaw:
 
         except (MissingIndexError, MissingSettingsError) as e:
             if self.porcelain:
-                print(f"ERROR\t{type(e).__name__}\t{str(e)}")
+                self._errors.append({"code": type(e).__name__, "message": str(e)})
+                self._emit_porcelain(dry_run=False, success=False)
             else:
                 self.console.print(
                     Panel(
@@ -740,7 +857,8 @@ class Thaw:
 
         except Exception as e:
             if self.porcelain:
-                print(f"ERROR\tunexpected\t{str(e)}")
+                self._errors.append({"code": "unexpected", "message": str(e)})
+                self._emit_porcelain(dry_run=False, success=False)
             else:
                 self.console.print(
                     Panel(
@@ -754,3 +872,17 @@ class Thaw:
                 )
             self.loggit.error("Thaw failed: %s", e, exc_info=True)
             raise
+
+    def _emit_porcelain(self, dry_run: bool, success: bool, mode: str = None) -> None:
+        """Emit JSON porcelain output to stdout."""
+        output = {
+            "action": "thaw",
+            "mode": mode or self._thaw_mode,
+            "dry_run": dry_run,
+            "success": success,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "results": self._results,
+            "errors": self._errors,
+            "summary": self._summary if hasattr(self, "_summary") else {},
+        }
+        print(json.dumps(output, indent=2))

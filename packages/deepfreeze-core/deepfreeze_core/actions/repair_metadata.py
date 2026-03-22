@@ -2,7 +2,9 @@
 
 # pylint: disable=too-many-arguments,too-many-instance-attributes, raise-missing-from
 
+import json
 import logging
+from datetime import datetime, timezone
 
 from elasticsearch8 import Elasticsearch
 from rich.console import Console
@@ -62,6 +64,9 @@ class RepairMetadata:
 
         self.client = client
         self.porcelain = porcelain
+        self._results = []
+        self._errors = []
+        self._start_time = None
 
         # Will be loaded during action
         self.settings = None
@@ -209,7 +214,10 @@ class RepairMetadata:
 
             if repo.thaw_state in [THAW_STATE_ACTIVE, THAW_STATE_THAWED]:
                 # These states should have instant-access storage
-                if actual["glacier"] == actual["total_objects"] and actual["total_objects"] > 0:
+                if (
+                    actual["glacier"] == actual["total_objects"]
+                    and actual["total_objects"] > 0
+                ):
                     # All objects in archive - should be frozen
                     is_discrepancy = True
                     suggested_state = THAW_STATE_FROZEN
@@ -221,7 +229,10 @@ class RepairMetadata:
 
             elif repo.thaw_state == THAW_STATE_FROZEN:
                 # This state should have archive storage
-                if actual["instant_access"] == actual["total_objects"] and actual["total_objects"] > 0:
+                if (
+                    actual["instant_access"] == actual["total_objects"]
+                    and actual["total_objects"] > 0
+                ):
                     # All objects accessible - was restored (thawed)
                     is_discrepancy = True
                     suggested_state = THAW_STATE_THAWED
@@ -232,18 +243,27 @@ class RepairMetadata:
 
             elif repo.thaw_state == THAW_STATE_THAWING:
                 # This state should have some objects restoring or all accessible
-                if actual["glacier"] == actual["total_objects"] and actual["total_objects"] > 0:
+                if (
+                    actual["glacier"] == actual["total_objects"]
+                    and actual["total_objects"] > 0
+                ):
                     # All still in archive - thaw failed or not started
                     is_discrepancy = True
                     suggested_state = THAW_STATE_FROZEN
-                elif actual["instant_access"] == actual["total_objects"] and actual["total_objects"] > 0:
+                elif (
+                    actual["instant_access"] == actual["total_objects"]
+                    and actual["total_objects"] > 0
+                ):
                     # All accessible - thaw completed
                     is_discrepancy = True
                     suggested_state = THAW_STATE_THAWED
 
             elif repo.thaw_state == THAW_STATE_EXPIRED:
                 # Expired should have archive storage (restore expired)
-                if actual["instant_access"] == actual["total_objects"] and actual["total_objects"] > 0:
+                if (
+                    actual["instant_access"] == actual["total_objects"]
+                    and actual["total_objects"] > 0
+                ):
                     # Still accessible - not actually expired
                     is_discrepancy = True
                     suggested_state = THAW_STATE_THAWED
@@ -418,7 +438,9 @@ class RepairMetadata:
                     result["error"] = "No timestamp data found in indices"
             except Exception as e:
                 result["error"] = str(e)
-                self.loggit.error("Failed to update date range for %s: %s", repo.name, e)
+                self.loggit.error(
+                    "Failed to update date range for %s: %s", repo.name, e
+                )
 
             results.append(result)
 
@@ -449,15 +471,28 @@ class RepairMetadata:
             if self.porcelain:
                 for d in discrepancies:
                     if d.get("error"):
-                        print(f"ERROR\t{d['repo']}\t{d.get('error')}")
+                        self._errors.append(
+                            {
+                                "code": "SCAN_ERROR",
+                                "repository": d["repo"],
+                                "message": d.get("error"),
+                            }
+                        )
                     else:
-                        print(
-                            f"DISCREPANCY\t{d['repo']}\t{d['recorded_state']}\t"
-                            f"{d['actual_state']}\t{d.get('total_objects', 0)} objects"
+                        self._results.append(
+                            {
+                                "type": "discrepancy",
+                                "repository": d["repo"],
+                                "recorded_state": d["recorded_state"],
+                                "actual_state": d["actual_state"],
+                                "objects": d.get("total_objects", 0),
+                            }
                         )
                 for u in date_range_updates:
-                    print(f"DATE_RANGE\t{u['repo']}\tmissing")
-                print(f"SUMMARY\t{len(discrepancies)} discrepancies\t{len(date_range_updates)} missing date ranges")
+                    self._results.append(
+                        {"type": "date_range_missing", "repository": u["repo"]}
+                    )
+                self._emit_porcelain(dry_run=True, success=True)
                 return
 
             if not discrepancies and not date_range_updates:
@@ -539,7 +574,8 @@ class RepairMetadata:
 
         except (MissingIndexError, MissingSettingsError) as e:
             if self.porcelain:
-                print(f"ERROR\t{type(e).__name__}\t{str(e)}")
+                self._errors.append({"code": type(e).__name__, "message": str(e)})
+                self._emit_porcelain(dry_run=True, success=False)
             else:
                 self.console.print(f"[red]Error: {e}[/red]")
             raise
@@ -568,7 +604,7 @@ class RepairMetadata:
 
             if not discrepancies and not date_range_results:
                 if self.porcelain:
-                    print("COMPLETE\t0 discrepancies\t0 date ranges")
+                    self._emit_porcelain(dry_run=False, success=True)
                 else:
                     self.console.print(
                         Panel(
@@ -600,13 +636,55 @@ class RepairMetadata:
 
             if self.porcelain:
                 for r in state_results:
-                    status = "SUCCESS" if r["success"] else "FAILED"
-                    print(f"STATE\t{status}\t{r['repo']}\t{r['old_state']}\t{r['new_state']}")
+                    if r["success"]:
+                        self._results.append(
+                            {
+                                "type": "state_repair",
+                                "repository": r["repo"],
+                                "old_state": r["old_state"],
+                                "new_state": r["new_state"],
+                                "action": "repaired",
+                                "status": "success",
+                            }
+                        )
+                    else:
+                        self._results.append(
+                            {
+                                "type": "state_repair",
+                                "repository": r["repo"],
+                                "old_state": r["old_state"],
+                                "new_state": r["new_state"],
+                                "action": "repaired",
+                                "status": "failed",
+                            }
+                        )
                 for r in date_range_results:
-                    status = "SUCCESS" if r["success"] else "FAILED"
-                    error_msg = f"\t{r['error']}" if r.get("error") else ""
-                    print(f"DATE_RANGE\t{status}\t{r['repo']}\t{r.get('new_start')}\t{r.get('new_end')}{error_msg}")
-                print(f"COMPLETE\t{state_success + date_success} repaired\t{state_fail + date_fail} failed")
+                    if r["success"]:
+                        self._results.append(
+                            {
+                                "type": "date_range",
+                                "repository": r["repo"],
+                                "start": r.get("new_start"),
+                                "end": r.get("new_end"),
+                                "action": "updated",
+                                "status": "success",
+                            }
+                        )
+                    else:
+                        self._results.append(
+                            {
+                                "type": "date_range",
+                                "repository": r["repo"],
+                                "start": r.get("new_start"),
+                                "end": r.get("new_end"),
+                                "action": "updated",
+                                "status": "failed",
+                                "error": r.get("error"),
+                            }
+                        )
+                self._emit_porcelain(
+                    dry_run=False, success=(state_fail + date_fail == 0)
+                )
             else:
                 total_fail = state_fail + date_fail
 
@@ -637,7 +715,9 @@ class RepairMetadata:
                             if r["success"]:
                                 status = "[green]Repaired[/green]"
                             else:
-                                status = f"[red]Failed: {r.get('error', 'Unknown')}[/red]"
+                                status = (
+                                    f"[red]Failed: {r.get('error', 'Unknown')}[/red]"
+                                )
 
                             table.add_row(
                                 r["repo"],
@@ -661,7 +741,9 @@ class RepairMetadata:
                             if r["success"]:
                                 status = "[green]Updated[/green]"
                             else:
-                                status = f"[red]Failed: {r.get('error', 'Unknown')}[/red]"
+                                status = (
+                                    f"[red]Failed: {r.get('error', 'Unknown')}[/red]"
+                                )
 
                             date_table.add_row(
                                 r["repo"],
@@ -694,7 +776,8 @@ class RepairMetadata:
 
         except (MissingIndexError, MissingSettingsError) as e:
             if self.porcelain:
-                print(f"ERROR\t{type(e).__name__}\t{str(e)}")
+                self._errors.append({"code": type(e).__name__, "message": str(e)})
+                self._emit_porcelain(dry_run=False, success=False)
             else:
                 self.console.print(
                     Panel(
@@ -710,7 +793,8 @@ class RepairMetadata:
 
         except Exception as e:
             if self.porcelain:
-                print(f"ERROR\tunexpected\t{str(e)}")
+                self._errors.append({"code": "unexpected", "message": str(e)})
+                self._emit_porcelain(dry_run=False, success=False)
             else:
                 self.console.print(
                     Panel(
@@ -724,3 +808,39 @@ class RepairMetadata:
                 )
             self.loggit.error("RepairMetadata failed: %s", e, exc_info=True)
             raise
+
+    def _emit_porcelain(self, dry_run: bool, success: bool) -> None:
+        """Emit JSON porcelain output to stdout."""
+        discrepancies_found = len(
+            [r for r in self._results if r.get("type") == "discrepancy"]
+        )
+        discrepancies_repaired = len(
+            [
+                r
+                for r in self._results
+                if r.get("type") == "state_repair" and r.get("status") == "success"
+            ]
+        )
+        date_ranges_updated = len(
+            [
+                r
+                for r in self._results
+                if r.get("type") == "date_range" and r.get("status") == "success"
+            ]
+        )
+        failures = len([r for r in self._results if r.get("status") == "failed"])
+        output = {
+            "action": "repair_metadata",
+            "dry_run": dry_run,
+            "success": success,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "results": self._results,
+            "errors": self._errors,
+            "summary": {
+                "discrepancies_found": discrepancies_found,
+                "discrepancies_repaired": discrepancies_repaired,
+                "date_ranges_updated": date_ranges_updated,
+                "failures": failures,
+            },
+        }
+        print(json.dumps(output, indent=2))

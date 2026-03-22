@@ -2,7 +2,9 @@
 
 # pylint: disable=too-many-arguments,too-many-instance-attributes, raise-missing-from
 
+import json
 import logging
+from datetime import datetime, timezone
 
 from elasticsearch8 import Elasticsearch
 from rich.console import Console
@@ -75,6 +77,10 @@ class Refreeze:
         self.request_id = request_id or thaw_request_id
         self.all_requests = all_requests
         self.porcelain = porcelain
+
+        self._results = []
+        self._errors = []
+        self._start_time = None
 
         # Will be loaded during action
         self.settings = None
@@ -237,6 +243,11 @@ class Refreeze:
         """
         self.loggit.info("DRY-RUN MODE.  No changes will be made.")
 
+        # Initialize porcelain tracking
+        self._results = []
+        self._errors = []
+        self._start_time = datetime.now(timezone.utc)
+
         try:
             self._load_settings()
 
@@ -246,15 +257,31 @@ class Refreeze:
 
                 if result.get("error"):
                     if self.porcelain:
-                        print(f"ERROR\t{result['error']}")
+                        self._errors.append(
+                            {"code": "REFREEZE_ERROR", "message": result["error"]}
+                        )
+                        self._emit_porcelain(dry_run=True, success=False)
                     else:
                         self.console.print(f"[red]Error: {result['error']}[/red]")
                     return
 
                 if self.porcelain:
-                    print(f"DRY_RUN\trefreeze_request\t{self.request_id}")
+                    self._results.append(
+                        {
+                            "type": "thaw_request",
+                            "request_id": self.request_id,
+                            "action": "would_refreeze",
+                        }
+                    )
                     for r in result.get("results", []):
-                        print(f"DRY_RUN\trefreeze_repo\t{r['repo']}")
+                        self._results.append(
+                            {
+                                "type": "repository",
+                                "name": r["repo"],
+                                "action": "would_refreeze",
+                            }
+                        )
+                    self._emit_porcelain(dry_run=True, success=True)
                 else:
                     repos = [r["repo"] for r in result.get("results", [])]
                     repo_list = "\n".join([f"  - [cyan]{r}[/cyan]" for r in repos])
@@ -274,7 +301,10 @@ class Refreeze:
 
                 if not completed:
                     if self.porcelain:
-                        print("INFO\tno_completed_requests")
+                        self._results.append(
+                            {"type": "info", "message": "No completed requests found"}
+                        )
+                        self._emit_porcelain(dry_run=True, success=True)
                     else:
                         self.console.print(
                             "[dim]No completed thaw requests to refreeze[/dim]"
@@ -283,7 +313,14 @@ class Refreeze:
 
                 if self.porcelain:
                     for req in completed:
-                        print(f"DRY_RUN\trefreeze_request\t{req.get('request_id')}")
+                        req_id = req.get("request_id")
+                        self._results.append(
+                            {
+                                "type": "thaw_request",
+                                "request_id": req_id,
+                                "action": "would_refreeze",
+                            }
+                        )
                 else:
                     table = Table(title="Requests to Refreeze")
                     table.add_column("Request ID", style="cyan")
@@ -312,9 +349,18 @@ class Refreeze:
                         f"\n[bold]Would refreeze {len(completed)} completed requests[/bold]"
                     )
 
+                if self.porcelain:
+                    self._emit_porcelain(dry_run=True, success=True)
+
             else:
                 if self.porcelain:
-                    print("ERROR\tmissing_parameters\tProvide --request-id or --all")
+                    self._errors.append(
+                        {
+                            "code": "MISSING_PARAMS",
+                            "message": "Provide --request-id or --all",
+                        }
+                    )
+                    self._emit_porcelain(dry_run=True, success=False)
                 else:
                     self.console.print(
                         "[red]Error: Provide either --request-id or --all[/red]"
@@ -322,7 +368,8 @@ class Refreeze:
 
         except (MissingIndexError, MissingSettingsError) as e:
             if self.porcelain:
-                print(f"ERROR\t{type(e).__name__}\t{str(e)}")
+                self._errors.append({"code": type(e).__name__, "message": str(e)})
+                self._emit_porcelain(dry_run=True, success=False)
             else:
                 self.console.print(f"[red]Error: {e}[/red]")
             raise
@@ -336,6 +383,11 @@ class Refreeze:
         """
         self.loggit.debug("Starting Refreeze action")
 
+        # Initialize porcelain tracking
+        self._results = []
+        self._errors = []
+        self._start_time = datetime.now(timezone.utc)
+
         try:
             self._load_settings()
 
@@ -345,7 +397,10 @@ class Refreeze:
 
                 if result.get("error"):
                     if self.porcelain:
-                        print(f"ERROR\t{result['error']}")
+                        self._errors.append(
+                            {"code": "REFREEZE_ERROR", "message": result["error"]}
+                        )
+                        self._emit_porcelain(dry_run=False, success=False)
                     else:
                         self.console.print(
                             Panel(
@@ -364,10 +419,17 @@ class Refreeze:
 
                 if self.porcelain:
                     for r in results:
-                        status = "SUCCESS" if r["success"] else "FAILED"
-                        print(
-                            f"{status}\t{r['repo']}\t{len(r.get('deleted_indices', []))} indices"
+                        status = r["success"]
+                        self._results.append(
+                            {
+                                "type": "repository",
+                                "name": r["repo"],
+                                "indices_removed": len(r.get("deleted_indices", [])),
+                                "action": "refrozen",
+                                "status": "success" if status else "failed",
+                            }
                         )
+                    self._emit_porcelain(dry_run=False, success=len(failed) == 0)
                 else:
                     if successful:
                         success_list = "\n".join(
@@ -407,7 +469,10 @@ class Refreeze:
 
                 if not completed:
                     if self.porcelain:
-                        print("INFO\tno_completed_requests")
+                        self._results.append(
+                            {"type": "info", "message": "No completed requests found"}
+                        )
+                        self._emit_porcelain(dry_run=False, success=True)
                     else:
                         self.console.print(
                             "[dim]No completed thaw requests to refreeze[/dim]"
@@ -418,7 +483,13 @@ class Refreeze:
                 for req in completed:
                     req_id = req.get("request_id", req.get("id"))
                     if self.porcelain:
-                        print(f"PROCESSING\t{req_id}")
+                        self._results.append(
+                            {
+                                "type": "thaw_request",
+                                "request_id": req_id,
+                                "action": "processing",
+                            }
+                        )
                     else:
                         self.console.print(
                             f"Processing request [cyan]{req_id}[/cyan]..."
@@ -435,8 +506,8 @@ class Refreeze:
                 )
 
                 if self.porcelain:
-                    print(
-                        f"COMPLETE\t{len(completed)} requests\t{successful_repos}/{total_repos} repos"
+                    self._emit_porcelain(
+                        dry_run=False, success=successful_repos == total_repos
                     )
                 else:
                     self.console.print(
@@ -452,7 +523,13 @@ class Refreeze:
 
             else:
                 if self.porcelain:
-                    print("ERROR\tmissing_parameters\tProvide --request-id or --all")
+                    self._errors.append(
+                        {
+                            "code": "MISSING_PARAMS",
+                            "message": "Provide --request-id or --all",
+                        }
+                    )
+                    self._emit_porcelain(dry_run=False, success=False)
                 else:
                     self.console.print(
                         Panel(
@@ -468,7 +545,8 @@ class Refreeze:
 
         except (MissingIndexError, MissingSettingsError) as e:
             if self.porcelain:
-                print(f"ERROR\t{type(e).__name__}\t{str(e)}")
+                self._errors.append({"code": type(e).__name__, "message": str(e)})
+                self._emit_porcelain(dry_run=False, success=False)
             else:
                 self.console.print(
                     Panel(
@@ -484,7 +562,8 @@ class Refreeze:
 
         except Exception as e:
             if self.porcelain:
-                print(f"ERROR\tunexpected\t{str(e)}")
+                self._errors.append({"code": "UNEXPECTED_ERROR", "message": str(e)})
+                self._emit_porcelain(dry_run=False, success=False)
             else:
                 self.console.print(
                     Panel(
@@ -498,3 +577,33 @@ class Refreeze:
                 )
             self.loggit.error("Refreeze failed: %s", e, exc_info=True)
             raise
+
+    def _emit_porcelain(self, dry_run: bool, success: bool) -> None:
+        """Emit JSON porcelain output to stdout."""
+        requests_count = len(
+            [
+                r
+                for r in self._results
+                if r.get("type") == "thaw_request" and r.get("action") == "refrozen"
+            ]
+        )
+        repos_count = len(
+            [
+                r
+                for r in self._results
+                if r.get("type") == "repository" and r.get("action") == "refrozen"
+            ]
+        )
+        output = {
+            "action": "refreeze",
+            "dry_run": dry_run,
+            "success": success,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "results": self._results,
+            "errors": self._errors,
+            "summary": {
+                "requests_refrozen": requests_count,
+                "repositories_refrozen": repos_count,
+            },
+        }
+        print(json.dumps(output, indent=2))

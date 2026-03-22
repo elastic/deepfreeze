@@ -2,6 +2,7 @@
 
 # pylint: disable=too-many-arguments,too-many-instance-attributes, raise-missing-from
 
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -69,6 +70,11 @@ class Cleanup:
         # Will be loaded during action
         self.settings = None
         self.s3 = None
+
+        # Results tracking for JSON output
+        self._results = []
+        self._errors = []
+        self._start_time = None
 
         self.loggit.debug("Deepfreeze Cleanup initialized")
 
@@ -332,6 +338,11 @@ class Cleanup:
         """
         self.loggit.info("DRY-RUN MODE.  No changes will be made.")
 
+        # Initialize tracking
+        self._results = []
+        self._errors = []
+        self._start_time = datetime.now(timezone.utc)
+
         try:
             self._load_settings()
 
@@ -343,22 +354,38 @@ class Cleanup:
             # Display what would be cleaned up
             if self.porcelain:
                 for repo in expired_repos:
-                    print(f"DRY_RUN\texpired_repo\t{repo.name}\t{repo.expires_at}")
+                    expires_at = (
+                        repo.expires_at.isoformat() if repo.expires_at else None
+                    )
+                    self._results.append(
+                        {
+                            "type": "expired_repo",
+                            "name": repo.name,
+                            "expires_at": expires_at,
+                            "action": "would_clean",
+                        }
+                    )
                 for req_info in old_requests:
                     req = req_info["request"]
-                    print(
-                        f"DRY_RUN\told_request\t{req.get('request_id')}\t"
-                        f"{req.get('status')}\t{req_info['age_days']}d old"
+                    self._results.append(
+                        {
+                            "type": "old_request",
+                            "request_id": req.get("request_id"),
+                            "status": req.get("status"),
+                            "age_days": req_info["age_days"],
+                            "action": "would_delete",
+                        }
                     )
                 for policy_info in orphaned_policies:
-                    print(
-                        f"DRY_RUN\torphan_policy\t{policy_info['policy_name']}\t"
-                        f"{policy_info['referenced_repo']}"
+                    self._results.append(
+                        {
+                            "type": "orphan_policy",
+                            "name": policy_info["policy_name"],
+                            "repository": policy_info["referenced_repo"],
+                            "action": "would_delete",
+                        }
                     )
-                print(
-                    f"SUMMARY\t{len(expired_repos)} repos\t{len(old_requests)} requests\t"
-                    f"{len(orphaned_policies)} policies"
-                )
+                self._emit_porcelain(dry_run=True, success=True)
             else:
                 # Expired repositories
                 if expired_repos:
@@ -442,7 +469,13 @@ class Cleanup:
 
         except (MissingIndexError, MissingSettingsError) as e:
             if self.porcelain:
-                print(f"ERROR\t{type(e).__name__}\t{str(e)}")
+                self._errors.append(
+                    {
+                        "type": type(e).__name__,
+                        "message": str(e),
+                    }
+                )
+                self._emit_porcelain(dry_run=True, success=False)
             else:
                 self.console.print(f"[red]Error: {e}[/red]")
             raise
@@ -455,6 +488,11 @@ class Cleanup:
         :rtype: None
         """
         self.loggit.debug("Starting Cleanup action")
+
+        # Initialize tracking
+        self._results = []
+        self._errors = []
+        self._start_time = datetime.now(timezone.utc)
 
         try:
             self._load_settings()
@@ -472,27 +510,36 @@ class Cleanup:
             # Display results
             if self.porcelain:
                 for r in repo_results:
-                    status = "SUCCESS" if r["success"] else "FAILED"
-                    print(f"{status}\texpired_repo\t{r['repo']}")
+                    self._results.append(
+                        {
+                            "type": "expired_repo",
+                            "name": r["repo"],
+                            "action": "cleaned",
+                            "status": "success" if r["success"] else "failed",
+                            "error": r.get("error"),
+                        }
+                    )
                 for r in request_results:
-                    status = "SUCCESS" if r["success"] else "FAILED"
-                    print(f"{status}\told_request\t{r['request_id']}")
+                    self._results.append(
+                        {
+                            "type": "old_request",
+                            "request_id": r["request_id"],
+                            "action": "deleted",
+                            "status": "success" if r["success"] else "failed",
+                            "error": r.get("error"),
+                        }
+                    )
                 for r in policy_results:
-                    status = "SUCCESS" if r["success"] else "FAILED"
-                    print(f"{status}\torphan_policy\t{r['policy_name']}")
-
-                total_success = (
-                    sum(1 for r in repo_results if r["success"])
-                    + sum(1 for r in request_results if r["success"])
-                    + sum(1 for r in policy_results if r["success"])
-                )
-                total_failed = (
-                    sum(1 for r in repo_results if not r["success"])
-                    + sum(1 for r in request_results if not r["success"])
-                    + sum(1 for r in policy_results if not r["success"])
-                )
-                print(f"COMPLETE\t{total_success} success\t{total_failed} failed")
-
+                    self._results.append(
+                        {
+                            "type": "orphan_policy",
+                            "name": r["policy_name"],
+                            "action": "deleted",
+                            "status": "success" if r["success"] else "failed",
+                            "error": r.get("error"),
+                        }
+                    )
+                self._emit_porcelain(dry_run=False, success=True)
             else:
                 # Summarize results
                 repo_success = sum(1 for r in repo_results if r["success"])
@@ -569,13 +616,23 @@ class Cleanup:
 
             self.loggit.info(
                 "Cleanup complete: %d success, %d failed",
-                total_success,
-                total_failed,
+                sum(1 for r in repo_results if r["success"])
+                + sum(1 for r in request_results if r["success"])
+                + sum(1 for r in policy_results if r["success"]),
+                sum(1 for r in repo_results if not r["success"])
+                + sum(1 for r in request_results if not r["success"])
+                + sum(1 for r in policy_results if not r["success"]),
             )
 
         except (MissingIndexError, MissingSettingsError) as e:
             if self.porcelain:
-                print(f"ERROR\t{type(e).__name__}\t{str(e)}")
+                self._errors.append(
+                    {
+                        "type": type(e).__name__,
+                        "message": str(e),
+                    }
+                )
+                self._emit_porcelain(dry_run=False, success=False)
             else:
                 self.console.print(
                     Panel(
@@ -591,7 +648,13 @@ class Cleanup:
 
         except Exception as e:
             if self.porcelain:
-                print(f"ERROR\tunexpected\t{str(e)}")
+                self._errors.append(
+                    {
+                        "type": "unexpected",
+                        "message": str(e),
+                    }
+                )
+                self._emit_porcelain(dry_run=False, success=False)
             else:
                 self.console.print(
                     Panel(
@@ -605,3 +668,43 @@ class Cleanup:
                 )
             self.loggit.error("Cleanup failed: %s", e, exc_info=True)
             raise
+
+    def _emit_porcelain(self, dry_run: bool, success: bool) -> None:
+        """Emit JSON porcelain output to stdout."""
+        expired_count = len(
+            [
+                r
+                for r in self._results
+                if r.get("type") == "expired_repo" and r.get("action") == "cleaned"
+            ]
+        )
+        requests_count = len(
+            [
+                r
+                for r in self._results
+                if r.get("type") == "old_request" and r.get("action") == "deleted"
+            ]
+        )
+        policies_count = len(
+            [
+                r
+                for r in self._results
+                if r.get("type") == "orphan_policy" and r.get("action") == "deleted"
+            ]
+        )
+        failures = len([r for r in self._results if r.get("status") == "failed"])
+        output = {
+            "action": "cleanup",
+            "dry_run": dry_run,
+            "success": success,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "results": self._results,
+            "errors": self._errors,
+            "summary": {
+                "expired_repos_cleaned": expired_count,
+                "old_requests_deleted": requests_count,
+                "orphan_policies_deleted": policies_count,
+                "failures": failures,
+            },
+        }
+        print(json.dumps(output, indent=2))

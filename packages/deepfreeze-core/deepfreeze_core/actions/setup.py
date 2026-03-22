@@ -2,7 +2,9 @@
 
 # pylint: disable=too-many-arguments,too-many-instance-attributes, raise-missing-from
 
+import json
 import logging
+from datetime import datetime, timezone
 
 from elasticsearch8 import Elasticsearch
 from rich.console import Console
@@ -88,6 +90,10 @@ class Setup:
 
         self.client = client
         self.porcelain = porcelain
+        # Results and errors tracking for JSON porcelain output
+        self._results = []
+        self._errors = []
+        self._start_time = None
         self.year = year
         self.month = month
         self.settings = Settings(
@@ -320,20 +326,18 @@ class Setup:
         # If any errors were found, display them all and raise exception
         if errors:
             if self.porcelain:
-                # Machine-readable output: tab-separated values
+                # Machine-readable output: JSON error envelope
                 for error in errors:
-                    # Extract clean text from rich markup
-                    issue_text = (
-                        error["issue"]
-                        .replace("[cyan]", "")
-                        .replace("[/cyan]", "")
-                        .replace("[yellow]", "")
-                        .replace("[/yellow]", "")
-                        .replace("[bold]", "")
-                        .replace("[/bold]", "")
-                        .replace("\n", " ")
+                    self._errors.append(
+                        {
+                            "code": "PRECONDITION_FAILED",
+                            "message": error["issue"]
+                            .replace("[", "")
+                            .replace("]", "")
+                            .replace("/", " "),
+                        }
                     )
-                    print(f"ERROR\tprecondition\t{issue_text}")
+                self._emit_porcelain(dry_run=True, success=False)
             else:
                 self.console.print(
                     "\n[bold red]Setup Preconditions Failed[/bold red]\n", style="bold"
@@ -374,21 +378,118 @@ class Setup:
         :rtype: None
         """
         self.loggit.info("DRY-RUN MODE.  No changes will be made.")
-        msg = f"DRY-RUN: deepfreeze setup of {self.new_repo_name} backed by {self.new_bucket_name}, with base path {self.base_path}."
-        self.loggit.info(msg)
-        self._check_preconditions()
+        self._start_time = datetime.now(timezone.utc)
 
-        self.loggit.info("DRY-RUN: Creating bucket %s", self.new_bucket_name)
-        create_repo(
-            self.client,
-            self.new_repo_name,
-            self.new_bucket_name,
-            self.base_path,
-            self.settings.canned_acl,
-            self.settings.storage_class,
-            provider=self.settings.provider,
-            dry_run=True,
-        )
+        # Reset results/errors for this run
+        self._results = []
+        self._errors = []
+
+        try:
+            # Check preconditions
+            self._check_preconditions()
+
+            # Record precondition checks that passed
+            if self.porcelain:
+                self._results.append(
+                    {
+                        "type": "precondition",
+                        "check": "status_index_not_exists",
+                        "passed": True,
+                    }
+                )
+                self._results.append(
+                    {
+                        "type": "precondition",
+                        "check": "no_existing_repositories",
+                        "passed": True,
+                    }
+                )
+                self._results.append(
+                    {
+                        "type": "precondition",
+                        "check": "bucket_not_exists",
+                        "passed": True,
+                    }
+                )
+                self._results.append(
+                    {
+                        "type": "precondition",
+                        "check": "index_template_exists",
+                        "passed": True,
+                    }
+                )
+                self._results.append(
+                    {
+                        "type": "precondition",
+                        "check": "repository_plugin_available",
+                        "passed": True,
+                    }
+                )
+
+            # Simulate what would be created
+            self.loggit.info("DRY-RUN: Would create bucket %s", self.new_bucket_name)
+            create_repo(
+                self.client,
+                self.new_repo_name,
+                self.new_bucket_name,
+                self.base_path,
+                self.settings.canned_acl,
+                self.settings.storage_class,
+                provider=self.settings.provider,
+                dry_run=True,
+            )
+
+            if self.porcelain:
+                self._results.append(
+                    {"type": "settings_index", "action": "would_create"}
+                )
+                self._results.append(
+                    {
+                        "type": "bucket",
+                        "name": self.new_bucket_name,
+                        "action": "would_create",
+                    }
+                )
+                self._results.append(
+                    {
+                        "type": "repository",
+                        "name": self.new_repo_name,
+                        "bucket": self.new_bucket_name,
+                        "base_path": self.base_path,
+                        "action": "would_create",
+                    }
+                )
+
+                if self.ilm_policy_name:
+                    self._results.append(
+                        {
+                            "type": "ilm_policy",
+                            "name": self.ilm_policy_name,
+                            "action": "would_create_or_update",
+                        }
+                    )
+                if self.index_template_name:
+                    self._results.append(
+                        {
+                            "type": "index_template",
+                            "name": self.index_template_name,
+                            "action": "would_update",
+                        }
+                    )
+
+                self._emit_porcelain(dry_run=True, success=True)
+            else:
+                msg = f"DRY-RUN: deepfreeze setup of {self.new_repo_name} backed by {self.new_bucket_name}, with base path {self.base_path}."
+                self.loggit.info(msg)
+
+        except PreconditionError:
+            # Precondition errors already emit porcelain in _check_preconditions
+            raise
+        except Exception as e:
+            if self.porcelain:
+                self._errors.append({"code": "UNEXPECTED_ERROR", "message": str(e)})
+                self._emit_porcelain(dry_run=True, success=False)
+            raise
 
     def do_action(self) -> None:
         """
@@ -398,6 +499,11 @@ class Setup:
         :rtype: None
         """
         self.loggit.debug("Starting Setup action")
+        self._start_time = datetime.now(timezone.utc)
+
+        # Reset results/errors for this run
+        self._results = []
+        self._errors = []
 
         try:
             # Check preconditions
@@ -408,9 +514,13 @@ class Setup:
             try:
                 ensure_settings_index(self.client, create_if_missing=True)
                 save_settings(self.client, self.settings)
+                self._results.append({"type": "settings_index", "action": "created"})
             except Exception as e:
                 if self.porcelain:
-                    print(f"ERROR\tsettings_index\t{str(e)}")
+                    self._errors.append(
+                        {"code": "SETTINGS_INDEX_ERROR", "message": str(e)}
+                    )
+                    self._emit_porcelain(dry_run=False, success=False)
                 else:
                     self.console.print(
                         Panel(
@@ -428,30 +538,35 @@ class Setup:
                 raise
 
             # Create S3 bucket
-            # ENHANCED LOGGING: Log bucket creation parameters
             self.loggit.info(
                 "Creating S3 bucket %s with ACL=%s, storage_class=%s",
                 self.new_bucket_name,
                 self.settings.canned_acl,
                 self.settings.storage_class,
             )
-            self.loggit.debug(
-                "Full bucket creation parameters: bucket=%s, ACL=%s, storage_class=%s, provider=%s",
-                self.new_bucket_name,
-                self.settings.canned_acl,
-                self.settings.storage_class,
-                self.settings.provider,
-            )
             try:
                 self.s3.create_bucket(self.new_bucket_name)
                 self.loggit.info(
                     "Successfully created S3 bucket %s", self.new_bucket_name
                 )
+                self._results.append(
+                    {
+                        "type": "bucket",
+                        "name": self.new_bucket_name,
+                        "action": "created",
+                    }
+                )
             except Exception as e:
                 if self.porcelain:
-                    print(f"ERROR\tstorage\t{self.new_bucket_name}\t{str(e)}")
+                    self._errors.append(
+                        {
+                            "code": "BUCKET_CREATION_ERROR",
+                            "message": str(e),
+                            "target": self.new_bucket_name,
+                        }
+                    )
+                    self._emit_porcelain(dry_run=False, success=False)
                 else:
-                    # Get provider-specific error info from the storage client
                     storage_type = self.s3.STORAGE_TYPE
                     solutions = self.s3.STORAGE_CREATION_HELP
 
@@ -468,16 +583,7 @@ class Setup:
                 raise
 
             # Create repository
-            # ENHANCED LOGGING: Log repository configuration
             self.loggit.info("Creating repository %s", self.new_repo_name)
-            self.loggit.debug(
-                "Repository configuration: name=%s, bucket=%s, base_path=%s, ACL=%s, storage_class=%s",
-                self.new_repo_name,
-                self.new_bucket_name,
-                self.base_path,
-                self.settings.canned_acl,
-                self.settings.storage_class,
-            )
             try:
                 create_repo(
                     self.client,
@@ -491,11 +597,26 @@ class Setup:
                 self.loggit.info(
                     "Successfully created repository %s", self.new_repo_name
                 )
+                self._results.append(
+                    {
+                        "type": "repository",
+                        "name": self.new_repo_name,
+                        "bucket": self.new_bucket_name,
+                        "base_path": self.base_path,
+                        "action": "created",
+                    }
+                )
             except Exception as e:
                 if self.porcelain:
-                    print(f"ERROR\trepository\t{self.new_repo_name}\t{str(e)}")
+                    self._errors.append(
+                        {
+                            "code": "REPOSITORY_CREATION_ERROR",
+                            "message": str(e),
+                            "target": self.new_repo_name,
+                        }
+                    )
+                    self._emit_porcelain(dry_run=False, success=False)
                 else:
-                    # Get provider-specific error info from the storage client
                     plugin_name = self.s3.ES_PLUGIN_NAME
                     plugin_display = self.s3.ES_PLUGIN_DISPLAY_NAME
                     doc_url = self.s3.ES_PLUGIN_DOC_URL
@@ -537,11 +658,14 @@ class Setup:
                         policy_name=self.ilm_policy_name,
                         repo_name=self.new_repo_name,
                     )
-                    if self.porcelain:
-                        print(
-                            f"ILM_POLICY\t{self.ilm_policy_name}\t{ilm_result['action']}"
-                        )
-                    else:
+                    self._results.append(
+                        {
+                            "type": "ilm_policy",
+                            "name": self.ilm_policy_name,
+                            "action": ilm_result["action"],
+                        }
+                    )
+                    if not self.porcelain:
                         if ilm_result["action"] == "created":
                             self.console.print(
                                 Panel(
@@ -579,9 +703,15 @@ class Setup:
                             )
                 except Exception as e:
                     # ILM policy management failed
-                    if self.porcelain:
-                        print(f"WARNING\tilm_policy\t{self.ilm_policy_name}\t{str(e)}")
-                    else:
+                    self._results.append(
+                        {
+                            "type": "ilm_policy",
+                            "name": self.ilm_policy_name,
+                            "action": "warning",
+                            "message": str(e),
+                        }
+                    )
+                    if not self.porcelain:
                         self.console.print(
                             Panel(
                                 f"[bold yellow]Warning: Failed to manage ILM policy[/bold yellow]\n\n"
@@ -603,11 +733,14 @@ class Setup:
                         template_name=self.index_template_name,
                         ilm_policy_name=self.ilm_policy_name,
                     )
-                    if self.porcelain:
-                        print(
-                            f"INDEX_TEMPLATE\t{self.index_template_name}\t{template_result['action']}"
-                        )
-                    else:
+                    self._results.append(
+                        {
+                            "type": "index_template",
+                            "name": self.index_template_name,
+                            "action": template_result["action"],
+                        }
+                    )
+                    if not self.porcelain:
                         if template_result["action"] == "updated":
                             old_policy = template_result.get("old_policy", "none")
                             self.console.print(
@@ -633,11 +766,15 @@ class Setup:
                                 )
                             )
                 except Exception as e:
-                    if self.porcelain:
-                        print(
-                            f"WARNING\tindex_template\t{self.index_template_name}\t{str(e)}"
-                        )
-                    else:
+                    self._results.append(
+                        {
+                            "type": "index_template",
+                            "name": self.index_template_name,
+                            "action": "warning",
+                            "message": str(e),
+                        }
+                    )
+                    if not self.porcelain:
                         self.console.print(
                             Panel(
                                 f"[bold yellow]Warning: Failed to update index template[/bold yellow]\n\n"
@@ -653,11 +790,7 @@ class Setup:
 
             # Success!
             if self.porcelain:
-                # Machine-readable output: tab-separated values
-                # Format: SUCCESS\t{repo_name}\t{bucket_name}\t{base_path}
-                print(
-                    f"SUCCESS\t{self.new_repo_name}\t{self.new_bucket_name}\t{self.base_path}"
-                )
+                self._emit_porcelain(dry_run=False, success=True)
             else:
                 # Build summary message with what was configured
                 summary_lines = [
@@ -741,7 +874,8 @@ class Setup:
         except Exception as e:
             # Catch any unexpected errors
             if self.porcelain:
-                print(f"ERROR\tunexpected\t{str(e)}")
+                self._errors.append({"code": "UNEXPECTED_ERROR", "message": str(e)})
+                self._emit_porcelain(dry_run=False, success=False)
             else:
                 provider_name = self.s3.ES_PLUGIN_DISPLAY_NAME
                 self.console.print(
@@ -760,3 +894,26 @@ class Setup:
                 )
             self.loggit.error("Unexpected error during setup: %s", e, exc_info=True)
             raise
+
+    def _emit_porcelain(self, dry_run: bool, success: bool) -> None:
+        """Emit JSON porcelain output to stdout."""
+        output = {
+            "action": "setup",
+            "dry_run": dry_run,
+            "success": success,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "results": self._results,
+            "errors": self._errors,
+            "summary": {
+                "repository": self.new_repo_name if success and not dry_run else None,
+                "bucket": self.new_bucket_name if success and not dry_run else None,
+                "base_path": self.base_path if success and not dry_run else None,
+            }
+            if not dry_run
+            else {
+                "would_create_repository": self.new_repo_name,
+                "would_create_bucket": self.new_bucket_name,
+                "would_create_base_path": self.base_path,
+            },
+        }
+        print(json.dumps(output, indent=2))

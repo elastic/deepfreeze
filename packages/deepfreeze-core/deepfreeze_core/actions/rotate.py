@@ -2,7 +2,9 @@
 
 # pylint: disable=too-many-arguments,too-many-instance-attributes, raise-missing-from
 
+import json
 import logging
+from datetime import datetime, timezone
 
 from elasticsearch8 import Elasticsearch
 from rich.console import Console
@@ -77,6 +79,11 @@ class Rotate:
         self.month = month
         self.porcelain = porcelain
 
+        # Porcelain output tracking
+        self._results = []
+        self._errors = []
+        self._start_time = None
+
         # Will be loaded during action
         self.settings = None
         self.s3 = None
@@ -142,7 +149,11 @@ class Rotate:
                     self.s3.create_bucket(new_bucket_name)
                     self.loggit.info("Created %s %s", storage_type, new_bucket_name)
                 else:
-                    self.loggit.info("%s %s already exists", storage_type.capitalize(), new_bucket_name)
+                    self.loggit.info(
+                        "%s %s already exists",
+                        storage_type.capitalize(),
+                        new_bucket_name,
+                    )
 
             # Create repository in Elasticsearch
             create_repo(
@@ -437,9 +448,9 @@ class Rotate:
             all_policies = self.client.ilm.get_lifecycle()
 
             # Get currently mounted repos
-            mounted_repos = set(get_matching_repo_names(
-                self.client, self.settings.repo_name_prefix
-            ))
+            mounted_repos = set(
+                get_matching_repo_names(self.client, self.settings.repo_name_prefix)
+            )
 
             for policy_name, policy_data in all_policies.items():
                 # Only check versioned policies matching our prefix
@@ -471,7 +482,9 @@ class Rotate:
                                 )
                                 if not dry_run:
                                     try:
-                                        self.client.ilm.delete_lifecycle(name=policy_name)
+                                        self.client.ilm.delete_lifecycle(
+                                            name=policy_name
+                                        )
                                         deleted_policies.append(policy_name)
                                     except Exception as e:
                                         self.loggit.error(
@@ -506,7 +519,15 @@ class Rotate:
             )
 
             if self.porcelain:
-                print(f"DRY_RUN\tnew_repository\t{new_repo}\t{new_bucket}\t{base_path}")
+                self._results.append(
+                    {
+                        "type": "repository",
+                        "name": new_repo,
+                        "bucket": new_bucket,
+                        "base_path": base_path,
+                        "action": "would_create",
+                    }
+                )
             else:
                 self.console.print(
                     Panel(
@@ -525,7 +546,13 @@ class Rotate:
             if repos_to_archive:
                 if self.porcelain:
                     for repo in repos_to_archive:
-                        print(f"DRY_RUN\tarchive_repository\t{repo}")
+                        self._results.append(
+                            {
+                                "type": "repository",
+                                "name": repo,
+                                "action": "would_archive",
+                            }
+                        )
                 else:
                     archive_list = "\n".join(
                         [f"  - [yellow]{r}[/yellow]" for r in repos_to_archive]
@@ -543,8 +570,13 @@ class Rotate:
             if self.settings.ilm_policy_name:
                 old_suffix = self.settings.last_suffix
                 if self.porcelain:
-                    print(
-                        f"DRY_RUN\tilm_policy\t{self.settings.ilm_policy_name}-{old_suffix}\t{self.settings.ilm_policy_name}-{new_suffix}"
+                    self._results.append(
+                        {
+                            "type": "ilm_policy",
+                            "old": f"{self.settings.ilm_policy_name}-{old_suffix}",
+                            "new": f"{self.settings.ilm_policy_name}-{new_suffix}",
+                            "action": "would_update",
+                        }
                     )
                 else:
                     self.console.print(
@@ -563,7 +595,13 @@ class Rotate:
             if orphaned_policies:
                 if self.porcelain:
                     for policy in orphaned_policies:
-                        print(f"DRY_RUN\tdelete_policy\t{policy}")
+                        self._results.append(
+                            {
+                                "type": "ilm_policy",
+                                "name": policy,
+                                "action": "would_delete",
+                            }
+                        )
                 else:
                     policy_list = "\n".join(
                         [f"  - [red]{p}[/red]" for p in orphaned_policies]
@@ -577,9 +615,14 @@ class Rotate:
                         )
                     )
 
+            # Emit successful dry-run porcelain output
+            if self.porcelain:
+                self._emit_porcelain(dry_run=True, success=True)
+
         except (MissingIndexError, MissingSettingsError) as e:
             if self.porcelain:
-                print(f"ERROR\t{type(e).__name__}\t{str(e)}")
+                self._errors.append({"code": type(e).__name__, "message": str(e)})
+                self._emit_porcelain(dry_run=True, success=False)
             else:
                 self.console.print(f"[red]Error: {e}[/red]")
             raise
@@ -597,11 +640,25 @@ class Rotate:
             self._load_settings()
             old_suffix = self.settings.last_suffix
 
+            # Initialize porcelain tracking
+            self._start_time = datetime.now(timezone.utc)
+            self._results = []
+            self._errors = []
+
             # Create new repository
             new_repo, new_bucket, base_path, new_suffix = self._create_new_repository()
 
             if self.porcelain:
-                print(f"CREATED\trepository\t{new_repo}\t{new_bucket}\t{base_path}")
+                self._results.append(
+                    {
+                        "type": "repository",
+                        "name": new_repo,
+                        "bucket": new_bucket,
+                        "base_path": base_path,
+                        "action": "created",
+                    }
+                )
+                self._new_repo_name = new_repo  # Save for summary
             else:
                 self.console.print(
                     Panel(
@@ -622,7 +679,9 @@ class Rotate:
             if updated_policies:
                 if self.porcelain:
                     for policy in updated_policies:
-                        print(f"UPDATED\tilm_policy\t{policy}")
+                        self._results.append(
+                            {"type": "ilm_policy", "name": policy, "action": "updated"}
+                        )
                 else:
                     policy_list = "\n".join(
                         [f"  - [cyan]{p}[/cyan]" for p in updated_policies]
@@ -642,7 +701,13 @@ class Rotate:
             if updated_date_ranges:
                 if self.porcelain:
                     for repo in updated_date_ranges:
-                        print(f"UPDATED\tdate_range\t{repo}")
+                        self._results.append(
+                            {
+                                "type": "date_range",
+                                "repository": repo,
+                                "action": "updated",
+                            }
+                        )
                 else:
                     range_list = "\n".join(
                         [f"  - [cyan]{r}[/cyan]" for r in updated_date_ranges]
@@ -661,7 +726,9 @@ class Rotate:
             if archived:
                 if self.porcelain:
                     for repo in archived:
-                        print(f"ARCHIVED\trepository\t{repo}")
+                        self._results.append(
+                            {"type": "repository", "name": repo, "action": "archived"}
+                        )
                 else:
                     archive_list = "\n".join(
                         [f"  - [yellow]{r}[/yellow]" for r in archived]
@@ -680,7 +747,9 @@ class Rotate:
             if deleted_policies:
                 if self.porcelain:
                     for policy in deleted_policies:
-                        print(f"DELETED\tilm_policy\t{policy}")
+                        self._results.append(
+                            {"type": "ilm_policy", "name": policy, "action": "deleted"}
+                        )
                 else:
                     policy_list = "\n".join(
                         [f"  - [red]{p}[/red]" for p in deleted_policies]
@@ -695,7 +764,9 @@ class Rotate:
                     )
 
             # Final summary
-            if not self.porcelain:
+            if self.porcelain:
+                self._emit_porcelain(dry_run=False, success=True)
+            else:
                 self.console.print(
                     Panel(
                         f"[bold green]Rotation completed successfully![/bold green]\n\n"
@@ -718,7 +789,8 @@ class Rotate:
 
         except (MissingIndexError, MissingSettingsError) as e:
             if self.porcelain:
-                print(f"ERROR\t{type(e).__name__}\t{str(e)}")
+                self._errors.append({"code": type(e).__name__, "message": str(e)})
+                self._emit_porcelain(dry_run=False, success=False)
             else:
                 self.console.print(
                     Panel(
@@ -734,7 +806,8 @@ class Rotate:
 
         except Exception as e:
             if self.porcelain:
-                print(f"ERROR\tunexpected\t{str(e)}")
+                self._errors.append({"code": "UNEXPECTED_ERROR", "message": str(e)})
+                self._emit_porcelain(dry_run=False, success=False)
             else:
                 self.console.print(
                     Panel(
@@ -748,3 +821,28 @@ class Rotate:
                 )
             self.loggit.error("Rotation failed: %s", e, exc_info=True)
             raise
+
+    def _emit_porcelain(self, dry_run: bool, success: bool) -> None:
+        """Emit JSON porcelain output to stdout."""
+        output = {
+            "action": "rotate",
+            "dry_run": dry_run,
+            "success": success,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "results": self._results,
+            "errors": self._errors,
+            "summary": {
+                "new_repository": self._new_repo_name
+                if hasattr(self, "_new_repo_name")
+                else None,
+                "archived_count": len(
+                    [
+                        r
+                        for r in self._results
+                        if r.get("type") == "repository"
+                        and r.get("action") == "archived"
+                    ]
+                ),
+            },
+        }
+        print(json.dumps(output, indent=2))
