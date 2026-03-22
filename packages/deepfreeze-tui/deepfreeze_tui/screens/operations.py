@@ -10,7 +10,7 @@ from textual.widgets import (
     Checkbox,
     TabbedContent,
     TabPane,
-    TextLog,
+    RichLog,
     RadioSet,
     RadioButton,
 )
@@ -50,7 +50,7 @@ class OperationsScreen(Screen):
         # Output log (shared across all operations)
         with Vertical(classes="output-panel"):
             yield Label("Output", classes="section-title")
-            yield TextLog(id="output-log", highlight=True, markup=True)
+            yield RichLog(id="output-log", highlight=True, markup=True)
 
     def _create_rotate_form(self):
         """Create the rotate operation form."""
@@ -166,7 +166,7 @@ class OperationsScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         button_id = event.button.id
-        log = self.query_one("#output-log", TextLog)
+        log = self.query_one("#output-log", RichLog)
 
         if button_id == "btn-rotate":
             self.current_action = "rotate"

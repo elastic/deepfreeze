@@ -289,8 +289,8 @@ RadioSet RadioButton {
     color: $elastic-fg;
 }
 
-/* TextLog */
-TextLog {
+/* RichLog */
+RichLog {
     background: $elastic-hover;
     border: solid $elastic-border;
     color: $elastic-fg;
