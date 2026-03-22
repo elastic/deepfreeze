@@ -91,8 +91,8 @@ export default function Repositories() {
       name: 'Date Range',
       sortable: true,
       render: (_: unknown, item: Repo) => {
-        const start = item.date_range_start || item.start_date;
-        const end = item.date_range_end || item.end_date;
+        const start = item.start;
+        const end = item.end;
         if (!start && !end) return <EuiText size="s" color="subdued">--</EuiText>;
         return (
           <EuiText size="s">
@@ -102,7 +102,7 @@ export default function Repositories() {
       },
     },
     {
-      field: 'mounted',
+      field: 'is_mounted',
       name: 'Mounted',
       sortable: true,
       render: (mounted: unknown) => (
@@ -112,7 +112,7 @@ export default function Repositories() {
       ),
     },
     {
-      field: 'state',
+      field: 'thaw_state',
       name: 'State',
       sortable: true,
       render: (state: string) => (
@@ -122,7 +122,7 @@ export default function Repositories() {
       ),
     },
     {
-      field: 'tier',
+      field: 'storage_tier',
       name: 'Tier',
       sortable: true,
       render: (tier: string) => tier || '--',

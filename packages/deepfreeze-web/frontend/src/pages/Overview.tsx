@@ -55,7 +55,7 @@ export default function Overview() {
   const repos = status.repositories || [];
   const stateCounts: Record<string, number> = {};
   for (const repo of repos) {
-    const state = (repo.state as string) || 'unknown';
+    const state = (repo.thaw_state as string) || 'unknown';
     stateCounts[state] = (stateCounts[state] || 0) + 1;
   }
 
