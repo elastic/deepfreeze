@@ -45,16 +45,16 @@ class RepoPanel(OptionList):
         self.border_subtitle = "\\[r]otate \\[t]haw \\[c]leanup \\[f]ix"
 
     def update_repos(self, repos: list[dict[str, Any]]) -> None:
-        """Replace all repos in the list."""
-        self._repos = repos
+        """Replace all repos in the list, sorted by name."""
+        self._repos = sorted(repos, key=lambda r: r.get("name", ""))
         self.clear_options()
-        for repo in repos:
+        for repo in self._repos:
             name = repo.get("name", "?")
             state = repo.get("thaw_state", "?")
             mounted = "M" if repo.get("is_mounted") else " "
             color = STATE_COLORS.get(state, "white")
             self.add_option(
-                Option(f"{mounted} {name:<30} [{color}]{state}[/{color}]", id=name)
+                Option(f"{mounted} {name}  [{color}]{state}[/{color}]", id=name)
             )
 
     def get_selected_repo(self) -> dict[str, Any] | None:
@@ -95,9 +95,11 @@ class ThawPanel(OptionList):
 
     def update_requests(self, requests: list[dict[str, Any]]) -> None:
         """Replace all thaw requests."""
-        self._requests = requests
+        self._requests = sorted(
+            requests, key=lambda r: r.get("created_at", r.get("id", "")), reverse=True
+        )
         self.clear_options()
-        for req in requests:
+        for req in self._requests:
             req_id = req.get("id", req.get("request_id", "?"))
             status = req.get("status", "?")
             color = THAW_STATUS_COLORS.get(status, "white")
