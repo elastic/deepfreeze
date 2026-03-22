@@ -119,9 +119,44 @@ class OverviewScreen(Screen):
                 yield Button("🧹 Cleanup", id="btn-cleanup")
                 yield Button("🔧 Repair", id="btn-repair")
 
-    def on_mount(self):
+    async def on_mount(self):
         """Called when screen is mounted."""
         self.update_health_display()
+        await self.refresh_data()
+
+    async def refresh_data(self):
+        """Fetch real data from service and update display."""
+        try:
+            if hasattr(self.app, "service") and self.app.service:
+                status = await self.app.service.get_status()
+                self.update_data(status.model_dump())
+
+                # Also fetch action history for the activity table
+                history = self.app.service.get_action_history(limit=10)
+                self.update_activity_table(history)
+        except Exception as e:
+            self.notify(f"Failed to load overview data: {str(e)}", severity="error")
+
+    def update_activity_table(self, history):
+        """Update the activity table with real action history."""
+        table = self.query_one("#activity-table", DataTable)
+        table.clear()
+
+        if not history:
+            table.add_row("—", "—", "—", "No recent activity")
+            return
+
+        for entry in history:
+            status = "✓ Success" if entry.success else "✗ Failed"
+            time_str = (
+                entry.timestamp.strftime("%Y-%m-%d %H:%M") if entry.timestamp else "—"
+            )
+            table.add_row(
+                time_str,
+                entry.action,
+                status,
+                entry.summary[:50] if entry.summary else "—",
+            )
 
     def update_health_display(self):
         """Update health badges based on cluster status."""
@@ -131,18 +166,8 @@ class OverviewScreen(Screen):
 
     def action_refresh(self):
         """Refresh status data."""
-        # In real implementation, would fetch from service
-        # For now, just update with sample data
-        self.update_data(
-            {
-                "cluster": {"status": "green", "name": "production"},
-                "repositories": [
-                    {"state": "active", "name": "deepfreeze-000001"},
-                    {"state": "frozen", "name": "deepfreeze-000002"},
-                ],
-                "thaw_requests": [{"id": "req-001"}],
-            }
-        )
+        # Run the async refresh in the background
+        self.run_worker(self.refresh_data())
 
     def action_switch_repos(self):
         """Switch to repositories screen."""

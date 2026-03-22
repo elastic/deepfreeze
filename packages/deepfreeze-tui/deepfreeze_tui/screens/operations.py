@@ -163,59 +163,19 @@ class OperationsScreen(Screen):
         """Switch to logs."""
         self.app.push_screen("logs")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         button_id = event.button.id
         log = self.query_one("#output-log", RichLog)
 
         if button_id == "btn-rotate":
-            self.current_action = "rotate"
-            dry_run = self.query_one("#rotate-dry-run", Checkbox).value
-            keep = self.query_one("#rotate-keep", Input).value
-
-            log.write(f"[blue]Executing Rotate (dry_run={dry_run})...[/blue]")
-            # Would call: self.app.service.rotate(keep=int(keep), dry_run=dry_run)
-            log.write(
-                f"[green]✓ Rotate {'preview' if dry_run else 'execution'} completed[/green]"
-            )
-
+            await self.execute_rotate(log)
         elif button_id == "btn-cleanup":
-            self.current_action = "cleanup"
-            dry_run = self.query_one("#cleanup-dry-run", Checkbox).value
-            retention = self.query_one("#cleanup-retention", Input).value
-
-            log.write(
-                f"[blue]Executing Cleanup (dry_run={dry_run}, retention={retention} days)...[/blue]"
-            )
-            # Would call: self.app.service.cleanup(...)
-            log.write(
-                f"[green]✓ Cleanup {'preview' if dry_run else 'execution'} completed[/green]"
-            )
-
+            await self.execute_cleanup(log)
         elif button_id == "btn-repair":
-            self.current_action = "repair"
-            dry_run = self.query_one("#repair-dry-run", Checkbox).value
-
-            log.write(f"[blue]Executing Metadata Repair (dry_run={dry_run})...[/blue]")
-            # Would call: self.app.service.repair_metadata(dry_run=dry_run)
-            log.write(
-                f"[green]✓ Repair {'scan' if dry_run else 'execution'} completed[/green]"
-            )
-
+            await self.execute_repair(log)
         elif button_id == "btn-setup":
-            self.current_action = "setup"
-            dry_run = self.query_one("#setup-dry-run", Checkbox).value
-            repo_prefix = self.query_one("#setup-repo-prefix", Input).value
-            bucket_prefix = self.query_one("#setup-bucket-prefix", Input).value
-
-            log.write(f"[blue]Executing Setup (dry_run={dry_run})...[/blue]")
-            log.write(f"  Repo prefix: {repo_prefix}")
-            log.write(f"  Bucket prefix: {bucket_prefix}")
-            # Would call: self.app.service.setup(...)
-            log.write(
-                f"[green]✓ Setup {'preview' if dry_run else 'execution'} completed[/green]"
-            )
-
+            await self.execute_setup(log)
         elif button_id in [
             "btn-rotate-cancel",
             "btn-cleanup-cancel",
@@ -223,3 +183,148 @@ class OperationsScreen(Screen):
             "btn-setup-cancel",
         ]:
             log.write("[dim]Operation cancelled[/dim]")
+
+    async def execute_rotate(self, log: RichLog):
+        """Execute the rotate operation."""
+        self.current_action = "rotate"
+        dry_run = self.query_one("#rotate-dry-run", Checkbox).value
+        keep_str = self.query_one("#rotate-keep", Input).value
+        year_str = self.query_one("#rotate-year", Input).value
+        month_str = self.query_one("#rotate-month", Input).value
+
+        log.write(f"[blue]Executing Rotate (dry_run={dry_run})...[/blue]")
+
+        try:
+            if hasattr(self.app, "service") and self.app.service:
+                # Parse optional year/month
+                year = int(year_str) if year_str else None
+                month = int(month_str) if month_str else None
+                keep = int(keep_str) if keep_str else 1
+
+                result = await self.app.service.rotate(
+                    year=year, month=month, keep=keep, dry_run=dry_run
+                )
+
+                if result.success:
+                    log.write(
+                        f"[green]✓ Rotate {'preview' if dry_run else 'execution'} completed[/green]"
+                    )
+                    log.write(f"[dim]Summary: {result.summary}[/dim]")
+
+                    # Show details if any
+                    if result.details:
+                        log.write("[dim]Details:[/dim]")
+                        for detail in result.details:
+                            log.write(
+                                f"  - {detail.type}: {detail.target} = {detail.status}"
+                            )
+                else:
+                    log.write(f"[red]✗ Rotate failed: {result.summary}[/red]")
+                    if result.errors:
+                        for error in result.errors:
+                            log.write(f"[red]  Error: {error.message}[/red]")
+        except Exception as e:
+            log.write(f"[red]✗ Rotate failed: {str(e)}[/red]")
+
+    async def execute_cleanup(self, log: RichLog):
+        """Execute the cleanup operation."""
+        self.current_action = "cleanup"
+        dry_run = self.query_one("#cleanup-dry-run", Checkbox).value
+        retention_str = self.query_one("#cleanup-retention", Input).value
+
+        log.write(
+            f"[blue]Executing Cleanup (dry_run={dry_run}, retention={retention_str} days)...[/blue]"
+        )
+
+        try:
+            if hasattr(self.app, "service") and self.app.service:
+                retention = int(retention_str) if retention_str else None
+
+                result = await self.app.service.cleanup(
+                    refrozen_retention_days=retention, dry_run=dry_run
+                )
+
+                if result.success:
+                    log.write(
+                        f"[green]✓ Cleanup {'preview' if dry_run else 'execution'} completed[/green]"
+                    )
+                    log.write(f"[dim]Summary: {result.summary}[/dim]")
+
+                    if result.details:
+                        log.write("[dim]Details:[/dim]")
+                        for detail in result.details:
+                            log.write(
+                                f"  - {detail.type}: {detail.target} = {detail.status}"
+                            )
+                else:
+                    log.write(f"[red]✗ Cleanup failed: {result.summary}[/red]")
+        except Exception as e:
+            log.write(f"[red]✗ Cleanup failed: {str(e)}[/red]")
+
+    async def execute_repair(self, log: RichLog):
+        """Execute the repair metadata operation."""
+        self.current_action = "repair"
+        dry_run = self.query_one("#repair-dry-run", Checkbox).value
+
+        log.write(f"[blue]Executing Metadata Repair (dry_run={dry_run})...[/blue]")
+
+        try:
+            if hasattr(self.app, "service") and self.app.service:
+                result = await self.app.service.repair_metadata(dry_run=dry_run)
+
+                if result.success:
+                    log.write(
+                        f"[green]✓ Repair {'scan' if dry_run else 'execution'} completed[/green]"
+                    )
+                    log.write(f"[dim]Summary: {result.summary}[/dim]")
+
+                    if result.details:
+                        log.write("[dim]Details:[/dim]")
+                        for detail in result.details:
+                            log.write(
+                                f"  - {detail.type}: {detail.target} = {detail.status}"
+                            )
+                else:
+                    log.write(f"[red]✗ Repair failed: {result.summary}[/red]")
+        except Exception as e:
+            log.write(f"[red]✗ Repair failed: {str(e)}[/red]")
+
+    async def execute_setup(self, log: RichLog):
+        """Execute the setup operation."""
+        self.current_action = "setup"
+        dry_run = self.query_one("#setup-dry-run", Checkbox).value
+        repo_prefix = self.query_one("#setup-repo-prefix", Input).value
+        bucket_prefix = self.query_one("#setup-bucket-prefix", Input).value
+        ilm_policy = self.query_one("#setup-ilm-policy", Input).value or None
+        template = self.query_one("#setup-template", Input).value or None
+
+        log.write(f"[blue]Executing Setup (dry_run={dry_run})...[/blue]")
+        log.write(f"  Repo prefix: {repo_prefix}")
+        log.write(f"  Bucket prefix: {bucket_prefix}")
+
+        try:
+            if hasattr(self.app, "service") and self.app.service:
+                result = await self.app.service.setup(
+                    repo_name_prefix=repo_prefix,
+                    bucket_name_prefix=bucket_prefix,
+                    ilm_policy_name=ilm_policy,
+                    index_template_name=template,
+                    dry_run=dry_run,
+                )
+
+                if result.success:
+                    log.write(
+                        f"[green]✓ Setup {'preview' if dry_run else 'execution'} completed[/green]"
+                    )
+                    log.write(f"[dim]Summary: {result.summary}[/dim]")
+
+                    if result.details:
+                        log.write("[dim]Details:[/dim]")
+                        for detail in result.details:
+                            log.write(
+                                f"  - {detail.type}: {detail.target} = {detail.status}"
+                            )
+                else:
+                    log.write(f"[red]✗ Setup failed: {result.summary}[/red]")
+        except Exception as e:
+            log.write(f"[red]✗ Setup failed: {str(e)}[/red]")

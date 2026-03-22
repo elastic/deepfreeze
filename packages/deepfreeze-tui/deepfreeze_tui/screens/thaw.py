@@ -125,34 +125,44 @@ class ThawScreen(Screen):
                         )
                         yield Button("Cancel", id="btn-cancel-create")
 
-    def on_mount(self):
+    async def on_mount(self):
         """Called when screen is mounted."""
-        self.load_requests()
+        await self.load_requests()
 
-    def load_requests(self):
+    async def load_requests(self):
         """Load thaw requests from service."""
-        # In real implementation, would call self.app.service.thaw_list()
-        self.thaw_requests = [
-            {
-                "request_id": "thaw-001",
-                "status": "completed",
-                "start_date": "2024-01-01",
-                "end_date": "2024-01-31",
-                "repos": ["deepfreeze-000001"],
-                "created_at": "2024-03-15",
-                "age_days": 5,
-            },
-            {
-                "request_id": "thaw-002",
-                "status": "in_progress",
-                "start_date": "2024-02-01",
-                "end_date": "2024-02-28",
-                "repos": ["deepfreeze-000002", "deepfreeze-000003"],
-                "created_at": "2024-03-22",
-                "age_days": 0,
-            },
-        ]
-        self.update_table()
+        try:
+            if hasattr(self.app, "service") and self.app.service:
+                result = await self.app.service.thaw_list(include_completed=True)
+
+                if result.success and result.details:
+                    self.thaw_requests = []
+                    for detail in result.details:
+                        if detail.type == "thaw_request":
+                            self.thaw_requests.append(
+                                {
+                                    "request_id": detail.target
+                                    or detail.metadata.get("request_id", "unknown"),
+                                    "status": detail.status or "unknown",
+                                    "start_date": detail.metadata.get(
+                                        "start_date", "—"
+                                    ),
+                                    "end_date": detail.metadata.get("end_date", "—"),
+                                    "repos": detail.metadata.get("repos", []),
+                                    "created_at": detail.metadata.get(
+                                        "created_at", "—"
+                                    ),
+                                    "age_days": detail.metadata.get("age_days", 0),
+                                }
+                            )
+                else:
+                    self.thaw_requests = []
+
+                self.update_table()
+        except Exception as e:
+            self.notify(f"Failed to load thaw requests: {str(e)}", severity="error")
+            self.thaw_requests = []
+            self.update_table()
 
     def update_table(self):
         """Update the requests table."""
@@ -217,17 +227,53 @@ class ThawScreen(Screen):
 
     def action_refresh(self):
         """Refresh requests."""
-        self.load_requests()
+        self.run_worker(self.load_requests())
 
-    def action_create(self):
-        """Switch to create tab."""
-        self.query_one(TabbedContent).active = "create"
-
-    def action_check(self):
+    async def action_check(self):
         """Check status of selected request."""
         if self.selected_request:
-            # Would call service.thaw_check()
-            pass
+            request_id = self.selected_request.get("request_id")
+            try:
+                if hasattr(self.app, "service") and self.app.service:
+                    self.notify(
+                        f"Checking status of {request_id}...", severity="information"
+                    )
+                    result = await self.app.service.thaw_check(request_id=request_id)
+                    if result.success:
+                        self.notify(
+                            f"Status check complete: {result.summary}",
+                            severity="information",
+                        )
+                        await self.load_requests()  # Refresh the list
+                    else:
+                        self.notify(
+                            f"Status check failed: {result.summary}", severity="error"
+                        )
+            except Exception as e:
+                self.notify(f"Failed to check status: {str(e)}", severity="error")
+
+    async def action_refreeze(self):
+        """Refreeze selected request."""
+        if self.selected_request:
+            request_id = self.selected_request.get("request_id")
+            try:
+                if hasattr(self.app, "service") and self.app.service:
+                    self.notify(f"Refreezing {request_id}...", severity="information")
+                    result = await self.app.service.refreeze(
+                        request_id=request_id, dry_run=False
+                    )
+                    if result.success:
+                        self.notify(
+                            f"Successfully refrozen {request_id}",
+                            severity="information",
+                        )
+                        await self.load_requests()  # Refresh the list
+                    else:
+                        self.notify(
+                            f"Refreeze failed: {result.summary}", severity="error"
+                        )
+            except Exception as e:
+                self.notify(f"Failed to refreeze: {str(e)}", severity="error")
 
     def action_refreeze(self):
         """Refreeze selected request."""
@@ -258,22 +304,48 @@ class ThawScreen(Screen):
         elif button_id == "btn-refreeze":
             self.action_refreeze()
 
-    def submit_thaw_request(self):
+    async def submit_thaw_request(self):
         """Submit the thaw request form."""
-        # In real implementation, would gather form data and call service
         start_date = self.query_one("#input-start-date", Input).value
         end_date = self.query_one("#input-end-date", Input).value
         duration = self.query_one("#input-duration", Input).value
+        tier = self.query_one("#select-tier", Select).value
+        sync = self.query_one("#chk-sync", Checkbox).value
+        dry_run = self.query_one("#chk-dry-run", Checkbox).value
 
         # Validate dates
         try:
-            datetime.strptime(start_date, "%Y-%m-%d")
-            datetime.strptime(end_date, "%Y-%m-%d")
+            from datetime import datetime
+
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
         except ValueError:
-            # Show error
+            self.notify("Invalid date format. Please use YYYY-MM-DD", severity="error")
             return
 
-        # Would call self.app.service.thaw_create(...)
-        # For now, just switch back to list
-        self.query_one(TabbedContent).active = "list"
-        self.load_requests()
+        try:
+            if hasattr(self.app, "service") and self.app.service:
+                self.notify("Creating thaw request...", severity="information")
+                result = await self.app.service.thaw_create(
+                    start_date=start_dt,
+                    end_date=end_dt,
+                    sync=sync,
+                    duration=int(duration),
+                    tier=tier if tier else "Standard",
+                    dry_run=dry_run,
+                )
+
+                if result.success:
+                    action_type = "preview" if dry_run else "request"
+                    self.notify(
+                        f"Thaw {action_type} created: {result.summary}",
+                        severity="information",
+                    )
+                    self.query_one(TabbedContent).active = "list"
+                    await self.load_requests()  # Refresh the list
+                else:
+                    self.notify(
+                        f"Thaw request failed: {result.summary}", severity="error"
+                    )
+        except Exception as e:
+            self.notify(f"Failed to create thaw request: {str(e)}", severity="error")

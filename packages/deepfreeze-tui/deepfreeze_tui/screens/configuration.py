@@ -89,59 +89,62 @@ class ConfigurationScreen(Screen):
             template_table.add_row("—", "—", "—")
             yield template_table
 
-    def on_mount(self):
+    async def on_mount(self):
         """Called when screen is mounted."""
-        self.load_configuration()
+        await self.load_configuration()
 
-    def load_configuration(self):
+    async def load_configuration(self):
         """Load configuration data from service."""
-        # In real implementation, would call self.app.service.get_status()
-        # to get settings, buckets, ILM policies, etc.
-        # For now, use sample data
-        self.settings = {
-            "repo_prefix": "deepfreeze",
-            "bucket_prefix": "deepfreeze",
-            "provider": "s3",
-            "base_path": "snapshots",
-            "rotate_by": "month",
-            "ilm_policy": "deepfreeze-policy",
-        }
+        try:
+            if hasattr(self.app, "service") and self.app.service:
+                # Fetch real status from service
+                status = await self.app.service.get_status()
 
-        self.ilm_policies = [
-            {
-                "name": "deepfreeze-policy",
-                "repo": "deepfreeze-000001",
-                "searchable_snapshot": True,
-            },
-            {
-                "name": "archive-policy",
-                "repo": None,
-                "searchable_snapshot": False,
-            },
-        ]
+                # Extract settings
+                if status.settings:
+                    self.settings = {
+                        "Repository Prefix": status.settings.repo_name_prefix,
+                        "Bucket Prefix": status.settings.bucket_name_prefix,
+                        "Provider": status.settings.provider,
+                        "Base Path Prefix": status.settings.base_path_prefix,
+                        "Rotate By": status.settings.rotate_by,
+                        "ILM Policy": status.settings.ilm_policy_name or "—",
+                    }
+                else:
+                    self.settings = {}
 
-        self.buckets = [
-            {
-                "name": "deepfreeze-production",
-                "provider": "s3",
-                "region": "us-east-1",
-            },
-            {
-                "name": "deepfreeze-archive",
-                "provider": "s3",
-                "region": "us-west-2",
-            },
-        ]
+                # Extract buckets
+                self.buckets = [
+                    {
+                        "name": bucket.name,
+                        "provider": bucket.provider,
+                        "region": bucket.region or "—",
+                    }
+                    for bucket in status.buckets
+                ]
 
-        self.index_templates = [
-            {
-                "name": "deepfreeze-template",
-                "pattern": "deepfreeze-*",
-                "ilm_policy": "deepfreeze-policy",
-            },
-        ]
+                # Extract ILM policies
+                self.ilm_policies = [
+                    {
+                        "name": policy.name,
+                        "repo": policy.repo or "—",
+                        "searchable_snapshot": policy.searchable_snapshot_enabled,
+                    }
+                    for policy in status.ilm_policies
+                ]
 
-        self.update_tables()
+                self.index_templates = []  # Status doesn't include templates yet
+
+                self.update_tables()
+                self.update_config_display()
+        except Exception as e:
+            self.notify(f"Failed to load configuration: {str(e)}", severity="error")
+
+    def update_config_display(self):
+        """Update the config values display."""
+        # This is a placeholder - the ConfigValue widgets would need
+        # to be updated with the actual settings values
+        pass
 
     def update_tables(self):
         """Update all data tables."""

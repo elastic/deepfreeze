@@ -114,14 +114,37 @@ class DeepfreezeApp(App):
                 self.refresh_interval, self.refresh_status
             )
 
-    def refresh_status(self):
-        """Refresh current screen's status data."""
-        # Get the current screen and update its data
-        current = self.screen
-        if hasattr(current, "update_data"):
-            # In real implementation, would fetch from service
-            # current.update_data(status_data)
-            pass
+    async def refresh_status(self):
+        """Refresh current screen's status data from the service."""
+        if not self.service:
+            self.notify("Service not initialized", severity="error")
+            return
+
+        try:
+            # Get the current screen and fetch real data
+            current = self.screen
+
+            # Fetch status from service
+            status = await self.service.get_status()
+
+            # Push data to current screen if it has update_data method
+            if hasattr(current, "update_data"):
+                # Convert SystemStatus to dict for the screen
+                status_dict = status.model_dump()
+                current.update_data(status_dict)
+
+            # Update connection status on success
+            if status.cluster and status.cluster.status == "red":
+                self.connection_status = "error: Cluster health is red"
+            else:
+                self.connection_status = "connected"
+            self.update_connection_status()
+
+        except Exception as e:
+            error_msg = f"Failed to refresh status: {str(e)}"
+            self.connection_status = f"error: {str(e)}"
+            self.update_connection_status()
+            self.notify(error_msg, severity="error", title="Connection Error")
 
     def action_refresh(self):
         """Manually refresh status."""

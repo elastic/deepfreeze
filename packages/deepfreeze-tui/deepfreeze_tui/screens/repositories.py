@@ -94,41 +94,45 @@ class RepositoriesScreen(Screen):
                     "Select a repository to view details", classes="detail-placeholder"
                 )
 
-    def on_mount(self):
+    async def on_mount(self):
         """Called when screen is mounted."""
-        self.load_repositories()
+        await self.load_repositories()
 
-    def load_repositories(self):
+    async def load_repositories(self):
         """Load repository data from service."""
-        # In real implementation, would call self.app.service.get_status()
-        # For now, use sample data
-        self.repositories = [
-            {
-                "name": "deepfreeze-000001",
-                "state": "active",
-                "bucket": "my-bucket",
-                "base_path": "snapshots/000001",
-                "date_range": "2024-01 to 2024-02",
-                "expires": "—",
-            },
-            {
-                "name": "deepfreeze-000002",
-                "state": "frozen",
-                "bucket": "my-bucket",
-                "base_path": "snapshots/000002",
-                "date_range": "2024-02 to 2024-03",
-                "expires": "—",
-            },
-            {
-                "name": "deepfreeze-000003",
-                "state": "thawed",
-                "bucket": "my-bucket",
-                "base_path": "snapshots/000003",
-                "date_range": "2024-03 to 2024-04",
-                "expires": "2024-12-31",
-            },
-        ]
-        self.apply_filters()
+        try:
+            if hasattr(self.app, "service") and self.app.service:
+                # Show loading state
+                status_label = self.query_one("#filter-status", Label)
+                status_label.update("Loading repositories...")
+
+                # Fetch real data from service
+                status = await self.app.service.get_status()
+
+                # Extract repositories from status
+                if hasattr(status, "repositories"):
+                    self.repositories = [
+                        {
+                            "name": repo.name,
+                            "state": repo.state,
+                            "bucket": repo.bucket,
+                            "base_path": repo.base_path,
+                            "date_range": f"{repo.date_range_start.strftime('%Y-%m') if repo.date_range_start else '—'} to {repo.date_range_end.strftime('%Y-%m') if repo.date_range_end else '—'}",
+                            "expires": repo.expires_at.strftime("%Y-%m-%d")
+                            if repo.expires_at
+                            else "—",
+                        }
+                        for repo in status.repositories
+                    ]
+                else:
+                    self.repositories = []
+
+                self.apply_filters()
+                status_label.update(f"Showing {len(self.repositories)} repositories")
+        except Exception as e:
+            self.notify(f"Failed to load repositories: {str(e)}", severity="error")
+            self.repositories = []
+            self.apply_filters()
 
     def apply_filters(self):
         """Apply state filter and search query."""
@@ -232,7 +236,56 @@ class RepositoriesScreen(Screen):
 
     def action_refresh(self):
         """Refresh repository data."""
-        self.load_repositories()
+        self.run_worker(self.load_repositories())
+
+    async def action_thaw_selected(self):
+        """Thaw the selected repository."""
+        if self.selected_repo:
+            repo_name = self.selected_repo.get("name")
+            try:
+                if hasattr(self.app, "service") and self.app.service:
+                    self.notify(
+                        f"Thawing repository {repo_name}...", severity="information"
+                    )
+                    # Navigate to thaw screen with pre-filled info
+                    self.app.push_screen("thaw")
+            except Exception as e:
+                self.notify(f"Failed to thaw {repo_name}: {str(e)}", severity="error")
+
+    async def action_refreeze_selected(self):
+        """Refreeze the selected repository."""
+        if self.selected_repo:
+            repo_name = self.selected_repo.get("name")
+            state = self.selected_repo.get("state")
+
+            if state != "thawed":
+                self.notify(
+                    f"Repository {repo_name} is not in thawed state (current: {state})",
+                    severity="warning",
+                )
+                return
+
+            try:
+                if hasattr(self.app, "service") and self.app.service:
+                    self.notify(
+                        f"Refreezing repository {repo_name}...", severity="information"
+                    )
+                    result = await self.app.service.refreeze(
+                        request_id=None, dry_run=False
+                    )
+                    if result.success:
+                        self.notify(
+                            f"Successfully refrozen {repo_name}", severity="information"
+                        )
+                        await self.load_repositories()  # Refresh the list
+                    else:
+                        self.notify(
+                            f"Refreeze failed: {result.summary}", severity="error"
+                        )
+            except Exception as e:
+                self.notify(
+                    f"Failed to refreeze {repo_name}: {str(e)}", severity="error"
+                )
 
     def action_search(self):
         """Focus search input."""
@@ -253,14 +306,13 @@ class RepositoriesScreen(Screen):
             self.selected_repo = self.filtered_repos[table.cursor_row]
             self.show_repo_details()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle action buttons."""
         button_id = event.button.id
         if button_id == "btn-thaw-repo":
-            self.app.push_screen("thaw")
+            await self.action_thaw_selected()
         elif button_id == "btn-refreeze-repo":
-            # Would trigger refreeze action
-            pass
+            await self.action_refreeze_selected()
         elif button_id == "btn-view-snapshots":
             # Would show snapshots
-            pass
+            self.notify("Snapshot viewing not yet implemented", severity="warning")

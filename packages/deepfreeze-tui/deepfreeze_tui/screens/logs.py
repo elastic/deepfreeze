@@ -76,69 +76,39 @@ class LogsScreen(Screen):
                 classes="status-bar",
             )
 
-    def on_mount(self):
+    async def on_mount(self):
         """Called when screen is mounted."""
-        self.load_history()
-        self.set_interval(30, self.load_history)  # Auto-refresh every 30 seconds
+        await self.load_history()
+        self.set_interval(
+            30, lambda: self.run_worker(self.load_history())
+        )  # Auto-refresh every 30 seconds
 
-    def load_history(self):
+    async def load_history(self):
         """Load action history from service."""
-        # In real implementation, would call self.app.service.get_action_history(limit=50)
-        # For now, use sample data
-        from datetime import datetime, timedelta
+        try:
+            if hasattr(self.app, "service") and self.app.service:
+                # Fetch real action history from service
+                history = self.app.service.get_action_history(limit=50)
 
-        now = datetime.now()
-        self.action_history = [
-            {
-                "timestamp": now - timedelta(minutes=5),
-                "action": "rotate",
-                "dry_run": False,
-                "success": True,
-                "summary": "Created deepfreeze-000042, archived 3 repos",
-                "duration_ms": 12500,
-            },
-            {
-                "timestamp": now - timedelta(hours=1),
-                "action": "cleanup",
-                "dry_run": True,
-                "success": True,
-                "summary": "Would remove 2 expired thaw requests",
-                "duration_ms": 3400,
-            },
-            {
-                "timestamp": now - timedelta(hours=3),
-                "action": "thaw_create",
-                "dry_run": False,
-                "success": True,
-                "summary": "Created thaw request for 2024-01-01 to 2024-01-31",
-                "duration_ms": 2800,
-            },
-            {
-                "timestamp": now - timedelta(days=1),
-                "action": "refreeze",
-                "dry_run": False,
-                "success": True,
-                "summary": "Refrozen thaw-001, archived 2 repos",
-                "duration_ms": 45000,
-            },
-            {
-                "timestamp": now - timedelta(days=2),
-                "action": "repair",
-                "dry_run": True,
-                "success": False,
-                "summary": "Found 5 inconsistencies in metadata",
-                "duration_ms": 8200,
-            },
-            {
-                "timestamp": now - timedelta(days=3),
-                "action": "setup",
-                "dry_run": False,
-                "success": True,
-                "summary": "Initialized deepfreeze with repo prefix 'deepfreeze'",
-                "duration_ms": 15600,
-            },
-        ]
-        self.update_table()
+                self.action_history = [
+                    {
+                        "timestamp": entry.timestamp,
+                        "action": entry.action,
+                        "dry_run": entry.dry_run,
+                        "success": entry.success,
+                        "summary": entry.summary,
+                        "duration_ms": entry.duration_ms
+                        if hasattr(entry, "duration_ms")
+                        else 0,
+                    }
+                    for entry in history
+                ]
+
+                self.update_table()
+        except Exception as e:
+            self.notify(f"Failed to load action history: {str(e)}", severity="error")
+            self.action_history = []
+            self.update_table()
 
     def update_table(self):
         """Update the history table with current filter."""
@@ -183,7 +153,7 @@ class LogsScreen(Screen):
 
     def action_refresh(self):
         """Refresh action history."""
-        self.load_history()
+        self.run_worker(self.load_history())
 
     def action_filter_all(self):
         """Show all actions."""
