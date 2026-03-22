@@ -242,11 +242,11 @@ class OverviewScreen(Screen):
         if "repositories" in status_data:
             repos = status_data["repositories"]
             counts = {
-                "active": len([r for r in repos if r.get("state") == "active"]),
-                "frozen": len([r for r in repos if r.get("state") == "frozen"]),
-                "thawing": len([r for r in repos if r.get("state") == "thawing"]),
-                "thawed": len([r for r in repos if r.get("state") == "thawed"]),
-                "expired": len([r for r in repos if r.get("state") == "expired"]),
+                "active": len([r for r in repos if r.get("thaw_state") == "active"]),
+                "frozen": len([r for r in repos if r.get("thaw_state") == "frozen"]),
+                "thawing": len([r for r in repos if r.get("thaw_state") == "thawing"]),
+                "thawed": len([r for r in repos if r.get("thaw_state") == "thawed"]),
+                "expired": len([r for r in repos if r.get("thaw_state") == "expired"]),
             }
 
             if hasattr(self, "stat_active"):

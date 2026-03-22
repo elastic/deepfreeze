@@ -19,74 +19,26 @@ class ServiceError(BaseModel):
 class ClusterHealth(BaseModel):
     """Elasticsearch cluster health information."""
 
-    name: str
-    status: str  # green, yellow, red
-    version: str
-    node_count: int
-
-
-class RepositoryInfo(BaseModel):
-    """Repository information for UI display."""
-
-    name: str
-    state: str  # active, frozen, thawing, thawed, expired
-    mounted: bool
-    bucket: str
-    base_path: str
-    date_range_start: Optional[datetime] = None
-    date_range_end: Optional[datetime] = None
-    storage_tier: Optional[str] = None
-    expires_at: Optional[datetime] = None
-
-
-class ThawRequestInfo(BaseModel):
-    """Thaw request information."""
-
-    request_id: str
-    status: str  # in_progress, completed, failed, refrozen
-    start_date: datetime
-    end_date: datetime
-    repos: list[str]
-    created_at: datetime
-    age_days: int = 0
-
-
-class BucketInfo(BaseModel):
-    """Storage bucket information."""
-
-    name: str
-    provider: str
-    region: Optional[str] = None
-
-
-class IlmPolicyInfo(BaseModel):
-    """ILM policy information."""
-
-    name: str
-    repo: Optional[str] = None
-    searchable_snapshot_enabled: bool = False
-
-
-class SettingsInfo(BaseModel):
-    """Deepfreeze settings information."""
-
-    repo_name_prefix: str
-    bucket_name_prefix: str
-    base_path_prefix: str
-    provider: str
-    rotate_by: str
-    ilm_policy_name: Optional[str] = None
+    name: str = ""
+    status: str = "unknown"  # green, yellow, red
+    version: str = ""
+    node_count: int = 0
 
 
 class SystemStatus(BaseModel):
-    """Complete system status response."""
+    """Complete system status response.
 
-    cluster: ClusterHealth
-    settings: Optional[SettingsInfo] = None
-    repositories: list[RepositoryInfo] = Field(default_factory=list)
-    thaw_requests: list[ThawRequestInfo] = Field(default_factory=list)
-    buckets: list[BucketInfo] = Field(default_factory=list)
-    ilm_policies: list[IlmPolicyInfo] = Field(default_factory=list)
+    Uses plain dicts/lists for repositories, thaw_requests, buckets,
+    and ilm_policies to avoid schema mismatches with the porcelain
+    JSON output from the Status action.
+    """
+
+    cluster: ClusterHealth = Field(default_factory=ClusterHealth)
+    settings: Optional[dict[str, Any]] = None
+    repositories: list[dict[str, Any]] = Field(default_factory=list)
+    thaw_requests: list[dict[str, Any]] = Field(default_factory=list)
+    buckets: list[dict[str, Any]] = Field(default_factory=list)
+    ilm_policies: list[dict[str, Any]] = Field(default_factory=list)
     initialized: bool = False
     errors: list[ServiceError] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=datetime.utcnow)

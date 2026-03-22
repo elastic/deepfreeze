@@ -43,6 +43,7 @@ except ImportError:
 from .errors import map_exception_to_error
 from .models import (
     ActionHistoryEntry,
+    ClusterHealth,
     CommandResult,
     PollingConfig,
     ServiceError,
@@ -326,23 +327,24 @@ class DeepfreezeService:
 
         return status
 
-    def _get_cluster_health(self) -> dict:
+    def _get_cluster_health(self) -> ClusterHealth:
         """Get basic cluster health info."""
         try:
             info = self.client.info()
-            return {
-                "name": info.get("cluster_name", "unknown"),
-                "status": "unknown",  # Would need health API call
-                "version": info.get("version", {}).get("number", "unknown"),
-                "node_count": 1,  # Simplified
-            }
+            health = self.client.cluster.health(timeout="5s")
+            return ClusterHealth(
+                name=info.get("cluster_name", "unknown"),
+                status=health.get("status", "unknown"),
+                version=info.get("version", {}).get("number", "unknown"),
+                node_count=health.get("number_of_nodes", 1),
+            )
         except Exception:
-            return {
-                "name": "unreachable",
-                "status": "red",
-                "version": "unknown",
-                "node_count": 0,
-            }
+            return ClusterHealth(
+                name="unreachable",
+                status="red",
+                version="unknown",
+                node_count=0,
+            )
 
     # Command wrappers
 

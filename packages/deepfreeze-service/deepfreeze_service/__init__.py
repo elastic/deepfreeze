@@ -10,16 +10,11 @@ __version__ = "1.0.0"
 from .models import (
     ActionDetail,
     ActionHistoryEntry,
-    BucketInfo,
     ClusterHealth,
     CommandResult,
-    IlmPolicyInfo,
     PollingConfig,
-    RepositoryInfo,
     ServiceError,
-    SettingsInfo,
     SystemStatus,
-    ThawRequestInfo,
 )
 
 # Export service
@@ -35,11 +30,6 @@ __all__ = [
     # Models
     "SystemStatus",
     "ClusterHealth",
-    "SettingsInfo",
-    "RepositoryInfo",
-    "ThawRequestInfo",
-    "BucketInfo",
-    "IlmPolicyInfo",
     "ServiceError",
     "CommandResult",
     "ActionDetail",
