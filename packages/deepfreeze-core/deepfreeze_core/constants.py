@@ -6,6 +6,7 @@ including status index configuration, provider definitions, and thaw lifecycle s
 
 # Status index configuration
 STATUS_INDEX = "deepfreeze-status"
+AUDIT_INDEX = "deepfreeze-audit"
 SETTINGS_ID = "1"
 
 # Supported cloud providers

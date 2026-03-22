@@ -8,6 +8,17 @@ This package is shared between the standalone deepfreeze CLI and curator.
 __version__ = "1.0.1"
 
 # Export constants
+from deepfreeze_core.constants import (
+    AUDIT_INDEX,
+    PROVIDERS,
+    SETTINGS_ID,
+    STATUS_INDEX,
+    THAW_STATE_EXPIRED,
+    THAW_STATE_FROZEN,
+    THAW_STATE_THAWED,
+    THAW_STATE_THAWING,
+)
+
 # Export actions
 from deepfreeze_core.actions import (
     Cleanup,
@@ -17,15 +28,6 @@ from deepfreeze_core.actions import (
     Setup,
     Status,
     Thaw,
-)
-from deepfreeze_core.constants import (
-    PROVIDERS,
-    SETTINGS_ID,
-    STATUS_INDEX,
-    THAW_STATE_EXPIRED,
-    THAW_STATE_FROZEN,
-    THAW_STATE_THAWED,
-    THAW_STATE_THAWING,
 )
 
 # Export ES client utilities
@@ -55,6 +57,14 @@ from deepfreeze_core.helpers import (
     Deepfreeze,
     Repository,
     Settings,
+)
+
+# Export audit logging
+from deepfreeze_core.audit import (
+    AUDIT_INDEX,
+    ActionTracker,
+    AuditLogger,
+    ensure_audit_index,
 )
 
 # Export S3 client
@@ -105,6 +115,7 @@ __all__ = [
     # Version
     "__version__",
     # Constants
+    "AUDIT_INDEX",
     "PROVIDERS",
     "SETTINGS_ID",
     "STATUS_INDEX",
@@ -124,6 +135,10 @@ __all__ = [
     "Deepfreeze",
     "Repository",
     "Settings",
+    # Audit
+    "ActionTracker",
+    "AuditLogger",
+    "ensure_audit_index",
     # S3 Client
     "AwsS3Client",
     "AzureBlobClient",
