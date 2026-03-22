@@ -206,10 +206,12 @@ class OverviewScreen(Screen):
         # Check for errors first
         errors = status_data.get("errors", [])
         if errors:
-            # Show error notification
+            # Show error notification (escape brackets to prevent markup issues)
             for error in errors[:3]:  # Show up to 3 errors
                 msg = error.get("message", "Unknown error")
-                self.notify(f"Error: {msg}", severity="error", timeout=10)
+                # Escape brackets that Textual might interpret as markup
+                safe_msg = msg.replace("[", "\\[").replace("]", "\\]")
+                self.notify(f"Error: {safe_msg}", severity="error", timeout=10)
 
             # Update health badge to show error state
             if hasattr(self, "health_badge_es"):
