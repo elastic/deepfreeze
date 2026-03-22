@@ -42,6 +42,14 @@ def main():
         help="Enable auto-reload for development",
         default=False,
     )
+    parser.add_argument(
+        "--cors-origin",
+        action="append",
+        dest="cors_origins",
+        help="Allowed CORS origin (repeatable). Omit to allow Vite dev server. "
+        "Use --cors-origin='*' to allow all origins.",
+        default=None,
+    )
 
     args = parser.parse_args()
 
@@ -55,7 +63,7 @@ def main():
     import uvicorn
     from .app import create_app
 
-    app = create_app(config_path=config_path)
+    app = create_app(config_path=config_path, cors_origins=args.cors_origins)
     uvicorn.run(app, host=args.host, port=args.port, reload=args.reload)
 
 

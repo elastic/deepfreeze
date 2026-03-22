@@ -25,8 +25,18 @@ async def lifespan(app: FastAPI):
     # Cleanup (if needed)
 
 
-def create_app(config_path: str | None = None) -> FastAPI:
-    """Create and configure the FastAPI application."""
+def create_app(
+    config_path: str | None = None,
+    cors_origins: list[str] | None = None,
+) -> FastAPI:
+    """Create and configure the FastAPI application.
+
+    Args:
+        config_path: Path to deepfreeze config file.
+        cors_origins: Allowed CORS origins. Pass an empty list to disable CORS
+                      (production mode where frontend is served by FastAPI).
+                      Defaults to allowing the Vite dev server origin.
+    """
     app = FastAPI(
         title="Deepfreeze",
         description="Web UI for deepfreeze - Elasticsearch S3 Glacier archive management",
@@ -37,22 +47,27 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # Store config path for lifespan
     app.state.config_path = config_path
 
-    # CORS - allow all origins (no auth in MVP)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     # API routes
     app.include_router(status.router, prefix="/api", tags=["status"])
     app.include_router(actions.router, prefix="/api", tags=["actions"])
 
     # Serve React build (production) if it exists
     frontend_build = Path(__file__).parent.parent / "frontend" / "dist"
-    if frontend_build.is_dir():
+    serving_frontend = frontend_build.is_dir()
+    if serving_frontend:
         app.mount("/", StaticFiles(directory=str(frontend_build), html=True))
+
+    # CORS — needed when frontend is served from a different origin (dev mode).
+    # In production (serving built frontend), same-origin so CORS not required.
+    if cors_origins is None and not serving_frontend:
+        cors_origins = ["*"]
+    if cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     return app

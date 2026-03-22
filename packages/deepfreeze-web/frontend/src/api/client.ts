@@ -2,9 +2,19 @@
  * API client for the deepfreeze FastAPI backend.
  */
 
-// Auto-detect API URL: use env var if set, otherwise same host on port 8000
-const API_BASE = import.meta.env.VITE_API_URL ||
-  `${window.location.protocol}//${window.location.hostname}:8000/api`;
+// Auto-detect API URL:
+// 1. VITE_API_URL env var if set explicitly
+// 2. In production (served by FastAPI), use relative /api path (same origin)
+// 3. In dev (Vite on 5173), point to backend on port 8000
+function detectApiBase(): string {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  if (import.meta.env.DEV) {
+    return `${window.location.protocol}//${window.location.hostname}:8000/api`;
+  }
+  return '/api';
+}
+
+const API_BASE = detectApiBase();
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
