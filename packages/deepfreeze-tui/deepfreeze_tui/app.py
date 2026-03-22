@@ -7,6 +7,7 @@ from textual.widgets import Footer, Static, OptionList
 
 from deepfreeze_service import DeepfreezeService, PollingConfig
 
+from .dialogs import ThawDialog
 from .modals import HelpPanel
 from .widgets.panels import (
     BucketPanel,
@@ -63,8 +64,9 @@ class DeepfreezeApp(App):
 
         yield Footer()
 
-        # Help panel - floats over layout when toggled visible
+        # Overlay panels - float over layout when toggled visible
         yield HelpPanel()
+        yield ThawDialog()
 
     def on_mount(self) -> None:
         """Initialize service and start data loading."""
@@ -215,14 +217,11 @@ class DeepfreezeApp(App):
         if not self.service:
             self.notify("Service not initialized", severity="error")
             return
-        # Show thaw input dialog
-        from .dialogs import ThawDialog
+        self.query_one(ThawDialog).show(callback=self._handle_thaw_input)
 
-        self.push_screen(ThawDialog(), callback=self._handle_thaw_input)
-
-    def _handle_thaw_input(self, params: dict | None) -> None:
+    def _handle_thaw_input(self, params: dict) -> None:
         """Handle thaw dialog result."""
-        if not params or not self.service:
+        if not self.service:
             return
         self.notify("Creating thaw request...", timeout=3)
         self.run_worker(self._exec_thaw(params))
