@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { trimDate } from '../api/util';
 import {
   EuiBasicTable,
   EuiTitle,
@@ -59,11 +60,7 @@ export default function Activity() {
       sortable: true,
       render: (ts: string) => {
         if (!ts) return '--';
-        try {
-          return new Date(ts).toLocaleString();
-        } catch {
-          return ts;
-        }
+        return trimDate(ts);
       },
     },
     {

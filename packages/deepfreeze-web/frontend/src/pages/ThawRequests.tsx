@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { trimDate } from '../api/util';
 import {
   EuiBasicTable,
   EuiFlyout,
@@ -87,12 +88,12 @@ export default function ThawRequests() {
       field: 'date_range',
       name: 'Date Range',
       render: (_: unknown, item: ThawRequest) => {
-        const start = item.start_date;
-        const end = item.end_date;
+        const start = trimDate(item.start_date);
+        const end = trimDate(item.end_date);
         if (!start && !end) return '--';
         return (
           <EuiText size="s">
-            {String(start || '?')} &rarr; {String(end || '?')}
+            {start || '?'} &rarr; {end || '?'}
           </EuiText>
         );
       },
@@ -111,11 +112,7 @@ export default function ThawRequests() {
       sortable: true,
       render: (ts: string) => {
         if (!ts) return '--';
-        try {
-          return new Date(ts).toLocaleString();
-        } catch {
-          return ts;
-        }
+        return trimDate(ts);
       },
     },
   ];

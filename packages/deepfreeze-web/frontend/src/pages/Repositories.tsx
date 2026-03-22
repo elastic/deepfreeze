@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { trimDate } from '../api/util';
 import {
   EuiBasicTable,
   EuiFieldSearch,
@@ -91,12 +92,12 @@ export default function Repositories() {
       name: 'Date Range',
       sortable: true,
       render: (_: unknown, item: Repo) => {
-        const start = item.start;
-        const end = item.end;
+        const start = trimDate(item.start);
+        const end = trimDate(item.end);
         if (!start && !end) return <EuiText size="s" color="subdued">--</EuiText>;
         return (
           <EuiText size="s">
-            {String(start || '?')} &rarr; {String(end || '?')}
+            {start || '?'} &rarr; {end || '?'}
           </EuiText>
         );
       },
