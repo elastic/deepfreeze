@@ -24,6 +24,19 @@ THAW_STATUS_COLORS = {
 }
 
 
+def _trim_date(val) -> str:
+    """Trim a date/datetime value to Y-m-dTH:M format (no seconds/millis)."""
+    if not val:
+        return ""
+    s = str(val)
+    for suffix in ("Z", "+00:00"):
+        s = s.removesuffix(suffix)
+    # Trim to YYYY-MM-DDTHH:MM (16 chars)
+    if len(s) > 16:
+        s = s[:16]
+    return s
+
+
 class RepoPanel(OptionList):
     """Repository list panel."""
 
@@ -297,10 +310,10 @@ class DetailPanel(Vertical):
             # Column header
             lines = [
                 "[bold]"
-                f"{'Name':<20} {'Bucket':<20} {'Base Path':<22} "
-                f"{'Date Range':<25} {'Mnt':>3} {'State':<8} {'Tier':<8}"
+                f"{'Name':<16} {'Base Path':<18} "
+                f"{'Start':<17} {'End':<17} {'M':>1} {'State':<8} {'Tier':<7}"
                 "[/bold]",
-                "[dim]" + "─" * 110 + "[/dim]",
+                "[dim]" + "─" * 88 + "[/dim]",
             ]
 
             tier_colors = {
@@ -314,13 +327,11 @@ class DetailPanel(Vertical):
 
             for repo in self._all_repos:
                 name = repo.get("name", "?")
-                bucket = repo.get("bucket", "N/A")
                 base_path = repo.get("base_path", "N/A")
-                start = repo.get("start", "")
-                end = repo.get("end", "")
-                date_range = f"{start} - {end}" if start and end else ""
+                start = _trim_date(repo.get("start", ""))
+                end = _trim_date(repo.get("end", ""))
                 mounted = (
-                    "[green]Yes[/green]" if repo.get("is_mounted") else "[red]No[/red] "
+                    "[green]Y[/green]" if repo.get("is_mounted") else "[red]N[/red]"
                 )
                 state = repo.get("thaw_state", "?")
                 state_color = STATE_COLORS.get(state, "white")
@@ -328,10 +339,10 @@ class DetailPanel(Vertical):
                 tier_color = tier_colors.get(tier, "white")
 
                 lines.append(
-                    f"{name:<20} {bucket:<20} {base_path:<22} "
-                    f"{date_range:<25} {mounted:>3} "
+                    f"{name:<16} {base_path:<18} "
+                    f"{start:<17} {end:<17} {mounted:>1} "
                     f"[{state_color}]{state:<8}[/{state_color}] "
-                    f"[{tier_color}]{tier:<8}[/{tier_color}]"
+                    f"[{tier_color}]{tier:<7}[/{tier_color}]"
                 )
 
             content.update("\n".join(lines))
@@ -350,10 +361,10 @@ class DetailPanel(Vertical):
         bucket = repo.get("bucket", "?")
         base_path = repo.get("base_path", "?")
         tier = repo.get("storage_tier", "?")
-        start = repo.get("start", "?")
-        end = repo.get("end", "?")
-        thawed_at = repo.get("thawed_at", None)
-        expires_at = repo.get("expires_at", None)
+        start = _trim_date(repo.get("start", ""))
+        end = _trim_date(repo.get("end", ""))
+        thawed_at = _trim_date(repo.get("thawed_at", ""))
+        expires_at = _trim_date(repo.get("expires_at", ""))
 
         lines = [
             f"[bold]Repository:[/bold] {name}",
@@ -380,9 +391,9 @@ class DetailPanel(Vertical):
         status = req.get("status", "?")
         color = THAW_STATUS_COLORS.get(status, "white")
         repos = req.get("repos", [])
-        created = req.get("created_at", "?")
-        start_date = req.get("start_date", "?")
-        end_date = req.get("end_date", "?")
+        created = _trim_date(req.get("created_at", "")) or "?"
+        start_date = _trim_date(req.get("start_date", "")) or "?"
+        end_date = _trim_date(req.get("end_date", "")) or "?"
         age = req.get("age_days", "?")
 
         lines = [
