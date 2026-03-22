@@ -272,7 +272,20 @@ class DeepfreezeService:
 
             # Parse the JSON output
             output = f.getvalue()
+            self.loggit.debug("Raw status output length: %d", len(output))
+            self.loggit.debug(
+                "Raw output preview: %s", output[:500] if len(output) > 500 else output
+            )
             data = json.loads(output)
+
+            self.loggit.debug("Parsed status data keys: %s", list(data.keys()))
+            self.loggit.debug(
+                "Repositories count: %d", len(data.get("repositories", []))
+            )
+            self.loggit.debug(
+                "Thaw requests count: %d", len(data.get("thaw_requests", []))
+            )
+            self.loggit.debug("Buckets count: %d", len(data.get("buckets", [])))
 
             # Convert to SystemStatus
             status = SystemStatus(
