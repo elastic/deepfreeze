@@ -129,12 +129,24 @@ class OverviewScreen(Screen):
         try:
             if hasattr(self.app, "service") and self.app.service:
                 status = await self.app.service.get_status()
+                # Debug: print status info to console
+                import sys
+
+                print(f"DEBUG: Status errors: {status.errors}", file=sys.stderr)
+                print(
+                    f"DEBUG: Status repos count: {len(status.repositories)}",
+                    file=sys.stderr,
+                )
                 self.update_data(status.model_dump())
 
                 # Also fetch action history for the activity table
                 history = self.app.service.get_action_history(limit=10)
                 self.update_activity_table(history)
         except Exception as e:
+            import sys, traceback
+
+            print(f"DEBUG ERROR: {str(e)}", file=sys.stderr)
+            print(f"DEBUG TRACEBACK: {traceback.format_exc()}", file=sys.stderr)
             self.notify(f"Failed to load overview data: {str(e)}", severity="error")
 
     def update_activity_table(self, history):
