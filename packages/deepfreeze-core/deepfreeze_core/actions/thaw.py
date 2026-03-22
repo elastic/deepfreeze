@@ -108,6 +108,7 @@ class Thaw:
         self._results = []
         self._errors = []
         self._start_time = None
+        self._thaw_mode = None  # Will be set in do_action/do_dry_run
         self.include_completed = include_completed
 
         # Will be loaded during action
