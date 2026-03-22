@@ -7,7 +7,7 @@ from textual.widgets import Footer, Static, OptionList
 
 from deepfreeze_service import DeepfreezeService, PollingConfig
 
-from .modals import HelpModal
+from .modals import HelpPanel
 from .widgets.panels import (
     BucketPanel,
     DetailPanel,
@@ -62,6 +62,9 @@ class DeepfreezeApp(App):
                 yield DetailPanel()
 
         yield Footer()
+
+        # Help panel - floats over layout when toggled visible
+        yield HelpPanel()
 
     def on_mount(self) -> None:
         """Initialize service and start data loading."""
@@ -186,26 +189,12 @@ class DeepfreezeApp(App):
         self.notify("Refreshing...", timeout=2)
 
     def action_show_help(self) -> None:
-        """Show context-sensitive help modal."""
+        """Toggle context-sensitive help panel."""
         focused = self.focused
         focused_id = ""
         if focused is not None:
             focused_id = focused.id or ""
-        self.push_screen(
-            HelpModal(focused_panel_id=focused_id),
-            callback=self._handle_help_action,
-        )
-
-    def _handle_help_action(self, action: str | None) -> None:
-        """Execute an action selected from the help modal."""
-        if not action:
-            return
-        if action == "quit":
-            self.action_quit()
-        elif action == "refresh":
-            self.action_refresh()
-        elif hasattr(self, f"action_do_{action}"):
-            getattr(self, f"action_do_{action}")()
+        self.query_one(HelpPanel).toggle(focused_panel_id=focused_id)
 
     # -- Action stubs (called from panel keybindings) --
 
