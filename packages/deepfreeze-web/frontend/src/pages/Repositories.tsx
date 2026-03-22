@@ -97,7 +97,8 @@ export default function Repositories() {
         if (!start && !end) return <EuiText size="s" color="subdued">--</EuiText>;
         return (
           <EuiText size="s">
-            {start || '?'} &rarr; {end || '?'}
+            <div>{start || '?'}</div>
+            <div>{end || '?'}</div>
           </EuiText>
         );
       },
