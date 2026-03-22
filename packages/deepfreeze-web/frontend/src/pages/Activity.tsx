@@ -12,25 +12,31 @@ import {
   EuiBadge,
   EuiIcon,
   EuiText,
+  EuiFlyout,
+  EuiFlyoutBody,
+  EuiFlyoutHeader,
+  EuiDescriptionList,
+  EuiCodeBlock,
   type EuiBasicTableColumn,
   type CriteriaWithPagination,
 } from '@elastic/eui';
-import { api, type ActionHistoryEntry } from '../api/client';
+import { api, type AuditEntry } from '../api/client';
 
 export default function Activity() {
-  const [history, setHistory] = useState<ActionHistoryEntry[]>([]);
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortField, setSortField] = useState<keyof ActionHistoryEntry>('timestamp');
+  const [sortField, setSortField] = useState<string>('timestamp');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState(25);
+  const [flyoutEntry, setFlyoutEntry] = useState<AuditEntry | null>(null);
 
-  const fetchHistory = useCallback(async () => {
+  const fetchAudit = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await api.getHistory(100);
-      setHistory(data.history);
+      const data = await api.getAuditLog(100);
+      setEntries(data.entries);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -40,28 +46,25 @@ export default function Activity() {
   }, []);
 
   useEffect(() => {
-    fetchHistory();
-    const interval = setInterval(fetchHistory, 15000);
+    fetchAudit();
+    const interval = setInterval(fetchAudit, 15000);
     return () => clearInterval(interval);
-  }, [fetchHistory]);
+  }, [fetchAudit]);
 
-  const sorted = [...history].sort((a, b) => {
-    const aVal = String(a[sortField] ?? '');
-    const bVal = String(b[sortField] ?? '');
+  const sorted = [...entries].sort((a, b) => {
+    const aVal = String((a as Record<string, unknown>)[sortField] ?? '');
+    const bVal = String((b as Record<string, unknown>)[sortField] ?? '');
     return sortDirection === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
   });
 
   const paged = sorted.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize);
 
-  const columns: EuiBasicTableColumn<ActionHistoryEntry>[] = [
+  const columns: EuiBasicTableColumn<AuditEntry>[] = [
     {
       field: 'timestamp',
       name: 'Timestamp',
       sortable: true,
-      render: (ts: string) => {
-        if (!ts) return '--';
-        return trimDate(ts);
-      },
+      render: (ts: string) => (ts ? trimDate(ts) : '--'),
     },
     {
       field: 'action',
@@ -69,6 +72,14 @@ export default function Activity() {
       sortable: true,
       render: (action: string) => (
         <EuiBadge color="hollow">{action}</EuiBadge>
+      ),
+    },
+    {
+      field: 'user',
+      name: 'User',
+      sortable: true,
+      render: (user: string) => (
+        <EuiText size="s">{user || '--'}</EuiText>
       ),
     },
     {
@@ -84,7 +95,7 @@ export default function Activity() {
     },
     {
       field: 'success',
-      name: 'Success',
+      name: 'Status',
       sortable: true,
       render: (success: boolean) => (
         <EuiIcon
@@ -95,38 +106,41 @@ export default function Activity() {
       ),
     },
     {
-      field: 'summary',
-      name: 'Summary',
-      truncateText: true,
-      render: (summary: string) => (
-        <EuiText size="s">{summary || '--'}</EuiText>
-      ),
+      field: 'duration_ms',
+      name: 'Duration',
+      sortable: true,
+      render: (ms: number) => {
+        if (!ms && ms !== 0) return '--';
+        if (ms < 1000) return `${ms}ms`;
+        return `${(ms / 1000).toFixed(1)}s`;
+      },
     },
     {
-      field: 'error_count',
+      field: 'errors',
       name: 'Errors',
-      sortable: true,
-      render: (count: number) =>
-        count > 0 ? (
+      render: (errors: unknown[]) => {
+        const count = Array.isArray(errors) ? errors.length : 0;
+        return count > 0 ? (
           <EuiBadge color="danger">{count}</EuiBadge>
         ) : (
           <EuiText size="s" color="subdued">0</EuiText>
-        ),
+        );
+      },
     },
   ];
 
-  const onTableChange = ({ page, sort }: CriteriaWithPagination<ActionHistoryEntry>) => {
+  const onTableChange = ({ page, sort }: CriteriaWithPagination<AuditEntry>) => {
     if (page) {
       setPageIndex(page.index);
       setPageSize(page.size);
     }
     if (sort) {
-      setSortField(sort.field as keyof ActionHistoryEntry);
+      setSortField(sort.field as string);
       setSortDirection(sort.direction);
     }
   };
 
-  if (loading && history.length === 0) {
+  if (loading && entries.length === 0) {
     return (
       <EuiFlexGroup justifyContent="center" alignItems="center" style={{ minHeight: 300 }}>
         <EuiFlexItem grow={false}>
@@ -136,11 +150,11 @@ export default function Activity() {
     );
   }
 
-  if (error && history.length === 0) {
+  if (error && entries.length === 0) {
     return (
-      <EuiCallOut title="Error loading activity history" color="danger" iconType="alert">
+      <EuiCallOut title="Error loading audit log" color="danger" iconType="alert">
         <p>{error}</p>
-        <EuiButton color="danger" onClick={fetchHistory}>
+        <EuiButton color="danger" onClick={fetchAudit}>
           Retry
         </EuiButton>
       </EuiCallOut>
@@ -158,7 +172,7 @@ export default function Activity() {
         <EuiFlexItem grow={false}>
           <EuiButton
             iconType="refresh"
-            onClick={fetchHistory}
+            onClick={fetchAudit}
             isLoading={loading}
             size="s"
           >
@@ -182,8 +196,94 @@ export default function Activity() {
           pageSizeOptions: [10, 25, 50, 100],
         }}
         onChange={onTableChange}
-        noItemsMessage="No activity history found"
+        rowProps={(item: AuditEntry) => ({
+          onClick: () => setFlyoutEntry(item),
+          style: { cursor: 'pointer' },
+        })}
+        noItemsMessage="No audit entries found"
       />
+
+      {flyoutEntry && (
+        <EuiFlyout onClose={() => setFlyoutEntry(null)} size="m" ownFocus>
+          <EuiFlyoutHeader hasBorder>
+            <EuiTitle size="m">
+              <h2>
+                <EuiBadge color="hollow">{flyoutEntry.action}</EuiBadge>
+                {' '}
+                {trimDate(flyoutEntry.timestamp)}
+              </h2>
+            </EuiTitle>
+          </EuiFlyoutHeader>
+          <EuiFlyoutBody>
+            <EuiDescriptionList
+              type="column"
+              compressed
+              listItems={[
+                { title: 'Action', description: flyoutEntry.action },
+                { title: 'Timestamp', description: trimDate(flyoutEntry.timestamp) || '--' },
+                { title: 'User', description: flyoutEntry.user || '--' },
+                { title: 'Hostname', description: flyoutEntry.hostname || '--' },
+                { title: 'Success', description: flyoutEntry.success ? 'Yes' : 'No' },
+                { title: 'Dry Run', description: flyoutEntry.dry_run ? 'Yes' : 'No' },
+                { title: 'Duration', description: flyoutEntry.duration_ms < 1000 ? `${flyoutEntry.duration_ms}ms` : `${(flyoutEntry.duration_ms / 1000).toFixed(1)}s` },
+                { title: 'Version', description: flyoutEntry.version || '--' },
+              ]}
+            />
+
+            {flyoutEntry.parameters && Object.keys(flyoutEntry.parameters).length > 0 && (
+              <>
+                <EuiSpacer size="l" />
+                <EuiTitle size="xs"><h3>Parameters</h3></EuiTitle>
+                <EuiSpacer size="s" />
+                <EuiCodeBlock language="json" fontSize="s" paddingSize="m">
+                  {JSON.stringify(flyoutEntry.parameters, null, 2)}
+                </EuiCodeBlock>
+              </>
+            )}
+
+            {flyoutEntry.summary && Object.keys(flyoutEntry.summary).length > 0 && (
+              <>
+                <EuiSpacer size="l" />
+                <EuiTitle size="xs"><h3>Summary</h3></EuiTitle>
+                <EuiSpacer size="s" />
+                <EuiCodeBlock language="json" fontSize="s" paddingSize="m">
+                  {JSON.stringify(flyoutEntry.summary, null, 2)}
+                </EuiCodeBlock>
+              </>
+            )}
+
+            {flyoutEntry.results && flyoutEntry.results.length > 0 && (
+              <>
+                <EuiSpacer size="l" />
+                <EuiTitle size="xs"><h3>Results ({flyoutEntry.results.length})</h3></EuiTitle>
+                <EuiSpacer size="s" />
+                <EuiCodeBlock language="json" fontSize="s" paddingSize="m">
+                  {JSON.stringify(flyoutEntry.results, null, 2)}
+                </EuiCodeBlock>
+              </>
+            )}
+
+            {flyoutEntry.errors && flyoutEntry.errors.length > 0 && (
+              <>
+                <EuiSpacer size="l" />
+                <EuiTitle size="xs"><h3>Errors ({flyoutEntry.errors.length})</h3></EuiTitle>
+                <EuiSpacer size="s" />
+                {flyoutEntry.errors.map((err, i) => (
+                  <EuiCallOut
+                    key={i}
+                    title={err.code}
+                    color="danger"
+                    iconType="alert"
+                    size="s"
+                  >
+                    <p>{err.message}</p>
+                  </EuiCallOut>
+                ))}
+              </>
+            )}
+          </EuiFlyoutBody>
+        </EuiFlyout>
+      )}
     </>
   );
 }

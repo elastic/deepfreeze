@@ -61,6 +61,21 @@ export interface ActionHistoryEntry {
   error_count: number;
 }
 
+export interface AuditEntry {
+  timestamp: string;
+  action: string;
+  dry_run: boolean;
+  success: boolean;
+  duration_ms: number;
+  parameters: Record<string, unknown>;
+  results: Record<string, unknown>[];
+  errors: { code: string; message: string }[];
+  summary: Record<string, unknown>;
+  user: string;
+  hostname: string;
+  version: string;
+}
+
 export const api = {
   // Status
   getStatus: (forceRefresh = false) =>
@@ -80,6 +95,12 @@ export const api = {
 
   getHistory: (limit = 25) =>
     request<{ history: ActionHistoryEntry[] }>(`/history?limit=${limit}`),
+
+  getAuditLog: (limit = 50, action?: string) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (action) params.set('action', action);
+    return request<{ entries: AuditEntry[]; source: string }>(`/audit?${params}`);
+  },
 
   // Actions
   rotate: (params: { year?: number; month?: number; keep?: number; dry_run?: boolean }) =>

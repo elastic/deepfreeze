@@ -16,28 +16,7 @@ async def get_status(request: Request, force_refresh: bool = False):
     """Get full system status (cluster, repos, thaw requests, buckets, ILM)."""
     service = _get_service(request)
     status = await service.get_status(force_refresh=force_refresh)
-    data = status.model_dump()
-    # Debug: log first repo to check field names
-    repos = data.get("repositories", [])
-    if repos:
-        import logging
-
-        logging.getLogger("deepfreeze.web").info(
-            "First repo keys: %s", list(repos[0].keys())
-        )
-        logging.getLogger("deepfreeze.web").info("First repo: %s", repos[0])
-    return data
-
-
-@router.get("/debug/raw-repo")
-async def debug_raw_repo(request: Request):
-    """Debug endpoint: return first repo raw data."""
-    service = _get_service(request)
-    status = await service.get_status(force_refresh=True)
-    repos = status.repositories
-    if repos:
-        return {"first_repo": repos[0], "keys": list(repos[0].keys())}
-    return {"first_repo": None, "keys": []}
+    return status.model_dump()
 
 
 @router.get("/status/cluster")
@@ -90,3 +69,19 @@ async def get_action_history(request: Request, limit: int = 25):
     service = _get_service(request)
     history = service.get_action_history(limit=limit)
     return {"history": [h.model_dump() for h in history]}
+
+
+@router.get("/audit")
+async def get_audit_log(
+    request: Request, limit: int = 50, action: str | None = None
+):
+    """Get detailed audit log entries from the ES audit index.
+
+    Returns full audit records including parameters, results, user, and hostname.
+    """
+    service = _get_service(request)
+    audit = service._get_audit()
+    if not audit:
+        return {"entries": [], "source": "unavailable"}
+    entries = audit.get_recent_entries(limit=limit, action_filter=action)
+    return {"entries": entries, "source": "elasticsearch"}

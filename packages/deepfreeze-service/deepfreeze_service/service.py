@@ -141,8 +141,38 @@ class DeepfreezeService:
             self._action_history = self._action_history[: self._max_history]
 
     def get_action_history(self, limit: int = 25) -> list[ActionHistoryEntry]:
-        """Get recent action history."""
+        """Get recent action history from ES audit log, falling back to in-memory."""
+        audit = self._get_audit()
+        if audit:
+            try:
+                entries = audit.get_recent_entries(limit=limit)
+                if entries:
+                    return [
+                        ActionHistoryEntry(
+                            timestamp=e.get("timestamp", ""),
+                            action=e.get("action", "unknown"),
+                            dry_run=e.get("dry_run", False),
+                            success=e.get("success", False),
+                            summary=self._summarize_audit_entry(e),
+                            error_count=len(e.get("errors", [])),
+                        )
+                        for e in entries
+                    ]
+            except Exception:
+                pass  # Fall back to in-memory
         return self._action_history[:limit]
+
+    @staticmethod
+    def _summarize_audit_entry(entry: dict) -> str:
+        """Build a summary string from an ES audit entry."""
+        summary = entry.get("summary", {})
+        if isinstance(summary, dict) and summary:
+            parts = [f"{k}: {v}" for k, v in summary.items()]
+            return ", ".join(parts)
+        results = entry.get("results", [])
+        if results:
+            return f"{len(results)} result(s)"
+        return ""
 
     async def _run_action(
         self, action, method_name: str = "do_action"
