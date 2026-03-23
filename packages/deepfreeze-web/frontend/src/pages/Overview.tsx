@@ -68,7 +68,7 @@ const repoColumns: EuiBasicTableColumn<Repo>[] = [
   { field: 'thaw_state', name: 'State', sortable: true, render: (v: string) => <EuiBadge color={stateColor(v || 'unknown')}>{v || 'unknown'}</EuiBadge> },
   { field: 'storage_tier', name: 'Storage Tier', sortable: true, render: (v: string) => v || '--' },
   { field: 'is_mounted', name: 'Mounted', render: (v: unknown) => <EuiBadge color={v ? 'success' : 'default'}>{v ? 'Yes' : 'No'}</EuiBadge> },
-  { field: 'bucket', name: 'Bucket', truncateText: true },
+  { field: 'bucket', name: 'Bucket Path', truncateText: true, render: (_: unknown, item: Repo) => `${item.bucket || ''}/${item.base_path || ''}` },
   {
     field: 'start',
     name: 'Date Range',

@@ -83,10 +83,11 @@ export default function Repositories() {
       render: (name: string) => <strong>{name}</strong>,
     },
     {
-      field: 'base_path',
-      name: 'Base Path',
+      field: 'bucket',
+      name: 'Bucket Path',
       sortable: true,
       truncateText: true,
+      render: (_: unknown, item: Repo) => `${item.bucket || ''}/${item.base_path || ''}`,
     },
     {
       field: 'date_range',
