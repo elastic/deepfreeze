@@ -81,7 +81,10 @@ export default function Overview() {
           <EuiFlexItem grow={false}>
             <EuiHealth color={clusterHealthColor(status.cluster.status)}>
               <EuiText size="m">
-                <strong>Cluster: {status.cluster.name}</strong> &mdash; {status.cluster.status}
+                <strong>Cluster: {status.cluster.name}</strong> &mdash;{' '}
+                <span style={{ color: status.cluster.status === 'green' ? '#00BFB3' : status.cluster.status === 'yellow' ? '#FEC514' : status.cluster.status === 'red' ? '#F66' : 'inherit', fontWeight: 600 }}>
+                  {status.cluster.status}
+                </span>
               </EuiText>
             </EuiHealth>
           </EuiFlexItem>
