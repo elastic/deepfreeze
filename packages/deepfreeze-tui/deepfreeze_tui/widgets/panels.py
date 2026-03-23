@@ -311,9 +311,9 @@ class DetailPanel(Vertical):
             lines = [
                 "[bold]"
                 f"{'Name':<16} {'Base Path':<18} "
-                f"{'Start':<17} {'End':<17} {'M':>1} {'State':<8} {'Tier':<7}"
+                f"{'Start':<17} {'End':<17} {'M':>1} {'State':<8} {'Storage Tier':<12}"
                 "[/bold]",
-                "[dim]" + "─" * 88 + "[/dim]",
+                "[dim]" + "─" * 93 + "[/dim]",
             ]
 
             tier_colors = {
@@ -342,7 +342,7 @@ class DetailPanel(Vertical):
                     f"{name:<16} {base_path:<18} "
                     f"{start:<17} {end:<17} {mounted:>1} "
                     f"[{state_color}]{state:<8}[/{state_color}] "
-                    f"[{tier_color}]{tier:<7}[/{tier_color}]"
+                    f"[{tier_color}]{tier:<12}[/{tier_color}]"
                 )
 
             content.update("\n".join(lines))

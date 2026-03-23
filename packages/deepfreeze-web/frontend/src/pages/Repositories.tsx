@@ -126,7 +126,7 @@ export default function Repositories() {
     },
     {
       field: 'storage_tier',
-      name: 'Tier',
+      name: 'Storage Tier',
       sortable: true,
       render: (tier: string) => tier || '--',
     },

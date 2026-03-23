@@ -66,7 +66,7 @@ function thawStatusColor(s: string): string {
 const repoColumns: EuiBasicTableColumn<Repo>[] = [
   { field: 'name', name: 'Name', sortable: true, render: (v: string) => <strong>{v}</strong> },
   { field: 'thaw_state', name: 'State', sortable: true, render: (v: string) => <EuiBadge color={stateColor(v || 'unknown')}>{v || 'unknown'}</EuiBadge> },
-  { field: 'storage_tier', name: 'Tier', sortable: true, render: (v: string) => v || '--' },
+  { field: 'storage_tier', name: 'Storage Tier', sortable: true, render: (v: string) => v || '--' },
   { field: 'is_mounted', name: 'Mounted', render: (v: unknown) => <EuiBadge color={v ? 'success' : 'default'}>{v ? 'Yes' : 'No'}</EuiBadge> },
   { field: 'bucket', name: 'Bucket', truncateText: true },
   {
