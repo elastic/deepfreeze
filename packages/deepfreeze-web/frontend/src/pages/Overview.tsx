@@ -149,9 +149,12 @@ export default function Overview() {
     stateCounts[state] = (stateCounts[state] || 0) + 1;
   }
 
+  const sortByName = (items: Record<string, unknown>[]) =>
+    [...items].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
   const reposByState = (state: string | null) => {
-    if (!state) return repos;
-    return repos.filter((r) => (r.thaw_state || 'unknown') === state);
+    const filtered = state ? repos.filter((r) => (r.thaw_state || 'unknown') === state) : repos;
+    return sortByName(filtered);
   };
 
   const openRepoFlyout = (title: string, state: string | null) => {
