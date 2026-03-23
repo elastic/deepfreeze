@@ -105,8 +105,8 @@ export default function Actions() {
           break;
         case 'thaw':
           result = await api.thawCreate({
-            start_date: thawStartDate?.format('YYYY-MM-DD') || '',
-            end_date: thawEndDate?.format('YYYY-MM-DD') || '',
+            start_date: thawStartDate?.format('YYYY-MM-DDTHH:mm:ss') || '',
+            end_date: thawEndDate?.format('YYYY-MM-DDTHH:mm:ss') || '',
             duration: thawDuration,
             dry_run: dryRun,
           });
@@ -213,14 +213,18 @@ export default function Actions() {
                 <EuiDatePicker
                   selected={thawStartDate}
                   onChange={(date) => setThawStartDate(date)}
-                  dateFormat="YYYY-MM-DD"
+                  showTimeSelect
+                  dateFormat="YYYY-MM-DD HH:mm"
+                  timeFormat="HH:mm"
                 />
               </EuiFormRow>
               <EuiFormRow label="End Date">
                 <EuiDatePicker
                   selected={thawEndDate}
                   onChange={(date) => setThawEndDate(date)}
-                  dateFormat="YYYY-MM-DD"
+                  showTimeSelect
+                  dateFormat="YYYY-MM-DD HH:mm"
+                  timeFormat="HH:mm"
                 />
               </EuiFormRow>
               <EuiFormRow label="Duration (hours)">

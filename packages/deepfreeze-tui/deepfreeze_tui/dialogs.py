@@ -21,7 +21,7 @@ class ThawDialog(Vertical):
     ThawDialog {
         display: none;
         layer: overlay;
-        width: 50;
+        width: 60;
         height: auto;
         border: solid #008a5e;
         border-title-color: #008a5e;
@@ -64,11 +64,11 @@ class ThawDialog(Vertical):
     def compose(self) -> ComposeResult:
         self.border_title = "Create Thaw Request"
 
-        yield Label("Start date (YYYY-MM-DD):")
-        yield Input(placeholder="2025-01-01", id="start-date")
+        yield Label("Start date (YYYY-MM-DD or YYYY-MM-DDTHH:MM):")
+        yield Input(placeholder="2025-01-01T08:00", id="start-date")
 
-        yield Label("End date (YYYY-MM-DD):")
-        yield Input(placeholder="2025-03-31", id="end-date")
+        yield Label("End date (YYYY-MM-DD or YYYY-MM-DDTHH:MM):")
+        yield Input(placeholder="2025-03-31T17:00", id="end-date")
 
         yield Label("Restore duration (days):")
         yield Input(placeholder="7", id="duration", value="7")
@@ -89,7 +89,7 @@ class ThawDialog(Vertical):
         try:
             screen_w = self.app.size.width
             screen_h = self.app.size.height
-            panel_w = 50
+            panel_w = 60
             self.styles.offset = (
                 max(0, (screen_w - panel_w) // 2),
                 max(0, (screen_h - 20) // 2),
