@@ -122,39 +122,21 @@ def repo_has_active_indices(client: Elasticsearch, repo_name: str) -> tuple[bool
     active_indices = []
 
     try:
-        # Get all indices and check which ones are searchable snapshots from this repo
-        all_indices = client.cat.indices(format="json")
-
-        for idx in all_indices:
-            index_name = idx.get("index", "")
-            # Searchable snapshots have names like "partial-<original>-<repo>-<hash>"
-            # or the index settings will reference the repository
-            if repo_name in index_name:
+        # Get all index settings in one call and check which are searchable
+        # snapshots backed by this repo. Only the store.type/repository_name
+        # check is reliable — a naive name-substring match causes false
+        # positives and prevents archiving.
+        all_settings = client.indices.get_settings(index="*")
+        for index_name, data in all_settings.items():
+            store = (
+                data.get("settings", {})
+                .get("index", {})
+                .get("store", {})
+            )
+            if store.get("type") == "snapshot" and (
+                store.get("snapshot", {}).get("repository_name") == repo_name
+            ):
                 active_indices.append(index_name)
-                continue
-
-            # Also check index settings for repository reference
-            try:
-                settings = client.indices.get_settings(index=index_name)
-                store_type = (
-                    settings.get(index_name, {})
-                    .get("settings", {})
-                    .get("index", {})
-                    .get("store", {})
-                    .get("type")
-                )
-                snapshot_repo = (
-                    settings.get(index_name, {})
-                    .get("settings", {})
-                    .get("index", {})
-                    .get("store", {})
-                    .get("snapshot", {})
-                    .get("repository_name")
-                )
-                if store_type == "snapshot" and snapshot_repo == repo_name:
-                    active_indices.append(index_name)
-            except Exception:
-                pass  # Index might not exist or be accessible
 
     except Exception as e:
         loggit.warning("Error checking for active indices in repo %s: %s", repo_name, e)
