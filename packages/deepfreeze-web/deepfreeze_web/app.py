@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from deepfreeze_service import DeepfreezeService, PollingConfig
@@ -51,11 +52,22 @@ def create_app(
     app.include_router(status.router, prefix="/api", tags=["status"])
     app.include_router(actions.router, prefix="/api", tags=["actions"])
 
-    # Serve React build (production) if it exists
+    # Serve React build (production) if it exists.
+    # Static assets (js/css/images) are served directly; all other routes
+    # fall back to index.html so React Router can handle client-side routing.
     frontend_build = Path(__file__).parent.parent / "frontend" / "dist"
     serving_frontend = frontend_build.is_dir()
     if serving_frontend:
-        app.mount("/", StaticFiles(directory=str(frontend_build), html=True))
+        app.mount("/assets", StaticFiles(directory=str(frontend_build / "assets")), name="assets")
+        index_html = frontend_build / "index.html"
+
+        @app.get("/{full_path:path}")
+        async def serve_spa(full_path: str):
+            # Serve the actual file if it exists (e.g. favicon.svg)
+            file_path = frontend_build / full_path
+            if full_path and file_path.is_file():
+                return FileResponse(file_path)
+            return FileResponse(index_html)
 
     # CORS — default to allowing all origins (no auth in this app).
     # Override with --cors-origin to restrict, or pass [] to disable.
