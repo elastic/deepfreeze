@@ -1,10 +1,11 @@
 /**
- * Hook for polling system status from the API.
+ * Hook for fetching system status from the API.
+ * Auto-refresh is handled by RefreshControl at the page level.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { api, type SystemStatus } from '../api/client';
 
-export function useStatus(pollInterval = 30000) {
+export function useStatus() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -22,13 +23,10 @@ export function useStatus(pollInterval = 30000) {
     }
   }, []);
 
+  // Initial fetch only
   useEffect(() => {
     refresh();
-    if (pollInterval > 0) {
-      const interval = setInterval(() => refresh(), pollInterval);
-      return () => clearInterval(interval);
-    }
-  }, [refresh, pollInterval]);
+  }, [refresh]);
 
   return { status, loading, error, refresh };
 }

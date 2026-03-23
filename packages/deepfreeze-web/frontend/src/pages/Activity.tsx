@@ -21,6 +21,7 @@ import {
   type CriteriaWithPagination,
 } from '@elastic/eui';
 import { api, type AuditEntry } from '../api/client';
+import RefreshControl from '../components/RefreshControl';
 
 export default function Activity() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
@@ -47,8 +48,6 @@ export default function Activity() {
 
   useEffect(() => {
     fetchAudit();
-    const interval = setInterval(fetchAudit, 15000);
-    return () => clearInterval(interval);
   }, [fetchAudit]);
 
   const sorted = [...entries].sort((a, b) => {
@@ -170,14 +169,7 @@ export default function Activity() {
           </EuiTitle>
         </EuiFlexItem>
         <EuiFlexItem grow={false}>
-          <EuiButton
-            iconType="refresh"
-            onClick={fetchAudit}
-            isLoading={loading}
-            size="s"
-          >
-            Refresh
-          </EuiButton>
+          <RefreshControl onRefresh={fetchAudit} loading={loading} />
         </EuiFlexItem>
       </EuiFlexGroup>
 

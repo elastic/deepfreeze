@@ -4,14 +4,15 @@ import {
   EuiPanel,
   EuiStat,
   EuiHealth,
+  EuiButton,
   EuiCallOut,
   EuiLoadingSpinner,
   EuiSpacer,
   EuiTitle,
-  EuiButton,
   EuiText,
 } from '@elastic/eui';
 import { useStatus } from '../hooks/useStatus';
+import RefreshControl from '../components/RefreshControl';
 
 function clusterHealthColor(status: string): 'success' | 'warning' | 'danger' | 'subdued' {
   switch (status) {
@@ -68,14 +69,7 @@ export default function Overview() {
           </EuiTitle>
         </EuiFlexItem>
         <EuiFlexItem grow={false}>
-          <EuiButton
-            iconType="refresh"
-            onClick={() => refresh(true)}
-            isLoading={loading}
-            size="s"
-          >
-            Refresh
-          </EuiButton>
+          <RefreshControl onRefresh={() => refresh(true)} loading={loading} />
         </EuiFlexItem>
       </EuiFlexGroup>
 

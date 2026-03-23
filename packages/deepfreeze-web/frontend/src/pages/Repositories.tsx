@@ -21,6 +21,7 @@ import {
   type EuiBasicTableColumn,
 } from '@elastic/eui';
 import { useStatus } from '../hooks/useStatus';
+import RefreshControl from '../components/RefreshControl';
 
 type Repo = Record<string, unknown>;
 
@@ -172,14 +173,7 @@ export default function Repositories() {
           </EuiTitle>
         </EuiFlexItem>
         <EuiFlexItem grow={false}>
-          <EuiButton
-            iconType="refresh"
-            onClick={() => refresh(true)}
-            isLoading={loading}
-            size="s"
-          >
-            Refresh
-          </EuiButton>
+          <RefreshControl onRefresh={() => refresh(true)} loading={loading} />
         </EuiFlexItem>
       </EuiFlexGroup>
 

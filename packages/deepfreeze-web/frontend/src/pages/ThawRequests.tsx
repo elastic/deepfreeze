@@ -19,6 +19,7 @@ import {
   type EuiBasicTableColumn,
 } from '@elastic/eui';
 import { useStatus } from '../hooks/useStatus';
+import RefreshControl from '../components/RefreshControl';
 
 type ThawRequest = Record<string, unknown>;
 
@@ -158,14 +159,7 @@ export default function ThawRequests() {
           </EuiTitle>
         </EuiFlexItem>
         <EuiFlexItem grow={false}>
-          <EuiButton
-            iconType="refresh"
-            onClick={() => refresh(true)}
-            isLoading={loading}
-            size="s"
-          >
-            Refresh
-          </EuiButton>
+          <RefreshControl onRefresh={() => refresh(true)} loading={loading} />
         </EuiFlexItem>
       </EuiFlexGroup>
 
