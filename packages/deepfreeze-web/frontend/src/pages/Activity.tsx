@@ -98,7 +98,7 @@ export default function Activity() {
       sortable: true,
       render: (success: boolean) => (
         <EuiIcon
-          type={success ? 'checkInCircleFilled' : 'crossInCircleFilled'}
+          type={success ? 'checkInCircleFilled' : 'cross'}
           color={success ? 'success' : 'danger'}
           size="m"
         />
