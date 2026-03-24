@@ -7,7 +7,7 @@ actions and provides async, structured interfaces for the TUI and Web UI.
 import asyncio
 import json
 import logging
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from io import StringIO
 from typing import Any, Optional
@@ -388,15 +388,16 @@ class DeepfreezeService:
         action = Thaw(
             client=self.client,
             check_all=True,
-            porcelain=False,
+            porcelain=True,
             audit=self._get_audit(),
         )
 
         def _run():
-            # Suppress stdout — we only care about the side effects
-            # (state updates in ES), not the output
-            f = StringIO()
-            with redirect_stdout(f):
+            # Suppress all output — we only care about the side effects
+            # (state updates in ES). porcelain=True avoids rich tables,
+            # and we redirect both stdout and stderr to discard everything.
+            devnull = StringIO()
+            with redirect_stdout(devnull), redirect_stderr(devnull):
                 action.do_action()
 
         loop = asyncio.get_event_loop()
