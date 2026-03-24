@@ -430,8 +430,12 @@ class DeepfreezeApp(App):
             return
 
         try:
-            progress = await self.service.get_thaw_restore_progress(str(req_id))
             detail = self.query_one(DetailPanel)
+            detail.append_restore_progress([{"repo": "...", "total": 0, "restored": 0, "in_progress": 0, "not_restored": 0, "complete": False, "error": "loading..."}])
+            progress = await self.service.get_thaw_restore_progress(str(req_id))
+            # Re-show the thaw detail then append fresh progress
+            detail.show_thaw_detail(req)
             detail.append_restore_progress(progress)
-        except Exception:
-            pass
+        except Exception as e:
+            detail = self.query_one(DetailPanel)
+            detail.append_restore_progress([{"repo": "error", "total": 0, "restored": 0, "in_progress": 0, "not_restored": 0, "complete": False, "error": str(e)}])
