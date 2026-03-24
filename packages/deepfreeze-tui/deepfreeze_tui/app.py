@@ -104,10 +104,6 @@ class DeepfreezeApp(App):
             return
 
         try:
-            try:
-                self.query_one(ActivityPanel).log_command("status", "refreshing...")
-            except Exception:
-                pass  # CommandLog may not be mounted yet on first call
             status = await self.service.get_status(force_refresh=True)
             self._status_data = status.model_dump()
 

@@ -389,7 +389,6 @@ class DeepfreezeService:
             client=self.client,
             check_all=True,
             porcelain=True,
-            audit=self._get_audit(),
         )
 
         def _run():

@@ -701,9 +701,10 @@ class Thaw:
         """
         self.loggit.info("DRY-RUN MODE.  No changes will be made.")
 
-        # Initialize audit tracking
+        # Only audit dry-run thaw creation, not read-only queries
+        is_mutating = bool(self.start_date and self.end_date)
         tracker = None
-        if self.audit:
+        if self.audit and is_mutating:
             tracker = self.audit.start_tracking(
                 action="thaw",
                 dry_run=True,
@@ -715,7 +716,6 @@ class Thaw:
                     "sync": self.sync,
                     "duration": self.restore_days,
                     "retrieval_tier": self.retrieval_tier,
-                    "request_id": self.request_id,
                 },
             )
 
@@ -724,42 +724,12 @@ class Thaw:
 
             if self.list_requests:
                 self._list_all_requests()
-                if tracker:
-                    tracker.add_result(
-                        {
-                            "type": "operation",
-                            "action": "list_requests",
-                            "status": "success",
-                        }
-                    )
-                    tracker.set_summary({"mode": "list", "listed_requests": True})
             elif self.check_all:
                 self._check_all_requests()
-                if tracker:
-                    tracker.add_result(
-                        {
-                            "type": "operation",
-                            "action": "check_all",
-                            "status": "success",
-                        }
-                    )
-                    tracker.set_summary({"mode": "check_all"})
             elif self.request_id:
                 request = self._check_request_status(self.request_id)
                 if request:
                     self._display_request_status(request)
-                    if tracker:
-                        tracker.add_result(
-                            {
-                                "type": "thaw_request",
-                                "action": "check_status",
-                                "request_id": self.request_id,
-                                "status": request.get("status"),
-                            }
-                        )
-                        tracker.set_summary(
-                            {"mode": "check_status", "request_id": self.request_id}
-                        )
             elif self.start_date and self.end_date:
                 request_id = self._initiate_thaw(dry_run=True)
                 if request_id and tracker:
@@ -809,9 +779,11 @@ class Thaw:
         """
         self.loggit.debug("Starting Thaw action")
 
-        # Initialize audit tracking
+        # Only audit mutating operations (initiating a thaw), not read-only
+        # queries like list, check-status, or check-all.
+        is_mutating = bool(self.start_date and self.end_date)
         tracker = None
-        if self.audit:
+        if self.audit and is_mutating:
             tracker = self.audit.start_tracking(
                 action="thaw",
                 dry_run=False,
@@ -823,7 +795,6 @@ class Thaw:
                     "sync": self.sync,
                     "duration": self.restore_days,
                     "retrieval_tier": self.retrieval_tier,
-                    "request_id": self.request_id,
                 },
             )
 
@@ -832,46 +803,12 @@ class Thaw:
 
             if self.list_requests:
                 self._list_all_requests()
-                if tracker:
-                    tracker.add_result(
-                        {
-                            "type": "operation",
-                            "action": "list_requests",
-                            "status": "success",
-                        }
-                    )
-                    tracker.set_summary({"mode": "list"})
             elif self.check_all:
                 self._check_all_requests()
-                if tracker:
-                    tracker.add_result(
-                        {
-                            "type": "operation",
-                            "action": "check_all",
-                            "status": "success",
-                        }
-                    )
-                    tracker.set_summary({"mode": "check_all"})
             elif self.request_id:
                 request = self._check_request_status(self.request_id)
                 if request:
                     self._display_request_status(request)
-                    if tracker:
-                        tracker.add_result(
-                            {
-                                "type": "thaw_request",
-                                "action": "check_status",
-                                "request_id": self.request_id,
-                                "status": request.get("status"),
-                            }
-                        )
-                        tracker.set_summary(
-                            {
-                                "mode": "check_status",
-                                "request_id": self.request_id,
-                                "status": request.get("status"),
-                            }
-                        )
 
                     # If sync mode and still in progress, wait
                     if self.sync and request.get("status") == THAW_STATUS_IN_PROGRESS:
