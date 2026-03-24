@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "deepfreeze-core"
-version = "1.0.0"
+version = "2.0.0"
 description = "Core library for Elasticsearch S3 Glacier archival - shared between curator and standalone deepfreeze"
 readme = "README.md"
 license = "Apache-2.0"

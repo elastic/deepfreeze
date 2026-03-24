@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "deepfreeze-service"
-version = "1.0.0"
+version = "2.0.0"
 description = "Async service layer for deepfreeze CLI"
 readme = "README.md"
 requires-python = ">=3.10"
