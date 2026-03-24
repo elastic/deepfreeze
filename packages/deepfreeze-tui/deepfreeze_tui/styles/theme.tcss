@@ -165,6 +165,4 @@ Footer > .footer--description {
     height: 1fr;
 }
 
-#config-content {
-    padding: 0 1;
-}
+/* config-panel content gets padding via Static text */

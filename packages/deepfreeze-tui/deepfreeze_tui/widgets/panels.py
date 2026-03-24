@@ -504,7 +504,7 @@ class DetailPanel(Vertical):
         content.update("\n".join(lines))
 
 
-class ConfigPanel(Vertical):
+class ConfigPanel(Static):
     """Collapsible configuration panel.
 
     When focused, expands to show full config details.
@@ -514,12 +514,9 @@ class ConfigPanel(Vertical):
     can_focus = True
 
     def __init__(self, **kwargs):
-        super().__init__(id="config-panel", classes="panel", **kwargs)
+        super().__init__("", id="config-panel", classes="panel", **kwargs)
         self._config: dict[str, Any] = {}
         self._expanded = False
-
-    def compose(self):
-        yield Static("[dim]No config loaded[/dim]", id="config-content")
 
     def on_mount(self) -> None:
         self.border_title = "Config"
@@ -527,20 +524,19 @@ class ConfigPanel(Vertical):
     def update_config(self, settings: dict[str, Any] | None) -> None:
         """Update the config data."""
         self._config = settings or {}
-        self._render()
+        self._render_config()
 
     def on_focus(self) -> None:
         self._expanded = True
-        self._render()
+        self._render_config()
 
     def on_blur(self) -> None:
         self._expanded = False
-        self._render()
+        self._render_config()
 
-    def _render(self) -> None:
-        content = self.query_one("#config-content", Static)
+    def _render_config(self) -> None:
         if not self._config:
-            content.update("[dim]No config loaded[/dim]")
+            self.update("[dim]No config loaded[/dim]")
             return
 
         if not self._expanded:
@@ -548,7 +544,7 @@ class ConfigPanel(Vertical):
             provider = self._config.get("provider", "?")
             prefix = self._config.get("repo_name_prefix", "?")
             style = self._config.get("style", "?")
-            content.update(
+            self.update(
                 f"[dim]provider:[/dim]{provider}  "
                 f"[dim]prefix:[/dim]{prefix}  "
                 f"[dim]style:[/dim]{style}"
@@ -576,9 +572,9 @@ class ConfigPanel(Vertical):
         for label, key in fields:
             val = self._config.get(key)
             if val is not None:
-                lines.append(f"  [dim]{label + ':':<30}[/dim] {val}")
+                lines.append(f" [dim]{label + ':':<30}[/dim] {val}")
 
-        content.update("\n".join(lines))
+        self.update("\n".join(lines))
 
 
 class CommandLog(VerticalScroll):
