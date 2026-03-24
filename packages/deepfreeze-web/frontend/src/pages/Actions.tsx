@@ -80,7 +80,7 @@ export default function Actions() {
   // Thaw form state
   const [thawStartDate, setThawStartDate] = useState<Moment | null>(moment().subtract(30, 'days'));
   const [thawEndDate, setThawEndDate] = useState<Moment | null>(moment());
-  const [thawDuration, setThawDuration] = useState<number>(72);
+  const [thawDuration, setThawDuration] = useState<number>(30);
   const [dryRun, setDryRun] = useState(false);
 
   const addToast = useCallback((title: string, color: 'success' | 'danger' | 'warning', text?: string) => {
@@ -227,12 +227,12 @@ export default function Actions() {
                   timeFormat="HH:mm"
                 />
               </EuiFormRow>
-              <EuiFormRow label="Duration (hours)">
+              <EuiFormRow label="Duration (days)">
                 <EuiFieldNumber
                   value={thawDuration}
                   onChange={(e) => setThawDuration(Number(e.target.value))}
                   min={1}
-                  max={720}
+                  max={365}
                 />
               </EuiFormRow>
             </EuiForm>

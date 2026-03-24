@@ -71,7 +71,7 @@ class ThawDialog(Vertical):
         yield Input(placeholder="2025-03-31T17:00", id="end-date")
 
         yield Label("Restore duration (days):")
-        yield Input(placeholder="7", id="duration", value="7")
+        yield Input(placeholder="30", id="duration", value="30")
 
         with Horizontal(classes="dialog-buttons"):
             yield Button("Create", variant="success", id="btn-create")
@@ -83,7 +83,7 @@ class ThawDialog(Vertical):
         # Clear previous values
         self.query_one("#start-date", Input).value = ""
         self.query_one("#end-date", Input).value = ""
-        self.query_one("#duration", Input).value = "7"
+        self.query_one("#duration", Input).value = "30"
         # Show and focus first input
         self.styles.display = "block"
         try:
