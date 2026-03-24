@@ -514,7 +514,7 @@ class DeepfreezeService:
                     })
                     continue
                 try:
-                    status = check_restore_status(s3, repo)
+                    status = check_restore_status(s3, repo.bucket, repo.base_path)
                     results.append({"repo": name, **status})
                 except Exception as e:
                     results.append({
