@@ -10,7 +10,12 @@ from rich.markup import escape
 from rich.panel import Panel
 
 from deepfreeze_core.audit import AuditLogger
-from deepfreeze_core.constants import STATUS_INDEX, THAW_STATE_FROZEN
+from deepfreeze_core.constants import (
+    STATUS_INDEX,
+    THAW_STATE_FROZEN,
+    THAW_STATE_THAWED,
+    THAW_STATE_THAWING,
+)
 from deepfreeze_core.exceptions import (
     MissingIndexError,
     MissingSettingsError,
@@ -336,16 +341,23 @@ class Rotate:
         """
         archived_repos = []
 
-        # Get all repos matching our prefix
-        repos = get_matching_repos(
+        # Get all mounted repos matching our prefix
+        all_mounted = get_matching_repos(
             self.client, self.settings.repo_name_prefix, mounted=True
         )
 
-        # Sort by name (which includes suffix)
-        repos = sorted(repos, key=lambda r: r.name)
+        # Separate thawed/thawing repos — these have their own lifecycle
+        # (managed by refreeze, not rotation) and shouldn't count against keep
+        thaw_states = {THAW_STATE_THAWED, THAW_STATE_THAWING}
+        active_repos = sorted(
+            [r for r in all_mounted if r.thaw_state not in thaw_states],
+            key=lambda r: r.name,
+        )
 
-        # Keep the newest 'keep' repos mounted
-        repos_to_archive = repos[: -self.keep] if len(repos) > self.keep else []
+        # Keep the newest 'keep' active repos mounted
+        repos_to_archive = (
+            active_repos[: -self.keep] if len(active_repos) > self.keep else []
+        )
 
         skipped_repos = []
 
