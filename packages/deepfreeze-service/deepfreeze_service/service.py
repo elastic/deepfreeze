@@ -94,6 +94,10 @@ class DeepfreezeService:
         self._last_status: Optional[SystemStatus] = None
         self._last_status_time: Optional[datetime] = None
 
+        # Thaw check throttle — avoid checking on every status poll
+        self._last_thaw_check_time: Optional[datetime] = None
+        self._thaw_check_interval = 60  # seconds between automatic checks
+
         # Create audit logger if client available
         self._audit: Optional[AuditLogger] = None
         if self._client:
@@ -286,39 +290,45 @@ class DeepfreezeService:
             if cache_age < self.polling_config.interval_seconds:
                 return self._last_status
 
+        status = await self._fetch_status_once(limit)
+
+        # If there are in-progress thaw requests, periodically run a thaw
+        # status check so the UI reflects completed restores without requiring
+        # a manual `deepfreeze thaw --check-status` from the CLI.
+        if self._should_check_thaw(status):
+            try:
+                self.loggit.info("Auto-checking in-progress thaw requests")
+                await self._auto_check_thaw()
+                # Re-fetch status after the check may have updated state
+                status = await self._fetch_status_once(limit)
+            except Exception as e:
+                self.loggit.warning("Auto thaw check failed: %s", e)
+
+        # Cache the result
+        self._last_status = status
+        self._last_status_time = datetime.now(timezone.utc)
+
+        return status
+
+    async def _fetch_status_once(
+        self, limit: Optional[int] = None
+    ) -> SystemStatus:
+        """Fetch status from deepfreeze-core without caching or thaw checks."""
         try:
-            # Create status action
             action = Status(
                 client=self.client,
-                porcelain=True,  # Get structured JSON output
+                porcelain=True,
                 limit=limit,
             )
 
-            # Capture stdout to get the JSON output
             f = StringIO()
             with redirect_stdout(f):
-                # Run in thread pool
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(None, action.do_action)
 
-            # Parse the JSON output
             output = f.getvalue()
-            self.loggit.debug("Raw status output length: %d", len(output))
-            self.loggit.debug(
-                "Raw output preview: %s", output[:500] if len(output) > 500 else output
-            )
             data = json.loads(output)
 
-            self.loggit.debug("Parsed status data keys: %s", list(data.keys()))
-            self.loggit.debug(
-                "Repositories count: %d", len(data.get("repositories", []))
-            )
-            self.loggit.debug(
-                "Thaw requests count: %d", len(data.get("thaw_requests", []))
-            )
-            self.loggit.debug("Buckets count: %d", len(data.get("buckets", [])))
-
-            # Convert to SystemStatus
             status = SystemStatus(
                 cluster=self._get_cluster_health(),
                 initialized=data.get("initialized", True),
@@ -332,30 +342,55 @@ class DeepfreezeService:
             )
 
             self.loggit.info(
-                "Status fetched successfully: %d repos, %d thaw requests",
+                "Status fetched: %d repos, %d thaw requests",
                 len(status.repositories),
                 len(status.thaw_requests),
             )
+            return status
 
         except Exception as e:
             error = map_exception_to_error(e)
-            self.loggit.error("Failed to get status: %s", str(e))
-            self.loggit.error("Error type: %s", type(e).__name__)
-            import traceback
-
-            self.loggit.error("Traceback: %s", traceback.format_exc())
-            status = SystemStatus(
+            self.loggit.error("Failed to get status: %s", e)
+            return SystemStatus(
                 cluster=self._get_cluster_health(),
                 initialized=False,
                 errors=[error],
                 timestamp=datetime.now(timezone.utc),
             )
 
-        # Cache the result
-        self._last_status = status
-        self._last_status_time = datetime.now(timezone.utc)
+    def _should_check_thaw(self, status: SystemStatus) -> bool:
+        """Check if we should auto-run a thaw status check.
 
-        return status
+        Returns True if there are in-progress thaw requests and enough time
+        has elapsed since the last automatic check.
+        """
+        has_in_progress = any(
+            r.get("status") == "in_progress"
+            for r in status.thaw_requests
+        )
+        if not has_in_progress:
+            return False
+
+        if self._last_thaw_check_time:
+            elapsed = (
+                datetime.now(timezone.utc) - self._last_thaw_check_time
+            ).total_seconds()
+            if elapsed < self._thaw_check_interval:
+                return False
+
+        return True
+
+    async def _auto_check_thaw(self) -> None:
+        """Run thaw --check-all to update in-progress thaw request states."""
+        self._last_thaw_check_time = datetime.now(timezone.utc)
+        action = Thaw(
+            client=self.client,
+            check_all=True,
+            porcelain=True,
+            audit=self._get_audit(),
+        )
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, action.do_action)
 
     def _get_cluster_health(self) -> ClusterHealth:
         """Get basic cluster health info."""
