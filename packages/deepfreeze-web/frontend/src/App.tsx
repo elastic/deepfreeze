@@ -112,43 +112,31 @@ function AppShell() {
 
   return (
     <>
-      <EuiHeader
-        position="fixed"
-        sections={[
-          {
-            items: [
-              <EuiHeaderSection key="title">
-                <EuiHeaderSectionItem>
-                  <EuiIcon type="snowflake" size="l" color="primary" />
-                  <EuiTitle size="xs">
-                    <h1 style={{ marginLeft: 8 }}>deepfreeze</h1>
-                  </EuiTitle>
-                </EuiHeaderSectionItem>
-              </EuiHeaderSection>,
-            ],
-          },
-          {
-            side: 'right',
-            items: [
-              <EuiHeaderSection key="config">
-                <EuiHeaderSectionItem>
-                  <EuiButtonIcon
-                    iconType="gear"
-                    aria-label="Configuration"
-                    color="text"
-                    display="empty"
-                    size="s"
-                    onClick={() => {
-                      fetchConfig();
-                      setConfigOpen(true);
-                    }}
-                  />
-                </EuiHeaderSectionItem>
-              </EuiHeaderSection>,
-            ],
-          },
-        ]}
-      />
+      <EuiHeader position="fixed">
+        <EuiHeaderSection>
+          <EuiHeaderSectionItem>
+            <EuiIcon type="snowflake" size="l" color="primary" />
+            <EuiTitle size="xs">
+              <h1 style={{ marginLeft: 8 }}>deepfreeze</h1>
+            </EuiTitle>
+          </EuiHeaderSectionItem>
+        </EuiHeaderSection>
+        <EuiHeaderSection side="right">
+          <EuiHeaderSectionItem>
+            <EuiButtonIcon
+              iconType="gear"
+              aria-label="Configuration"
+              color="text"
+              display="empty"
+              size="s"
+              onClick={() => {
+                fetchConfig();
+                setConfigOpen(true);
+              }}
+            />
+          </EuiHeaderSectionItem>
+        </EuiHeaderSection>
+      </EuiHeader>
       <EuiPageTemplate
         panelled
         restrictWidth={false}
