@@ -195,6 +195,8 @@ class DeepfreezeApp(App):
             req = self.query_one(ThawPanel).get_selected_request()
             if req:
                 detail.show_thaw_detail(req)
+                if req.get("status") == "in_progress" and self.service:
+                    self.run_worker(self._load_restore_progress(req))
         elif source_id == "buckets":
             detail.set_context("buckets")
             bucket = self.query_one(BucketPanel).get_selected_bucket()
@@ -420,3 +422,16 @@ class DeepfreezeApp(App):
 
         # Refresh data after action
         self.run_worker(self._load_data())
+
+    async def _load_restore_progress(self, req: dict) -> None:
+        """Load S3 restore progress for a thaw request and update detail panel."""
+        req_id = req.get("request_id") or req.get("id")
+        if not req_id or not self.service:
+            return
+
+        try:
+            progress = await self.service.get_thaw_restore_progress(str(req_id))
+            detail = self.query_one(DetailPanel)
+            detail.append_restore_progress(progress)
+        except Exception:
+            pass

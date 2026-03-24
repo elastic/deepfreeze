@@ -71,6 +71,16 @@ export interface ActionHistoryEntry {
   error_count: number;
 }
 
+export interface RestoreProgress {
+  repo: string;
+  total: number;
+  restored: number;
+  in_progress: number;
+  not_restored: number;
+  complete: boolean;
+  error?: string;
+}
+
 export interface AuditEntry {
   timestamp: string;
   action: string;
@@ -102,6 +112,9 @@ export const api = {
 
   getIlmPolicies: () =>
     request<{ ilm_policies: Record<string, unknown>[] }>('/status/ilm-policies'),
+
+  getRestoreProgress: (requestId: string) =>
+    request<{ request_id: string; repos: RestoreProgress[] }>(`/thaw-requests/${requestId}/restore-progress`),
 
   getHistory: (limit = 25) =>
     request<{ history: ActionHistoryEntry[] }>(`/history?limit=${limit}`),

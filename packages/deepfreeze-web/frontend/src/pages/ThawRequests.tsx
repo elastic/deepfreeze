@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { trimDate } from '../api/util';
 import {
   EuiBasicTable,
@@ -15,10 +15,12 @@ import {
   EuiLoadingSpinner,
   EuiCallOut,
   EuiText,
+  EuiProgress,
   type CriteriaWithPagination,
   type EuiBasicTableColumn,
 } from '@elastic/eui';
 import { useStatus } from '../hooks/useStatus';
+import { api, type RestoreProgress } from '../api/client';
 import RefreshControl from '../components/RefreshControl';
 
 type ThawRequest = Record<string, unknown>;
@@ -42,6 +44,24 @@ function statusColor(s: string): string {
 export default function ThawRequests() {
   const { status, loading, error, refresh } = useStatus();
   const [flyoutItem, setFlyoutItem] = useState<ThawRequest | null>(null);
+  const [restoreProgress, setRestoreProgress] = useState<RestoreProgress[] | null>(null);
+  const [progressLoading, setProgressLoading] = useState(false);
+
+  const openFlyout = useCallback((item: ThawRequest) => {
+    setFlyoutItem(item);
+    setRestoreProgress(null);
+    // Load restore progress for in_progress requests
+    if (item.status === 'in_progress') {
+      const reqId = String(item.request_id || item.id || '');
+      if (reqId) {
+        setProgressLoading(true);
+        api.getRestoreProgress(reqId)
+          .then((data) => setRestoreProgress(data.repos))
+          .catch(() => setRestoreProgress(null))
+          .finally(() => setProgressLoading(false));
+      }
+    }
+  }, []);
   const [sortField, setSortField] = useState<string>('created_at');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [pageIndex, setPageIndex] = useState(0);
@@ -179,7 +199,7 @@ export default function ThawRequests() {
         }}
         onChange={onTableChange}
         rowProps={(item: ThawRequest) => ({
-          onClick: () => setFlyoutItem(item),
+          onClick: () => openFlyout(item),
           style: { cursor: 'pointer' },
         })}
         noItemsMessage="No thaw requests found"
@@ -225,6 +245,37 @@ export default function ThawRequests() {
                     </EuiBadge>
                   </div>
                 ))}
+              </>
+            )}
+
+            {flyoutItem.status === 'in_progress' && (
+              <>
+                <EuiSpacer size="l" />
+                <EuiTitle size="xs">
+                  <h3>S3 Restore Progress</h3>
+                </EuiTitle>
+                <EuiSpacer size="s" />
+                {progressLoading && <EuiLoadingSpinner size="m" />}
+                {restoreProgress && restoreProgress.map((rp, i) => {
+                  const pct = rp.total > 0 ? Math.round((rp.restored / rp.total) * 100) : 0;
+                  return (
+                    <div key={i} style={{ marginBottom: 16 }}>
+                      <EuiText size="s"><strong>{rp.repo}</strong></EuiText>
+                      <EuiSpacer size="xs" />
+                      <EuiProgress value={rp.restored} max={rp.total} size="m" color={rp.complete ? 'success' : 'primary'} />
+                      <EuiSpacer size="xs" />
+                      <EuiText size="xs" color="subdued">
+                        {rp.restored}/{rp.total} restored ({pct}%)
+                        {rp.in_progress > 0 && ` \u00b7 ${rp.in_progress} in progress`}
+                        {rp.not_restored > 0 && ` \u00b7 ${rp.not_restored} pending`}
+                        {rp.complete && ' \u00b7 Complete'}
+                      </EuiText>
+                    </div>
+                  );
+                })}
+                {!progressLoading && !restoreProgress && (
+                  <EuiText size="s" color="subdued">Could not load restore progress.</EuiText>
+                )}
               </>
             )}
           </EuiFlyoutBody>

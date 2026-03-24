@@ -414,6 +414,40 @@ class DetailPanel(Vertical):
 
         content.update("\n".join(lines))
 
+    def append_restore_progress(self, progress: list[dict[str, Any]]) -> None:
+        """Append S3 restore progress to the current detail view."""
+        content = self.query_one("#detail-content", Static)
+        current = str(content.renderable)
+
+        lines = ["", "[bold]S3 Restore Progress[/bold]", ""]
+        for rp in progress:
+            name = rp.get("repo", "?")
+            total = rp.get("total", 0)
+            restored = rp.get("restored", 0)
+            in_prog = rp.get("in_progress", 0)
+            not_restored = rp.get("not_restored", 0)
+            complete = rp.get("complete", False)
+            error = rp.get("error")
+
+            if error:
+                lines.append(f"  {name}: [red]{error}[/red]")
+                continue
+
+            pct = round((restored / total) * 100) if total > 0 else 0
+            color = "green" if complete else "yellow"
+            bar_width = 20
+            filled = round(bar_width * pct / 100)
+            bar = f"[{color}]{'█' * filled}[/{color}]{'░' * (bar_width - filled)}"
+
+            lines.append(f"  {name}")
+            lines.append(f"    {bar} {pct}%")
+            lines.append(
+                f"    [dim]total:{total}  restored:{restored}  "
+                f"in_progress:{in_prog}  pending:{not_restored}[/dim]"
+            )
+
+        content.update(current + "\n".join(lines))
+
     def show_bucket_detail(self, bucket: dict[str, Any]) -> None:
         """Display bucket details."""
         content = self.query_one("#detail-content", Static)

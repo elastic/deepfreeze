@@ -474,6 +474,59 @@ class DeepfreezeService:
         )
         return await self._run_action(action, "do_action")
 
+    async def get_thaw_restore_progress(self, request_id: str) -> list[dict]:
+        """Get restore progress for each repo in a thaw request.
+
+        Calls S3 head_object on each object to determine restore status.
+        Only meaningful for in_progress requests.
+
+        Returns list of dicts with: repo, total, restored, in_progress,
+        not_restored, complete.
+        """
+        from deepfreeze_core.utilities import (
+            check_restore_status,
+            get_thaw_request,
+            get_matching_repos,
+            get_settings,
+        )
+        from deepfreeze_core.s3client import s3_client_factory
+
+        def _check():
+            request = get_thaw_request(self.client, request_id)
+            settings = get_settings(self.client)
+            s3 = s3_client_factory(settings.provider)
+            repo_names = request.get("repos", [])
+
+            # Get repo objects for bucket/path info
+            all_repos = get_matching_repos(
+                self.client, settings.repo_name_prefix
+            )
+            repo_map = {r.name: r for r in all_repos}
+
+            results = []
+            for name in repo_names:
+                repo = repo_map.get(name)
+                if not repo:
+                    results.append({
+                        "repo": name, "total": 0, "restored": 0,
+                        "in_progress": 0, "not_restored": 0, "complete": False,
+                        "error": "repo not found",
+                    })
+                    continue
+                try:
+                    status = check_restore_status(s3, repo)
+                    results.append({"repo": name, **status})
+                except Exception as e:
+                    results.append({
+                        "repo": name, "total": 0, "restored": 0,
+                        "in_progress": 0, "not_restored": 0, "complete": False,
+                        "error": str(e),
+                    })
+            return results
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _check)
+
     async def thaw_list(self, include_completed: bool = False) -> CommandResult:
         """List thaw requests."""
         action = Thaw(

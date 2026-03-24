@@ -71,6 +71,14 @@ async def get_action_history(request: Request, limit: int = 25):
     return {"history": [h.model_dump() for h in history]}
 
 
+@router.get("/thaw-requests/{request_id}/restore-progress")
+async def get_restore_progress(request: Request, request_id: str):
+    """Get S3 restore progress for each repo in a thaw request."""
+    service = _get_service(request)
+    progress = await service.get_thaw_restore_progress(request_id)
+    return {"request_id": request_id, "repos": progress}
+
+
 @router.get("/audit")
 async def get_audit_log(
     request: Request, limit: int = 50, action: str | None = None
