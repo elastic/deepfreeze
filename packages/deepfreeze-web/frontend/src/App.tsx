@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   EuiProvider,
   EuiPageTemplate,
@@ -9,8 +9,14 @@ import {
   EuiTitle,
   EuiSpacer,
   EuiIcon,
+  EuiButtonIcon,
+  EuiFlyout,
+  EuiFlyoutHeader,
+  EuiFlyoutBody,
+  EuiDescriptionList,
 } from '@elastic/eui';
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { api } from './api/client';
 import Overview from './pages/Overview';
 import Repositories from './pages/Repositories';
 import ThawRequests from './pages/ThawRequests';
@@ -21,6 +27,44 @@ function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const [isSideNavOpenOnMobile, setIsSideNavOpenOnMobile] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [config, setConfig] = useState<Record<string, unknown> | null>(null);
+
+  const fetchConfig = useCallback(async () => {
+    try {
+      const data = await api.getStatus(false);
+      setConfig(data.settings);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchConfig();
+  }, [fetchConfig]);
+
+  const configItems = config
+    ? [
+        { title: 'Provider', description: String(config.provider || '--') },
+        { title: 'Repository Prefix', description: String(config.repo_name_prefix || '--') },
+        { title: 'Bucket Prefix', description: String(config.bucket_name_prefix || '--') },
+        { title: 'Base Path Prefix', description: String(config.base_path_prefix || '--') },
+        { title: 'Storage Class', description: String(config.storage_class || '--') },
+        { title: 'Canned ACL', description: String(config.canned_acl || '--') },
+        { title: 'Rotation Style', description: String(config.style || '--') },
+        { title: 'Rotate By', description: String(config.rotate_by || '--') },
+        { title: 'Last Suffix', description: String(config.last_suffix || '--') },
+        ...(config.ilm_policy_name
+          ? [{ title: 'ILM Policy', description: String(config.ilm_policy_name) }]
+          : []),
+        ...(config.index_template_name
+          ? [{ title: 'Index Template', description: String(config.index_template_name) }]
+          : []),
+        { title: 'Thaw Retention (completed)', description: `${config.thaw_request_retention_days_completed ?? 7} days` },
+        { title: 'Thaw Retention (failed)', description: `${config.thaw_request_retention_days_failed ?? 30} days` },
+        { title: 'Thaw Retention (refrozen)', description: `${config.thaw_request_retention_days_refrozen ?? 35} days` },
+      ]
+    : [];
 
   const sideNavItems = [
     {
@@ -83,6 +127,26 @@ function AppShell() {
               </EuiHeaderSection>,
             ],
           },
+          {
+            side: 'right',
+            items: [
+              <EuiHeaderSection key="config">
+                <EuiHeaderSectionItem>
+                  <EuiButtonIcon
+                    iconType="gear"
+                    aria-label="Configuration"
+                    color="text"
+                    display="empty"
+                    size="s"
+                    onClick={() => {
+                      fetchConfig();
+                      setConfigOpen(true);
+                    }}
+                  />
+                </EuiHeaderSectionItem>
+              </EuiHeaderSection>,
+            ],
+          },
         ]}
       />
       <EuiPageTemplate
@@ -109,6 +173,27 @@ function AppShell() {
           </Routes>
         </EuiPageTemplate.Section>
       </EuiPageTemplate>
+
+      {configOpen && (
+        <EuiFlyout onClose={() => setConfigOpen(false)} size="s" ownFocus>
+          <EuiFlyoutHeader hasBorder>
+            <EuiTitle size="m">
+              <h2>Configuration</h2>
+            </EuiTitle>
+          </EuiFlyoutHeader>
+          <EuiFlyoutBody>
+            {config ? (
+              <EuiDescriptionList
+                type="column"
+                compressed
+                listItems={configItems}
+              />
+            ) : (
+              <p>No configuration loaded.</p>
+            )}
+          </EuiFlyoutBody>
+        </EuiFlyout>
+      )}
     </>
   );
 }

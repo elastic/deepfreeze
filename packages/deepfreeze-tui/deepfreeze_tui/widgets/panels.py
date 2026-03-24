@@ -504,6 +504,83 @@ class DetailPanel(Vertical):
         content.update("\n".join(lines))
 
 
+class ConfigPanel(Vertical):
+    """Collapsible configuration panel.
+
+    When focused, expands to show full config details.
+    When not focused, collapses to a single-line summary.
+    """
+
+    can_focus = True
+
+    def __init__(self, **kwargs):
+        super().__init__(id="config-panel", classes="panel", **kwargs)
+        self._config: dict[str, Any] = {}
+        self._expanded = False
+
+    def compose(self):
+        yield Static("[dim]No config loaded[/dim]", id="config-content")
+
+    def on_mount(self) -> None:
+        self.border_title = "Config"
+
+    def update_config(self, settings: dict[str, Any] | None) -> None:
+        """Update the config data."""
+        self._config = settings or {}
+        self._render()
+
+    def on_focus(self) -> None:
+        self._expanded = True
+        self._render()
+
+    def on_blur(self) -> None:
+        self._expanded = False
+        self._render()
+
+    def _render(self) -> None:
+        content = self.query_one("#config-content", Static)
+        if not self._config:
+            content.update("[dim]No config loaded[/dim]")
+            return
+
+        if not self._expanded:
+            # Collapsed: single-line summary
+            provider = self._config.get("provider", "?")
+            prefix = self._config.get("repo_name_prefix", "?")
+            style = self._config.get("style", "?")
+            content.update(
+                f"[dim]provider:[/dim]{provider}  "
+                f"[dim]prefix:[/dim]{prefix}  "
+                f"[dim]style:[/dim]{style}"
+            )
+            return
+
+        # Expanded: full config
+        lines = []
+        fields = [
+            ("Provider", "provider"),
+            ("Repo Prefix", "repo_name_prefix"),
+            ("Bucket Prefix", "bucket_name_prefix"),
+            ("Base Path Prefix", "base_path_prefix"),
+            ("Storage Class", "storage_class"),
+            ("Canned ACL", "canned_acl"),
+            ("Rotation Style", "style"),
+            ("Rotate By", "rotate_by"),
+            ("Last Suffix", "last_suffix"),
+            ("ILM Policy", "ilm_policy_name"),
+            ("Index Template", "index_template_name"),
+            ("Thaw Retention (completed)", "thaw_request_retention_days_completed"),
+            ("Thaw Retention (failed)", "thaw_request_retention_days_failed"),
+            ("Thaw Retention (refrozen)", "thaw_request_retention_days_refrozen"),
+        ]
+        for label, key in fields:
+            val = self._config.get(key)
+            if val is not None:
+                lines.append(f"  [dim]{label + ':':<30}[/dim] {val}")
+
+        content.update("\n".join(lines))
+
+
 class CommandLog(VerticalScroll):
     """Command log panel showing action history, like lazygit's command log.
 

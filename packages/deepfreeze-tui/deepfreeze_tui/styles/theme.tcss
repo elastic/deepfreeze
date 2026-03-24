@@ -151,3 +151,20 @@ Footer > .footer--description {
     height: 1fr;
     max-height: 8;
 }
+
+/* -- Config panel: collapsed by default, expands on focus -- */
+#config-panel {
+    height: 3;
+}
+
+#config-panel:focus {
+    height: 1fr;
+}
+
+#config-panel:focus-within {
+    height: 1fr;
+}
+
+#config-content {
+    padding: 0 1;
+}

@@ -12,6 +12,7 @@ from .modals import HelpPanel
 from .widgets.panels import (
     BucketPanel,
     CommandLog,
+    ConfigPanel,
     DetailPanel,
     ILMPanel,
     RepoPanel,
@@ -31,9 +32,10 @@ class DeepfreezeApp(App):
         Binding("ctrl+r", "refresh", "Refresh"),
         Binding("1", "focus_panel('repos')", "Repos", show=False),
         Binding("2", "focus_panel('thaw-requests')", "Thaw", show=False),
-        Binding("3", "focus_panel('buckets')", "Buckets", show=False),
-        Binding("4", "focus_panel('ilm-policies')", "ILM", show=False),
-        Binding("5", "focus_panel('detail-panel')", "Detail", show=False),
+        Binding("3", "focus_panel('ilm-policies')", "ILM", show=False),
+        Binding("4", "focus_panel('buckets')", "Buckets", show=False),
+        Binding("5", "focus_panel('config-panel')", "Config", show=False),
+        Binding("6", "focus_panel('detail-panel')", "Detail", show=False),
     ]
 
     def __init__(self, config_path=None, refresh_interval=30):
@@ -56,8 +58,9 @@ class DeepfreezeApp(App):
             with Vertical(id="left-col"):
                 yield RepoPanel()
                 yield ThawPanel()
-                yield BucketPanel()
                 yield ILMPanel()
+                yield BucketPanel()
+                yield ConfigPanel()
 
             # Right column: detail view + command log
             with Vertical(id="right-col"):
@@ -114,10 +117,13 @@ class DeepfreezeApp(App):
             buckets = self._status_data.get("buckets", [])
             ilm = self._status_data.get("ilm_policies", [])
 
+            settings = self._status_data.get("settings")
+
             self.query_one(RepoPanel).update_repos(repos)
             self.query_one(ThawPanel).update_requests(thaw_reqs)
             self.query_one(BucketPanel).update_buckets(buckets)
             self.query_one(ILMPanel).update_policies(ilm)
+            self.query_one(ConfigPanel).update_config(settings)
 
             # Also populate the All Repos tab in the detail panel
             self.query_one(DetailPanel).update_all_repos(repos)
