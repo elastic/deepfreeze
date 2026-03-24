@@ -24,7 +24,6 @@ from deepfreeze_core.exceptions import (
 from deepfreeze_core.helpers import Repository
 from deepfreeze_core.s3client import s3_client_factory
 from deepfreeze_core.utilities import (
-    get_all_indices_in_repo,
     get_repositories_by_names,
     get_settings,
     get_thaw_request,
@@ -102,40 +101,77 @@ class Refreeze:
 
     def _delete_mounted_indices(self, repo: Repository) -> list:
         """
-        Delete indices that were mounted from a repository.
+        Delete all searchable snapshot indices backed by this repository.
+
+        Finds indices by checking store settings (reliable), then deletes them.
+        Data stream backing indices (.ds-*) are deleted via the data stream API.
 
         :param repo: The repository to delete indices from
-        :return: List of deleted index names
+        :return: List of deleted index/data-stream names
         """
-        deleted_indices = []
+        deleted = []
 
         try:
-            # Get all indices in the repository
-            indices = get_all_indices_in_repo(self.client, repo.name)
+            # Find all searchable snapshot indices backed by this repo
+            all_settings = self.client.indices.get_settings(index="*")
+            ss_indices = []
+            for index_name, data in all_settings.items():
+                store = (
+                    data.get("settings", {})
+                    .get("index", {})
+                    .get("store", {})
+                )
+                if store.get("type") == "snapshot" and (
+                    store.get("snapshot", {}).get("repository_name") == repo.name
+                ):
+                    ss_indices.append(index_name)
 
-            for index_name in indices:
-                # Check if index exists (might be mounted with different name patterns)
-                for pattern in [
-                    index_name,
-                    f"partial-{index_name}",
-                    f"restored-{index_name}",
-                ]:
-                    if self.client.indices.exists(index=pattern):
-                        self.loggit.info("Deleting mounted index %s", pattern)
-                        try:
-                            self.client.indices.delete(index=pattern)
-                            deleted_indices.append(pattern)
-                        except Exception as e:
-                            self.loggit.warning(
-                                "Failed to delete index %s: %s", pattern, e
-                            )
+            if not ss_indices:
+                self.loggit.info("No searchable snapshot indices found for %s", repo.name)
+                return deleted
+
+            self.loggit.info(
+                "Found %d searchable snapshot indices for %s: %s",
+                len(ss_indices), repo.name, ss_indices,
+            )
+
+            # Collect data streams that own any of these backing indices
+            ds_to_delete = set()
+            try:
+                ds_response = self.client.indices.get_data_stream(name="*")
+                for ds in ds_response.get("data_streams", []):
+                    ds_name = ds["name"]
+                    backing = {idx["index_name"] for idx in ds.get("indices", [])}
+                    if backing & set(ss_indices):
+                        ds_to_delete.add(ds_name)
+            except Exception as e:
+                self.loggit.debug("Could not list data streams: %s", e)
+
+            # Delete data streams first (removes their backing indices)
+            for ds_name in ds_to_delete:
+                try:
+                    self.loggit.info("Deleting data stream %s", ds_name)
+                    self.client.indices.delete_data_stream(name=ds_name)
+                    deleted.append(f"data_stream:{ds_name}")
+                except Exception as e:
+                    self.loggit.warning("Failed to delete data stream %s: %s", ds_name, e)
+
+            # Delete any remaining non-data-stream indices
+            for index_name in ss_indices:
+                try:
+                    if self.client.indices.exists(index=index_name):
+                        self.loggit.info("Deleting index %s", index_name)
+                        self.client.indices.delete(index=index_name)
+                        deleted.append(index_name)
+                except Exception as e:
+                    self.loggit.warning("Failed to delete index %s: %s", index_name, e)
 
         except Exception as e:
             self.loggit.warning(
                 "Could not get indices for repository %s: %s", repo.name, e
             )
 
-        return deleted_indices
+        return deleted
 
     def _refreeze_repository(self, repo: Repository, dry_run: bool = False) -> dict:
         """
