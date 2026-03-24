@@ -106,13 +106,13 @@ OptionList > .option-list--option {
     padding: 1 2;
 }
 
-/* -- Command log at bottom right -- */
-#command-log {
+/* -- Activity panel at bottom right -- */
+#activity-panel {
     height: 1fr;
-    max-height: 12;
+    max-height: 14;
 }
 
-#log-content {
+#activity-content {
     padding: 0 1;
 }
 

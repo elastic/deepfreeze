@@ -577,62 +577,92 @@ class ConfigPanel(Static):
         self.update("\n".join(lines))
 
 
-class CommandLog(VerticalScroll):
-    """Command log panel showing action history, like lazygit's command log.
+class ActivityPanel(VerticalScroll):
+    """Activity panel showing audit log entries from Elasticsearch.
 
-    Displays timestamped entries of commands run and their outcomes.
-    Most recent entries appear at the bottom.
+    Displays recent actions with timestamp, status, action name, and summary.
+    Also shows in-session commands as they happen.
     """
 
     can_focus = True
 
-    MAX_ENTRIES = 200
-
     def __init__(self, **kwargs):
-        super().__init__(id="command-log", classes="panel", **kwargs)
-        self._entries: list[str] = []
+        super().__init__(id="activity-panel", classes="panel", **kwargs)
+        self._pending: list[str] = []
 
     def compose(self):
-        yield Static("[dim]No commands yet[/dim]", id="log-content")
+        yield Static("[dim]Loading activity...[/dim]", id="activity-content")
 
     def on_mount(self) -> None:
-        self.border_title = "Command Log"
+        self.border_title = "Activity"
+
+    def update_history(self, entries: list[dict[str, Any]]) -> None:
+        """Update with audit log entries from the service."""
+        lines = []
+        for e in entries:
+            ts = _trim_date(e.get("timestamp", ""))
+            action = e.get("action", "?")
+            success = e.get("success", False)
+            dry_run = e.get("dry_run", False)
+            summary = e.get("summary", "")
+            errors = e.get("error_count", 0)
+
+            status = "[green]OK[/green]" if success else "[red]FAIL[/red]"
+            line = f"[dim]{ts}[/dim] {status} [bold]{action}[/bold]"
+            if dry_run:
+                line += " [yellow](dry)[/yellow]"
+            if summary:
+                safe = str(summary).replace("[", "\\[").replace("]", "\\]")
+                line += f" {safe}"
+            if errors and errors > 0:
+                line += f" [red]({errors} errors)[/red]"
+            lines.append(line)
+
+        # Append any pending in-session entries
+        if self._pending:
+            if lines:
+                lines.append("[dim]───[/dim]")
+            lines.extend(self._pending)
+
+        content = self.query_one("#activity-content", Static)
+        if lines:
+            content.update("\n".join(lines))
+        else:
+            content.update("[dim]No activity yet[/dim]")
 
     def log_command(self, action: str, detail: str = "") -> None:
-        """Log a command being started."""
+        """Log an in-session command (shows immediately before next audit refresh)."""
         from datetime import datetime
 
         ts = datetime.now().strftime("%H:%M:%S")
-        entry = f"[dim]{ts}[/dim] [bold]{action}[/bold]"
+        entry = f"[dim]{ts}[/dim] [cyan]...[/cyan] [bold]{action}[/bold]"
         if detail:
             safe = detail.replace("[", "\\[").replace("]", "\\]")
             entry += f" {safe}"
-        self._entries.append(entry)
-        self._trim_and_render()
+        self._pending.append(entry)
+        self._append_to_display(entry)
 
     def log_result(
         self, action: str, success: bool, summary: str, duration_ms: int = 0
     ) -> None:
-        """Log the result of a completed command."""
+        """Log a completed command result."""
         from datetime import datetime
 
         ts = datetime.now().strftime("%H:%M:%S")
-        if success:
-            status = "[green]OK[/green]"
-        else:
-            status = "[red]FAIL[/red]"
+        status = "[green]OK[/green]" if success else "[red]FAIL[/red]"
         safe_summary = summary.replace("[", "\\[").replace("]", "\\]")
         entry = f"[dim]{ts}[/dim] {status} [bold]{action}[/bold] {safe_summary}"
         if duration_ms > 0:
             entry += f" [dim]({duration_ms}ms)[/dim]"
-        self._entries.append(entry)
-        self._trim_and_render()
+        self._pending.append(entry)
+        self._append_to_display(entry)
 
-    def _trim_and_render(self) -> None:
-        """Keep entries under MAX_ENTRIES and update display."""
-        if len(self._entries) > self.MAX_ENTRIES:
-            self._entries = self._entries[-self.MAX_ENTRIES :]
-        content = self.query_one("#log-content", Static)
-        content.update("\n".join(self._entries))
-        # Auto-scroll to bottom
+    def _append_to_display(self, entry: str) -> None:
+        """Append a single entry to current display."""
+        content = self.query_one("#activity-content", Static)
+        current = content.renderable
+        if current and str(current) != "[dim]Loading activity...[/dim]" and str(current) != "[dim]No activity yet[/dim]":
+            content.update(f"{current}\n{entry}")
+        else:
+            content.update(entry)
         self.scroll_end(animate=False)

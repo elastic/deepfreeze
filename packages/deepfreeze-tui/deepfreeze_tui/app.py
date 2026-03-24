@@ -10,8 +10,8 @@ from deepfreeze_service import DeepfreezeService, PollingConfig
 from .dialogs import ConfirmDialog, ThawDialog
 from .modals import HelpPanel
 from .widgets.panels import (
+    ActivityPanel,
     BucketPanel,
-    CommandLog,
     ConfigPanel,
     DetailPanel,
     ILMPanel,
@@ -65,7 +65,7 @@ class DeepfreezeApp(App):
             # Right column: detail view + command log
             with Vertical(id="right-col"):
                 yield DetailPanel()
-                yield CommandLog()
+                yield ActivityPanel()
 
         yield Footer()
 
@@ -105,7 +105,7 @@ class DeepfreezeApp(App):
 
         try:
             try:
-                self.query_one(CommandLog).log_command("status", "refreshing...")
+                self.query_one(ActivityPanel).log_command("status", "refreshing...")
             except Exception:
                 pass  # CommandLog may not be mounted yet on first call
             status = await self.service.get_status(force_refresh=True)
@@ -124,6 +124,15 @@ class DeepfreezeApp(App):
             self.query_one(BucketPanel).update_buckets(buckets)
             self.query_one(ILMPanel).update_policies(ilm)
             self.query_one(ConfigPanel).update_config(settings)
+
+            # Load audit history
+            try:
+                history = self.service.get_action_history(limit=50)
+                self.query_one(ActivityPanel).update_history(
+                    [h.model_dump() for h in history]
+                )
+            except Exception:
+                pass
 
             # Also populate the All Repos tab in the detail panel
             self.query_one(DetailPanel).update_all_repos(repos)
@@ -250,7 +259,7 @@ class DeepfreezeApp(App):
     def _on_rotate_confirmed(self, confirmed: bool) -> None:
         if not confirmed:
             return
-        self.query_one(CommandLog).log_command("rotate")
+        self.query_one(ActivityPanel).log_command("rotate")
         self.run_worker(self._exec_rotate())
 
     async def _exec_rotate(self) -> None:
@@ -268,7 +277,7 @@ class DeepfreezeApp(App):
         """Handle thaw dialog result."""
         if not self.service:
             return
-        self.query_one(CommandLog).log_command(
+        self.query_one(ActivityPanel).log_command(
             "thaw", f"{params['start_date']} to {params['end_date']}"
         )
         self.run_worker(self._exec_thaw(params))
@@ -300,7 +309,7 @@ class DeepfreezeApp(App):
     def _on_cleanup_confirmed(self, confirmed: bool) -> None:
         if not confirmed:
             return
-        self.query_one(CommandLog).log_command("cleanup")
+        self.query_one(ActivityPanel).log_command("cleanup")
         self.run_worker(self._exec_cleanup())
 
     async def _exec_cleanup(self) -> None:
@@ -312,7 +321,7 @@ class DeepfreezeApp(App):
         if not self.service:
             self.notify("Service not initialized", severity="error")
             return
-        self.query_one(CommandLog).log_command("repair-metadata")
+        self.query_one(ActivityPanel).log_command("repair-metadata")
         self.run_worker(self._exec_repair())
 
     async def _exec_repair(self) -> None:
@@ -348,7 +357,7 @@ class DeepfreezeApp(App):
         if not req_id:
             return
         short_id = req_id[-8:] if len(req_id) > 8 else req_id
-        self.query_one(CommandLog).log_command("refreeze", short_id)
+        self.query_one(ActivityPanel).log_command("refreeze", short_id)
         self.run_worker(self._exec_refreeze(req_id))
 
     async def _exec_refreeze(self, request_id: str) -> None:
@@ -402,7 +411,7 @@ class DeepfreezeApp(App):
         content.update("\n".join(lines))
 
         # Log to command log
-        self.query_one(CommandLog).log_result(
+        self.query_one(ActivityPanel).log_result(
             action_name.lower(),
             result.success,
             result.summary,
