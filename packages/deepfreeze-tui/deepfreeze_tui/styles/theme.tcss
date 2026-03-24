@@ -158,11 +158,8 @@ Footer > .footer--description {
 }
 
 #config-panel:focus {
-    height: 1fr;
-}
-
-#config-panel:focus-within {
-    height: 1fr;
+    height: auto;
+    max-height: 20;
 }
 
 /* config-panel content gets padding via Static text */
