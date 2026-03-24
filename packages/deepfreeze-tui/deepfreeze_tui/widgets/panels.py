@@ -220,6 +220,7 @@ class DetailPanel(Vertical):
         self._all_repos: list[dict[str, Any]] = []
         self._panel_context = "repos"
         self._populating = False  # guard against events during data load
+        self._last_detail_text = ""  # track current detail content for appending
 
     def compose(self):
         # Tab 0: Selected item detail (scrollable)
@@ -349,6 +350,11 @@ class DetailPanel(Vertical):
         finally:
             self._populating = False
 
+    def _set_detail_content(self, text: str) -> None:
+        """Set the detail content and track it for appending."""
+        self._last_detail_text = text
+        self.query_one("#detail-content", Static).update(text)
+
     # -- Show methods (always update the Selected tab content) --
 
     def show_repo_detail(self, repo: dict[str, Any]) -> None:
@@ -386,7 +392,6 @@ class DetailPanel(Vertical):
 
     def show_thaw_detail(self, req: dict[str, Any]) -> None:
         """Display thaw request details."""
-        content = self.query_one("#detail-content", Static)
         req_id = req.get("id", req.get("request_id", "?"))
         status = req.get("status", "?")
         color = THAW_STATUS_COLORS.get(status, "white")
@@ -412,13 +417,10 @@ class DetailPanel(Vertical):
             elif isinstance(r, dict):
                 lines.append(f"    - {r.get('name', r)}")
 
-        content.update("\n".join(lines))
+        self._set_detail_content("\n".join(lines))
 
     def append_restore_progress(self, progress: list[dict[str, Any]]) -> None:
         """Append S3 restore progress to the current detail view."""
-        content = self.query_one("#detail-content", Static)
-        current = str(content.renderable)
-
         lines = ["", "[bold]S3 Restore Progress[/bold]", ""]
         for rp in progress:
             name = rp.get("repo", "?")
@@ -446,7 +448,8 @@ class DetailPanel(Vertical):
                 f"in_progress:{in_prog}  pending:{not_restored}[/dim]"
             )
 
-        content.update(current + "\n".join(lines))
+        full_text = self._last_detail_text + "\n".join(lines)
+        self._set_detail_content(full_text)
 
     def show_bucket_detail(self, bucket: dict[str, Any]) -> None:
         """Display bucket details."""
