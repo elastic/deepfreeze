@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { trimDate } from '../api/util';
 import {
   EuiBasicTable,
@@ -39,6 +39,43 @@ function statusColor(s: string): string {
     default:
       return 'default';
   }
+}
+
+function formatElapsed(createdAt: string): string {
+  try {
+    const created = new Date(createdAt);
+    const now = new Date();
+    const totalSec = Math.max(0, Math.floor((now.getTime() - created.getTime()) / 1000));
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  } catch {
+    return '';
+  }
+}
+
+function ThawFlyoutContent({ item }: { item: ThawRequest }) {
+  const [elapsed, setElapsed] = useState('');
+  const createdAt = String(item.created_at || '');
+
+  useEffect(() => {
+    if (!createdAt) return;
+    setElapsed(formatElapsed(createdAt));
+    const timer = setInterval(() => setElapsed(formatElapsed(createdAt)), 1000);
+    return () => clearInterval(timer);
+  }, [createdAt]);
+
+  const listItems = [
+    { title: 'Request ID', description: String(item.request_id || item.id || '--') },
+    { title: 'Status', description: String(item.status || '--') },
+    { title: 'Created At', description: createdAt ? `${trimDate(createdAt)}  (${elapsed} ago)` : '--' },
+    { title: 'Date Range', description: `${trimDate(item.start_date) || '?'} \u2192 ${trimDate(item.end_date) || '?'}` },
+  ];
+
+  return (
+    <EuiDescriptionList type="column" compressed listItems={listItems} />
+  );
 }
 
 export default function ThawRequests() {
@@ -216,20 +253,7 @@ export default function ThawRequests() {
             </EuiTitle>
           </EuiFlyoutHeader>
           <EuiFlyoutBody>
-            <EuiDescriptionList
-              type="column"
-              compressed
-              listItems={Object.entries(flyoutItem)
-                .filter(([key]) => key !== 'repositories')
-                .filter(([, v]) => v !== null && v !== undefined)
-                .map(([key, value]) => ({
-                  title: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-                  description:
-                    typeof value === 'object'
-                      ? JSON.stringify(value, null, 2)
-                      : String(value),
-                }))}
-            />
+            <ThawFlyoutContent item={flyoutItem} />
 
             {Array.isArray(flyoutItem.repositories) && flyoutItem.repositories.length > 0 && (
               <>

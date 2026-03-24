@@ -401,11 +401,28 @@ class DetailPanel(Vertical):
         end_date = _trim_date(req.get("end_date", "")) or "?"
         age = req.get("age_days", "?")
 
+        elapsed = ""
+        try:
+            from datetime import datetime, timezone
+            created_raw = req.get("created_at", "")
+            if created_raw:
+                created_dt = datetime.fromisoformat(str(created_raw))
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                delta = datetime.now(timezone.utc) - created_dt
+                total_secs = int(delta.total_seconds())
+                if total_secs >= 0:
+                    h, rem = divmod(total_secs, 3600)
+                    m, s = divmod(rem, 60)
+                    elapsed = f" [dim]({h:02d}:{m:02d}:{s:02d} ago)[/dim]"
+        except Exception:
+            pass
+
         lines = [
             f"[bold]Thaw Request:[/bold] {req_id}",
             "",
             f"  Status:     [{color}]{status}[/{color}]",
-            f"  Created:    {created}",
+            f"  Created:    {created}{elapsed}",
             f"  Date Range: {start_date} .. {end_date}",
             f"  Age:        {age} days",
             "",
