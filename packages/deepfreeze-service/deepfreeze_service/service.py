@@ -326,7 +326,9 @@ class DeepfreezeService:
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(None, action.do_action)
 
-            output = f.getvalue()
+            output = f.getvalue().strip()
+            if not output:
+                raise ValueError("Status action returned no output")
             data = json.loads(output)
 
             status = SystemStatus(
@@ -386,11 +388,19 @@ class DeepfreezeService:
         action = Thaw(
             client=self.client,
             check_all=True,
-            porcelain=True,
+            porcelain=False,
             audit=self._get_audit(),
         )
+
+        def _run():
+            # Suppress stdout — we only care about the side effects
+            # (state updates in ES), not the output
+            f = StringIO()
+            with redirect_stdout(f):
+                action.do_action()
+
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, action.do_action)
+        await loop.run_in_executor(None, _run)
 
     def _get_cluster_health(self) -> ClusterHealth:
         """Get basic cluster health info."""
