@@ -500,23 +500,34 @@ class Refreeze:
                 # Track repository refreezes
                 if tracker:
                     for r in results:
+                        deleted = r.get("deleted_indices", [])
                         if r["success"]:
+                            # Log each deleted index/data-stream
+                            for idx in deleted:
+                                tracker.add_result(
+                                    {
+                                        "type": "data_stream" if idx.startswith("data_stream:") else "index",
+                                        "action": "deleted",
+                                        "target": idx.replace("data_stream:", ""),
+                                        "repository": r["repo"],
+                                    }
+                                )
+                            # Log the repo unmount
                             tracker.add_result(
                                 {
                                     "type": "repository",
-                                    "action": "refrozen",
+                                    "action": "unmounted_and_refrozen",
                                     "target": r["repo"],
                                     "status": "success",
-                                    "indices_removed": len(
-                                        r.get("deleted_indices", [])
-                                    ),
+                                    "indices_removed": len(deleted),
+                                    "deleted_indices": deleted,
                                 }
                             )
                         else:
                             tracker.add_result(
                                 {
                                     "type": "repository",
-                                    "action": "refrozen",
+                                    "action": "refreeze_failed",
                                     "target": r["repo"],
                                     "status": "failed",
                                     "error": r.get("error"),
@@ -527,6 +538,9 @@ class Refreeze:
                             "requests_refrozen": 1,
                             "repositories_refrozen": len(successful),
                             "repositories_failed": len(failed),
+                            "total_indices_deleted": sum(
+                                len(r.get("deleted_indices", [])) for r in results
+                            ),
                         }
                     )
 
@@ -627,16 +641,25 @@ class Refreeze:
                             )
 
                         for r in result.get("results", []):
+                            deleted = r.get("deleted_indices", [])
                             if r["success"]:
+                                for idx in deleted:
+                                    tracker.add_result(
+                                        {
+                                            "type": "data_stream" if idx.startswith("data_stream:") else "index",
+                                            "action": "deleted",
+                                            "target": idx.replace("data_stream:", ""),
+                                            "repository": r["repo"],
+                                        }
+                                    )
                                 tracker.add_result(
                                     {
                                         "type": "repository",
-                                        "action": "refrozen",
+                                        "action": "unmounted_and_refrozen",
                                         "target": r["repo"],
                                         "status": "success",
-                                        "indices_removed": len(
-                                            r.get("deleted_indices", [])
-                                        ),
+                                        "indices_removed": len(deleted),
+                                        "deleted_indices": deleted,
                                     }
                                 )
                                 repositories_refrozen += 1
@@ -644,7 +667,7 @@ class Refreeze:
                                 tracker.add_result(
                                     {
                                         "type": "repository",
-                                        "action": "refrozen",
+                                        "action": "refreeze_failed",
                                         "target": r["repo"],
                                         "status": "failed",
                                         "error": r.get("error"),
@@ -652,12 +675,18 @@ class Refreeze:
                                 )
                                 repositories_failed += 1
 
+                total_indices = sum(
+                    len(r.get("deleted_indices", []))
+                    for res in all_results
+                    for r in res.get("results", [])
+                )
                 if tracker:
                     tracker.set_summary(
                         {
                             "requests_refrozen": requests_refrozen,
                             "repositories_refrozen": repositories_refrozen,
                             "repositories_failed": repositories_failed,
+                            "total_indices_deleted": total_indices,
                         }
                     )
 
