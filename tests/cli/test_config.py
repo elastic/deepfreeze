@@ -5,8 +5,8 @@ import tempfile
 from unittest.mock import patch
 
 import pytest
-from deepfreeze import ActionError
-from deepfreeze.config import (
+from elastic_deepfreeze import ActionError
+from elastic_deepfreeze.config import (
     get_elasticsearch_config,
     get_logging_config,
     load_config,

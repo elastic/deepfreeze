@@ -7,7 +7,7 @@ ported from curator/validators/options.py (deepfreeze-specific schemas only).
 
 from voluptuous import Schema
 
-from deepfreeze import defaults
+from elastic_deepfreeze import defaults
 
 # Deepfreeze action option schemas
 # Each schema lists the option defaults that apply to that action

@@ -9,7 +9,7 @@ __version__ = "1.0.1"
 
 # Export constants
 # Export actions
-from deepfreeze_core.actions import (
+from elastic_deepfreeze_core.actions import (
     Cleanup,
     Refreeze,
     RepairMetadata,
@@ -18,7 +18,7 @@ from deepfreeze_core.actions import (
     Status,
     Thaw,
 )
-from deepfreeze_core.constants import (
+from elastic_deepfreeze_core.constants import (
     PROVIDERS,
     SETTINGS_ID,
     STATUS_INDEX,
@@ -29,7 +29,7 @@ from deepfreeze_core.constants import (
 )
 
 # Export ES client utilities
-from deepfreeze_core.esclient import (
+from elastic_deepfreeze_core.esclient import (
     ESClientWrapper,
     create_es_client,
     create_es_client_from_config,
@@ -38,7 +38,7 @@ from deepfreeze_core.esclient import (
 )
 
 # Export exceptions
-from deepfreeze_core.exceptions import (
+from elastic_deepfreeze_core.exceptions import (
     ActionError,
     ActionException,
     DeepfreezeException,
@@ -49,21 +49,21 @@ from deepfreeze_core.exceptions import (
 )
 
 # Export helpers
-from deepfreeze_core.helpers import (
+from elastic_deepfreeze_core.helpers import (
     Deepfreeze,
     Repository,
     Settings,
 )
 
 # Export S3 client
-from deepfreeze_core.s3client import (
+from elastic_deepfreeze_core.s3client import (
     AwsS3Client,
     S3Client,
     s3_client_factory,
 )
 
 # Export commonly used utilities
-from deepfreeze_core.utilities import (
+from elastic_deepfreeze_core.utilities import (
     check_restore_status,
     create_repo,
     decode_date,

@@ -21,17 +21,17 @@ jobs:
     - name: Install dependencies
       run: |
         pip install hatch
-        pip install -e packages/deepfreeze-core[dev]
-        pip install -e packages/deepfreeze-cli[dev]
+        pip install -e packages/elastic-deepfreeze-core[dev]
+        pip install -e packages/elastic-deepfreeze-cli[dev]
 
     - name: Run linting
       run: |
-        cd packages/deepfreeze-core && ruff check deepfreeze_core/
-        cd ../deepfreeze-cli && ruff check deepfreeze/
+        cd packages/elastic-deepfreeze-core && ruff check elastic_deepfreeze_core/
+        cd ../elastic-deepfreeze-cli && ruff check elastic_deepfreeze/
 
     - name: Run tests
       run: |
-        pytest tests/ -v --cov=deepfreeze_core --cov=deepfreeze --cov-report=xml
+        pytest tests/ -v --cov=elastic_deepfreeze_core --cov=elastic_deepfreeze --cov-report=xml
 
     - name: Upload coverage
       uses: codecov/codecov-action@v4

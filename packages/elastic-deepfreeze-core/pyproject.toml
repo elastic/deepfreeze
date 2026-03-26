@@ -3,22 +3,22 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "deepfreeze-cli"
+name = "elastic-deepfreeze-core"
 version = "1.0.0"
-description = "Standalone Elasticsearch S3 Glacier archival and lifecycle management tool"
+description = "Core library for Elasticsearch S3 Glacier archival - shared between curator and standalone deepfreeze"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.8"
 authors = [
-    { name = "Bret Wortman", email = "bret@wortman.us" },
+    { name = "Bret Wortman" }
 ]
 keywords = [
     "elasticsearch",
-    "s3",
+    "elastic",
     "glacier",
+    "s3",
     "archival",
     "snapshot",
-    "deepfreeze",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -35,40 +35,36 @@ classifiers = [
     "Topic :: System :: Archiving",
     "Topic :: Database",
 ]
+
 dependencies = [
-    "deepfreeze-core>=1.0.0",
-    "click>=8.0.0",
-    "voluptuous>=0.14.0",
-    "pyyaml>=6.0.0",
+    "elasticsearch8>=8.0.0",
+    "boto3>=1.26.0",
+    "rich>=13.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
-    "moto[s3]>=4.0.0",
+    "pytest-mock>=3.10.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
-    "mypy>=1.0.0",
+    "moto>=4.0.0",
 ]
-
-[project.scripts]
-deepfreeze = "deepfreeze.cli.main:cli"
 
 [project.urls]
 Homepage = "https://github.com/elastic/deepfreeze"
-Documentation = "https://github.com/elastic/deepfreeze/tree/main/packages/deepfreeze-cli"
+Documentation = "https://github.com/elastic/deepfreeze/tree/main/packages/elastic-deepfreeze-core"
 Repository = "https://github.com/elastic/deepfreeze"
 
 [tool.hatch.build.targets.wheel]
-packages = ["deepfreeze"]
+packages = ["elastic_deepfreeze_core"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "deepfreeze/**/*.py",
+    "elastic_deepfreeze_core/**/*.py",
     "README.md",
     "pyproject.toml",
-    "config.yml.example",
 ]
 
 [tool.black]
@@ -83,12 +79,6 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_functions = ["test_*"]
-addopts = "-v --tb=short"
-
-[tool.mypy]
-python_version = "3.8"
-warn_return_any = true
-warn_unused_configs = true
-ignore_missing_imports = true
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = "-v"

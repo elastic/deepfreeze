@@ -11,7 +11,7 @@ import logging
 import boto3
 from botocore.exceptions import ClientError
 
-from deepfreeze_core.exceptions import ActionError
+from elastic_deepfreeze_core.exceptions import ActionError
 
 
 class S3Client(metaclass=abc.ABCMeta):
@@ -68,7 +68,7 @@ class S3Client(metaclass=abc.ABCMeta):
         retrieval_tier: str = "Standard",
     ) -> None:
         """
-        Return a bucket from deepfreeze_core.
+        Return a bucket from elastic_deepfreeze_core.
 
         Args:
             bucket_name (str): The name of the bucket to return.

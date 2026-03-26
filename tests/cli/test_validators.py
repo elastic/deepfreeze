@@ -1,8 +1,8 @@
 """Tests for the deepfreeze validators module"""
 
 import pytest
-from deepfreeze import defaults
-from deepfreeze.validators import (
+from elastic_deepfreeze import defaults
+from elastic_deepfreeze.validators import (
     ACTION_SCHEMAS,
     DEEPFREEZE_OPTIONS,
     get_default_options,

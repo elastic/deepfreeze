@@ -10,14 +10,14 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from deepfreeze_core.constants import STATUS_INDEX
-from deepfreeze_core.exceptions import (
+from elastic_deepfreeze_core.constants import STATUS_INDEX
+from elastic_deepfreeze_core.exceptions import (
     ActionError,
     MissingIndexError,
     MissingSettingsError,
 )
-from deepfreeze_core.s3client import s3_client_factory
-from deepfreeze_core.utilities import (
+from elastic_deepfreeze_core.s3client import s3_client_factory
+from elastic_deepfreeze_core.utilities import (
     get_all_repos,
     get_matching_repo_names,
     get_settings,
@@ -38,7 +38,7 @@ class Status:
         do_action: Display status information
 
     :example:
-        >>> from deepfreeze_core.actions import Status
+        >>> from elastic_deepfreeze_core.actions import Status
         >>> status = Status(client)
         >>> status.do_action()
     """

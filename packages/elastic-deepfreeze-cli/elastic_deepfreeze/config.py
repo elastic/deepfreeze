@@ -11,7 +11,7 @@ import os
 from typing import Any, Optional
 
 import yaml
-from deepfreeze_core import ActionError
+from elastic_deepfreeze_core import ActionError
 
 # Environment variable prefix for deepfreeze configuration
 ENV_PREFIX = "DEEPFREEZE_"
@@ -267,7 +267,7 @@ def configure_logging(config: dict) -> None:
     logger.propagate = False  # Don't propagate to root logger (prevents duplicates)
 
     # Configure deepfreeze_core logger the same way
-    core_logger = logging.getLogger("deepfreeze_core")
+    core_logger = logging.getLogger("elastic_deepfreeze_core")
     core_logger.setLevel(level)
     core_logger.handlers = handlers
     core_logger.propagate = False

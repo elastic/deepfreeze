@@ -11,7 +11,7 @@ This package adds the CLI and configuration management.
 __version__ = "1.0.1"
 
 # Re-export everything from deepfreeze-core for backward compatibility
-from deepfreeze_core import (
+from elastic_deepfreeze_core import (
     PROVIDERS,
     SETTINGS_ID,
     # Constants

@@ -9,14 +9,14 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 
-from deepfreeze_core.constants import STATUS_INDEX, THAW_STATE_FROZEN
-from deepfreeze_core.exceptions import (
+from elastic_deepfreeze_core.constants import STATUS_INDEX, THAW_STATE_FROZEN
+from elastic_deepfreeze_core.exceptions import (
     MissingIndexError,
     MissingSettingsError,
 )
-from deepfreeze_core.helpers import Settings
-from deepfreeze_core.s3client import s3_client_factory
-from deepfreeze_core.utilities import (
+from elastic_deepfreeze_core.helpers import Settings
+from elastic_deepfreeze_core.s3client import s3_client_factory
+from elastic_deepfreeze_core.utilities import (
     create_repo,
     create_versioned_ilm_policy,
     get_composable_templates,
@@ -47,7 +47,7 @@ class Rotate:
         do_action: Perform the rotation
 
     :example:
-        >>> from deepfreeze_core.actions import Rotate
+        >>> from elastic_deepfreeze_core.actions import Rotate
         >>> rotate = Rotate(client, keep=2)
         >>> rotate.do_action()
     """

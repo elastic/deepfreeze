@@ -18,10 +18,10 @@ from datetime import datetime, timezone
 import botocore
 from elasticsearch8 import Elasticsearch, NotFoundError
 
-from deepfreeze_core.constants import SETTINGS_ID, STATUS_INDEX
-from deepfreeze_core.exceptions import ActionError, MissingIndexError
-from deepfreeze_core.helpers import Repository, Settings
-from deepfreeze_core.s3client import S3Client
+from elastic_deepfreeze_core.constants import SETTINGS_ID, STATUS_INDEX
+from elastic_deepfreeze_core.exceptions import ActionError, MissingIndexError
+from elastic_deepfreeze_core.helpers import Repository, Settings
+from elastic_deepfreeze_core.s3client import S3Client
 
 
 def push_to_glacier(s3: S3Client, repo: Repository) -> bool:

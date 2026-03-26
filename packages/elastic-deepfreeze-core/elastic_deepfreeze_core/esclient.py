@@ -12,7 +12,7 @@ from elasticsearch8 import Elasticsearch
 from elasticsearch8.exceptions import AuthenticationException
 from elasticsearch8.exceptions import ConnectionError as ESConnectionError
 
-from deepfreeze_core.exceptions import ActionError
+from elastic_deepfreeze_core.exceptions import ActionError
 
 
 def create_es_client(

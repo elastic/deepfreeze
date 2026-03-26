@@ -14,19 +14,19 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from deepfreeze_core.constants import (
+from elastic_deepfreeze_core.constants import (
     STATUS_INDEX,
     THAW_STATUS_COMPLETED,
     THAW_STATUS_FAILED,
     THAW_STATUS_IN_PROGRESS,
 )
-from deepfreeze_core.exceptions import (
+from elastic_deepfreeze_core.exceptions import (
     ActionError,
     MissingIndexError,
     MissingSettingsError,
 )
-from deepfreeze_core.s3client import s3_client_factory
-from deepfreeze_core.utilities import (
+from elastic_deepfreeze_core.s3client import s3_client_factory
+from elastic_deepfreeze_core.utilities import (
     check_restore_status,
     decode_date,
     find_and_mount_indices_in_date_range,
@@ -64,7 +64,7 @@ class Thaw:
         do_action: Perform the thaw operation
 
     :example:
-        >>> from deepfreeze_core.actions import Thaw
+        >>> from elastic_deepfreeze_core.actions import Thaw
         >>> thaw = Thaw(client, start_date=datetime(2023, 1, 1), end_date=datetime(2023, 1, 31))
         >>> thaw.do_action()
     """

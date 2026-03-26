@@ -1,4 +1,4 @@
-# Deepfreeze
+# Elastic Deepfreeze CLI
 
 Standalone Elasticsearch S3 Glacier archival and lifecycle management tool.
 
@@ -18,24 +18,16 @@ Deepfreeze provides cost-effective S3 Glacier archival and lifecycle management 
 
 ## Installation
 
-### From PyPI (when published)
+### From PyPI
 
 ```bash
-pip install deepfreeze-cli
+pip install elastic-deepfreeze-cli
 ```
 
 ### From Source
 
 ```bash
-# Clone the repository
-git clone https://github.com/wortmanb/curator.git
-cd curator/deepfreeze
-
-# Install in development mode
-pip install -e .
-
-# Or install with development dependencies
-pip install -e ".[dev]"
+pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/elastic-deepfreeze-cli
 ```
 
 ### Verify Installation
@@ -54,8 +46,7 @@ deepfreeze --help
 - Elasticsearch 8.x cluster
 - AWS credentials configured (for S3 access)
 - Required Python packages (installed automatically):
-  - elasticsearch8
-  - boto3
+  - elastic-deepfreeze-core
   - click
   - rich
   - voluptuous
@@ -245,7 +236,7 @@ pip install -e ".[dev]"
 pytest
 
 # Run with coverage
-pytest --cov=deepfreeze --cov-report=term-missing
+pytest --cov=elastic_deepfreeze --cov-report=term-missing
 
 # Run specific test file
 pytest tests/test_actions.py
@@ -257,14 +248,9 @@ pytest tests/test_actions.py
 - No live Elasticsearch or AWS connection required
 - All tests run in isolation
 
-## Independence from Curator
+## Why "elastic-deepfreeze-cli"?
 
-Deepfreeze is a standalone package that operates independently of Elasticsearch Curator. It:
-
-- Has no imports from the curator package
-- Uses its own Elasticsearch client wrapper (not es_client.builder)
-- Maintains its own exception classes
-- Can be installed and run without curator
+The package name includes the `elastic-` prefix to prevent dependency confusion attacks. See the [main README](../../README.md) for details.
 
 ## License
 

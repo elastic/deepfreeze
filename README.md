@@ -10,25 +10,25 @@ See Elastic Search Labs blog post at https://www.elastic.co/search-labs/blog/s3-
 
 This repository contains two packages:
 
-### deepfreeze-core
+### elastic-deepfreeze-core
 
 Core library providing the business logic for deepfreeze operations. Used by both the standalone CLI and Elasticsearch Curator.
 
 ```bash
-pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/deepfreeze-core
+pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/elastic-deepfreeze-core
 ```
 
-[View deepfreeze-core documentation](packages/deepfreeze-core/README.md)
+[View elastic-deepfreeze-core documentation](packages/elastic-deepfreeze-core/README.md)
 
-### deepfreeze-cli
+### elastic-deepfreeze-cli
 
 Standalone CLI tool for managing Elasticsearch S3 Glacier archives.
 
 ```bash
-pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/deepfreeze-cli
+pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/elastic-deepfreeze-cli
 ```
 
-[View deepfreeze-cli documentation](packages/deepfreeze-cli/README.md)
+[View elastic-deepfreeze-cli documentation](packages/elastic-deepfreeze-cli/README.md)
 
 ## Features
 
@@ -44,7 +44,7 @@ pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/
 
 1. Install the CLI:
    ```bash
-   pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/deepfreeze-cli
+   pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/elastic-deepfreeze-cli
    ```
 
 2. Create a configuration file (`config.yml`):
@@ -74,7 +74,11 @@ pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/
 
 ## Integration with Curator
 
-Elasticsearch Curator can use deepfreeze-core as a dependency. See the [Curator documentation](https://github.com/wortmanb/curator) for integration details.
+Elasticsearch Curator can use elastic-deepfreeze-core as a dependency. See the [Curator documentation](https://github.com/wortmanb/curator) for integration details.
+
+## Why "elastic-deepfreeze-*"?
+
+The package names include the `elastic-` prefix to prevent dependency confusion attacks. The original names (`deepfreeze-core`, `deepfreeze-cli`) were vulnerable to name squatting on PyPI. By using a scoped prefix that we control, we ensure that `pip install` will fetch the authentic packages from the Elastic organization.
 
 ## Development
 
@@ -86,8 +90,8 @@ git clone https://github.com/elastic/deepfreeze.git
 cd deepfreeze
 
 # Install both packages in development mode
-pip install -e packages/deepfreeze-core[dev]
-pip install -e packages/deepfreeze-cli[dev]
+pip install -e packages/elastic-deepfreeze-core[dev]
+pip install -e packages/elastic-deepfreeze-cli[dev]
 
 # Run tests
 pytest tests/
@@ -98,14 +102,14 @@ pytest tests/
 ```
 deepfreeze/
 ├── packages/
-│   ├── deepfreeze-core/     # Core library
-│   │   └── deepfreeze_core/
-│   └── deepfreeze-cli/      # Standalone CLI
-│       └── deepfreeze/
+│   ├── elastic-deepfreeze-core/     # Core library
+│   │   └── elastic_deepfreeze_core/
+│   └── elastic-deepfreeze-cli/      # Standalone CLI
+│       └── elastic_deepfreeze/
 ├── tests/
-│   ├── core/                # Core library tests
-│   └── cli/                 # CLI tests
-└── .github/workflows/       # CI/CD
+│   ├── core/                        # Core library tests
+│   └── cli/                         # CLI tests
+└── .github/workflows/               # CI/CD
 ```
 
 ## License

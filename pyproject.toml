@@ -12,14 +12,14 @@ requires-python = ">=3.8"
 
 [tool.hatch.envs.default]
 dependencies = [
-    "packages/deepfreeze-core",
-    "packages/deepfreeze-cli",
+    "packages/elastic-deepfreeze-core",
+    "packages/elastic-deepfreeze-cli",
 ]
 
 [tool.hatch.envs.test]
 dependencies = [
-    "packages/deepfreeze-core",
-    "packages/deepfreeze-cli",
+    "packages/elastic-deepfreeze-core",
+    "packages/elastic-deepfreeze-cli",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "moto[s3]>=4.0.0",
@@ -29,7 +29,7 @@ dependencies = [
 all = "pytest tests/ -v"
 core = "pytest tests/core/ -v"
 cli = "pytest tests/cli/ -v"
-cov = "pytest tests/ --cov=deepfreeze_core --cov=deepfreeze --cov-report=term-missing"
+cov = "pytest tests/ --cov=elastic_deepfreeze_core --cov=elastic_deepfreeze --cov-report=term-missing"
 
 [tool.black]
 line-length = 88
@@ -38,7 +38,5 @@ target-version = ["py38", "py39", "py310", "py311", "py312"]
 [tool.ruff]
 line-length = 88
 target-version = "py38"
-
-[tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4"]
 ignore = ["E501"]

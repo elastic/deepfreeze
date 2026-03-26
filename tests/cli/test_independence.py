@@ -20,9 +20,9 @@ class TestNoCuratorImports:
 
     def test_scan_all_python_files_for_curator_imports(self):
         """Scan all Python files in deepfreeze package for curator imports using AST"""
-        import deepfreeze
+        import elastic_deepfreeze
 
-        package_dir = Path(deepfreeze.__file__).parent
+        package_dir = Path(elastic_deepfreeze.__file__).parent
         curator_imports = []
 
         for py_file in package_dir.rglob("*.py"):
@@ -64,14 +64,14 @@ class TestPackageImportsStandalone:
 
     def test_import_deepfreeze(self):
         """Test that import deepfreeze works"""
-        import deepfreeze
+        import elastic_deepfreeze
 
-        assert deepfreeze is not None
-        assert hasattr(deepfreeze, "__version__")
+        assert elastic_deepfreeze is not None
+        assert hasattr(elastic_deepfreeze, "__version__")
 
     def test_import_deepfreeze_exceptions(self):
         """Test that exception classes can be imported from deepfreeze"""
-        from deepfreeze import (
+        from elastic_deepfreeze import (
             ActionError,
             DeepfreezeException,
         )
@@ -80,8 +80,8 @@ class TestPackageImportsStandalone:
         assert issubclass(ActionError, DeepfreezeException)
 
     def test_import_deepfreeze_constants(self):
-        """Test that constants can be imported from deepfreeze_core.constants"""
-        from deepfreeze_core.constants import (
+        """Test that constants can be imported from elastic_deepfreeze_core.constants"""
+        from elastic_deepfreeze_core.constants import (
             PROVIDERS,
             SETTINGS_ID,
             STATUS_INDEX,
@@ -93,7 +93,7 @@ class TestPackageImportsStandalone:
 
     def test_import_deepfreeze_helpers(self):
         """Test that helper classes can be imported from deepfreeze"""
-        from deepfreeze import (
+        from elastic_deepfreeze import (
             Deepfreeze,
             Repository,
             Settings,
@@ -105,7 +105,7 @@ class TestPackageImportsStandalone:
 
     def test_import_deepfreeze_actions(self):
         """Test that action classes can be imported from deepfreeze"""
-        from deepfreeze import (
+        from elastic_deepfreeze import (
             Cleanup,
             Refreeze,
             RepairMetadata,
@@ -124,16 +124,16 @@ class TestPackageImportsStandalone:
         assert RepairMetadata is not None
 
     def test_import_deepfreeze_cli(self):
-        """Test that deepfreeze.cli imports correctly"""
+        """Test that elastic_deepfreeze.cli imports correctly"""
         import click
-        from deepfreeze.cli.main import cli
+        from elastic_deepfreeze.cli.main import cli
 
         assert cli is not None
         assert isinstance(cli, click.core.Group)
 
     def test_import_deepfreeze_validators(self):
-        """Test that deepfreeze.validators imports correctly"""
-        from deepfreeze.validators import (
+        """Test that elastic_deepfreeze.validators imports correctly"""
+        from elastic_deepfreeze.validators import (
             ACTION_SCHEMAS,
             get_schema,
             validate_options,
@@ -144,8 +144,8 @@ class TestPackageImportsStandalone:
         assert get_schema is not None
 
     def test_import_deepfreeze_config(self):
-        """Test that deepfreeze.config imports correctly"""
-        from deepfreeze.config import (
+        """Test that elastic_deepfreeze.config imports correctly"""
+        from elastic_deepfreeze.config import (
             get_elasticsearch_config,
             get_logging_config,
             load_config,
@@ -162,7 +162,7 @@ class TestCLIFunctionality:
     def test_cli_help(self):
         """Test deepfreeze --help works"""
         from click.testing import CliRunner
-        from deepfreeze.cli.main import cli
+        from elastic_deepfreeze.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["--help"])
@@ -173,7 +173,7 @@ class TestCLIFunctionality:
     def test_cli_version(self):
         """Test deepfreeze --version works"""
         from click.testing import CliRunner
-        from deepfreeze.cli.main import cli
+        from elastic_deepfreeze.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
@@ -184,7 +184,7 @@ class TestCLIFunctionality:
     def test_cli_setup_help(self):
         """Test deepfreeze setup --help works"""
         from click.testing import CliRunner
-        from deepfreeze.cli.main import cli
+        from elastic_deepfreeze.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["setup", "--help"])
@@ -196,7 +196,7 @@ class TestCLIFunctionality:
     def test_cli_status_help(self):
         """Test deepfreeze status --help works"""
         from click.testing import CliRunner
-        from deepfreeze.cli.main import cli
+        from elastic_deepfreeze.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["status", "--help"])
@@ -207,7 +207,7 @@ class TestCLIFunctionality:
     def test_cli_rotate_help(self):
         """Test deepfreeze rotate --help works"""
         from click.testing import CliRunner
-        from deepfreeze.cli.main import cli
+        from elastic_deepfreeze.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["rotate", "--help"])
@@ -218,7 +218,7 @@ class TestCLIFunctionality:
     def test_cli_thaw_help(self):
         """Test deepfreeze thaw --help works"""
         from click.testing import CliRunner
-        from deepfreeze.cli.main import cli
+        from elastic_deepfreeze.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["thaw", "--help"])
@@ -230,7 +230,7 @@ class TestCLIFunctionality:
     def test_cli_refreeze_help(self):
         """Test deepfreeze refreeze --help works"""
         from click.testing import CliRunner
-        from deepfreeze.cli.main import cli
+        from elastic_deepfreeze.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["refreeze", "--help"])
@@ -241,7 +241,7 @@ class TestCLIFunctionality:
     def test_cli_cleanup_help(self):
         """Test deepfreeze cleanup --help works"""
         from click.testing import CliRunner
-        from deepfreeze.cli.main import cli
+        from elastic_deepfreeze.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["cleanup", "--help"])
@@ -251,7 +251,7 @@ class TestCLIFunctionality:
     def test_cli_repair_metadata_help(self):
         """Test deepfreeze repair-metadata --help works"""
         from click.testing import CliRunner
-        from deepfreeze.cli.main import cli
+        from elastic_deepfreeze.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["repair-metadata", "--help"])
@@ -262,7 +262,7 @@ class TestCLIFunctionality:
     def test_all_commands_registered(self):
         """Test that all expected commands are registered"""
         from click.testing import CliRunner
-        from deepfreeze.cli.main import cli
+        from elastic_deepfreeze.cli.main import cli
 
         runner = CliRunner()
         result = runner.invoke(cli, ["--help"])
@@ -287,27 +287,27 @@ class TestModuleIndependence:
     @pytest.mark.parametrize(
         "module_name",
         [
-            "deepfreeze",
-            "deepfreeze.config",
-            "deepfreeze.cli",
-            "deepfreeze.cli.main",
-            "deepfreeze.validators",
-            "deepfreeze.defaults",
-            "deepfreeze_core",
-            "deepfreeze_core.exceptions",
-            "deepfreeze_core.constants",
-            "deepfreeze_core.helpers",
-            "deepfreeze_core.s3client",
-            "deepfreeze_core.esclient",
-            "deepfreeze_core.utilities",
-            "deepfreeze_core.actions",
-            "deepfreeze_core.actions.setup",
-            "deepfreeze_core.actions.status",
-            "deepfreeze_core.actions.rotate",
-            "deepfreeze_core.actions.thaw",
-            "deepfreeze_core.actions.refreeze",
-            "deepfreeze_core.actions.cleanup",
-            "deepfreeze_core.actions.repair_metadata",
+            "elastic_deepfreeze",
+            "elastic_deepfreeze.config",
+            "elastic_deepfreeze.cli",
+            "elastic_deepfreeze.cli.main",
+            "elastic_deepfreeze.validators",
+            "elastic_deepfreeze.defaults",
+            "elastic_deepfreeze_core",
+            "elastic_deepfreeze_core.exceptions",
+            "elastic_deepfreeze_core.constants",
+            "elastic_deepfreeze_core.helpers",
+            "elastic_deepfreeze_core.s3client",
+            "elastic_deepfreeze_core.esclient",
+            "elastic_deepfreeze_core.utilities",
+            "elastic_deepfreeze_core.actions",
+            "elastic_deepfreeze_core.actions.setup",
+            "elastic_deepfreeze_core.actions.status",
+            "elastic_deepfreeze_core.actions.rotate",
+            "elastic_deepfreeze_core.actions.thaw",
+            "elastic_deepfreeze_core.actions.refreeze",
+            "elastic_deepfreeze_core.actions.cleanup",
+            "elastic_deepfreeze_core.actions.repair_metadata",
         ],
     )
     def test_module_imports_independently(self, module_name):
@@ -326,10 +326,10 @@ class TestBinaryBuildConfiguration:
         """Verify pyproject.toml has CLI entry point defined"""
         from pathlib import Path
 
-        import deepfreeze
+        import elastic_deepfreeze
 
         # Find the deepfreeze package's pyproject.toml (in the parent of package dir)
-        package_dir = Path(deepfreeze.__file__).parent
+        package_dir = Path(elastic_deepfreeze.__file__).parent
 
         # The pyproject.toml should be at the same level as the package
         # Since __init__.py is at deepfreeze/, pyproject.toml is at deepfreeze/../pyproject.toml
@@ -343,21 +343,21 @@ class TestBinaryBuildConfiguration:
                     "[project.scripts]" in content
                 ), "No CLI entry point section in pyproject.toml"
                 assert (
-                    "deepfreeze" in content
+                    "elastic_deepfreeze" in content
                 ), "deepfreeze CLI entry point not found in pyproject.toml"
         else:
             # If pyproject.toml not at expected location, just verify CLI works
-            from deepfreeze.cli.main import cli
+            from elastic_deepfreeze.cli.main import cli
 
             assert cli is not None
 
     def test_package_has_version(self):
         """Verify package has version defined"""
-        import deepfreeze
+        import elastic_deepfreeze
 
-        assert hasattr(deepfreeze, "__version__")
-        assert deepfreeze.__version__ is not None
-        assert len(deepfreeze.__version__) > 0
+        assert hasattr(elastic_deepfreeze, "__version__")
+        assert elastic_deepfreeze.__version__ is not None
+        assert len(elastic_deepfreeze.__version__) > 0
 
 
 class TestVerificationScript:
@@ -365,9 +365,9 @@ class TestVerificationScript:
 
     def test_verification_script_checks_imports_with_ast(self):
         """Use AST to verify no curator imports (ignores docstrings and comments)"""
-        import deepfreeze
+        import elastic_deepfreeze
 
-        package_dir = Path(deepfreeze.__file__).parent
+        package_dir = Path(elastic_deepfreeze.__file__).parent
         curator_imports = []
 
         for py_file in package_dir.rglob("*.py"):
@@ -394,9 +394,9 @@ class TestVerificationScript:
 
     def test_no_es_client_builder_dependency_in_imports(self):
         """Verify no actual import statements use es_client.builder"""
-        import deepfreeze
+        import elastic_deepfreeze
 
-        package_dir = Path(deepfreeze.__file__).parent
+        package_dir = Path(elastic_deepfreeze.__file__).parent
         es_client_imports = []
 
         for py_file in package_dir.rglob("*.py"):

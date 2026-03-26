@@ -10,16 +10,16 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
-from deepfreeze_core.constants import (
+from elastic_deepfreeze_core.constants import (
     STATUS_INDEX,
     THAW_STATE_ACTIVE,
     THAW_STATE_FROZEN,
     THAW_STATE_THAWED,
     THAW_STATE_THAWING,
 )
-from deepfreeze_core.exceptions import MissingIndexError, MissingSettingsError
-from deepfreeze_core.s3client import s3_client_factory
-from deepfreeze_core.utilities import (
+from elastic_deepfreeze_core.exceptions import MissingIndexError, MissingSettingsError
+from elastic_deepfreeze_core.s3client import s3_client_factory
+from elastic_deepfreeze_core.utilities import (
     get_all_repos,
     get_settings,
 )
@@ -42,7 +42,7 @@ class RepairMetadata:
         do_action: Scan and repair discrepancies
 
     :example:
-        >>> from deepfreeze_core.actions import RepairMetadata
+        >>> from elastic_deepfreeze_core.actions import RepairMetadata
         >>> repair = RepairMetadata(client)
         >>> repair.do_action()
     """
@@ -250,7 +250,7 @@ class RepairMetadata:
 
         try:
             # Get the repo from status index and update
-            from deepfreeze_core.helpers import Repository
+            from elastic_deepfreeze_core.helpers import Repository
 
             repo = Repository.from_elasticsearch(
                 self.client, discrepancy["repo"], STATUS_INDEX

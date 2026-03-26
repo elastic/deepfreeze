@@ -19,10 +19,10 @@ import pytest
 class TestCreateEsClient:
     """Tests for create_es_client function"""
 
-    @patch("deepfreeze_core.esclient.Elasticsearch")
+    @patch("elastic_deepfreeze_core.esclient.Elasticsearch")
     def test_create_with_username_password(self, mock_es_class):
         """Test creating client with username/password authentication"""
-        from deepfreeze import create_es_client
+        from elastic_deepfreeze import create_es_client
 
         # Mock successful connection
         mock_client = MagicMock()
@@ -45,10 +45,10 @@ class TestCreateEsClient:
         assert call_kwargs["basic_auth"] == ("elastic", "changeme")
         mock_client.cluster.health.assert_called_once()
 
-    @patch("deepfreeze_core.esclient.Elasticsearch")
+    @patch("elastic_deepfreeze_core.esclient.Elasticsearch")
     def test_create_with_api_key(self, mock_es_class):
         """Test creating client with API key authentication"""
-        from deepfreeze import create_es_client
+        from elastic_deepfreeze import create_es_client
 
         mock_client = MagicMock()
         mock_client.cluster.health.return_value = {
@@ -66,10 +66,10 @@ class TestCreateEsClient:
         call_kwargs = mock_es_class.call_args[1]
         assert call_kwargs["api_key"] == "base64-encoded-key"
 
-    @patch("deepfreeze_core.esclient.Elasticsearch")
+    @patch("elastic_deepfreeze_core.esclient.Elasticsearch")
     def test_create_with_cloud_id(self, mock_es_class):
         """Test creating client with Elastic Cloud ID"""
-        from deepfreeze import create_es_client
+        from elastic_deepfreeze import create_es_client
 
         mock_client = MagicMock()
         mock_client.cluster.health.return_value = {
@@ -87,10 +87,10 @@ class TestCreateEsClient:
         call_kwargs = mock_es_class.call_args[1]
         assert call_kwargs["cloud_id"] == "deployment:base64string"
 
-    @patch("deepfreeze_core.esclient.Elasticsearch")
+    @patch("elastic_deepfreeze_core.esclient.Elasticsearch")
     def test_create_with_certificates(self, mock_es_class):
         """Test creating client with SSL certificates"""
-        from deepfreeze import create_es_client
+        from elastic_deepfreeze import create_es_client
 
         mock_client = MagicMock()
         mock_client.cluster.health.return_value = {
@@ -114,7 +114,7 @@ class TestCreateEsClient:
 
     def test_create_missing_hosts_and_cloud_id(self):
         """Test that ValueError is raised when neither hosts nor cloud_id provided"""
-        from deepfreeze import create_es_client
+        from elastic_deepfreeze import create_es_client
 
         with pytest.raises(ValueError) as exc_info:
             create_es_client(username="user", password="pass")
@@ -125,10 +125,10 @@ class TestCreateEsClient:
 class TestConnectionValidation:
     """Tests for connection validation"""
 
-    @patch("deepfreeze_core.esclient.Elasticsearch")
+    @patch("elastic_deepfreeze_core.esclient.Elasticsearch")
     def test_connection_validation_success(self, mock_es_class):
         """Test that connection validation calls cluster health"""
-        from deepfreeze import create_es_client
+        from elastic_deepfreeze import create_es_client
 
         mock_client = MagicMock()
         mock_client.cluster.health.return_value = {
@@ -145,10 +145,10 @@ class TestConnectionValidation:
 
         mock_client.cluster.health.assert_called_with(timeout="5s")
 
-    @patch("deepfreeze_core.esclient.Elasticsearch")
+    @patch("elastic_deepfreeze_core.esclient.Elasticsearch")
     def test_authentication_failure(self, mock_es_class):
         """Test that authentication failure raises ActionError"""
-        from deepfreeze import ActionError, create_es_client
+        from elastic_deepfreeze import ActionError, create_es_client
 
         # Create a mock AuthenticationException that behaves properly
         mock_auth_exception = MagicMock()
@@ -176,10 +176,10 @@ class TestConnectionValidation:
                 password="credentials",
             )
 
-    @patch("deepfreeze_core.esclient.Elasticsearch")
+    @patch("elastic_deepfreeze_core.esclient.Elasticsearch")
     def test_generic_exception_raises_action_error(self, mock_es_class):
         """Test that generic exceptions are converted to ActionError"""
-        from deepfreeze import ActionError, create_es_client
+        from elastic_deepfreeze import ActionError, create_es_client
 
         mock_client = MagicMock()
         mock_client.cluster.health.side_effect = Exception("Something went wrong")
@@ -198,7 +198,7 @@ class TestYamlConfigLoading:
 
     def test_load_config_from_yaml(self):
         """Test loading configuration from YAML file"""
-        from deepfreeze import load_config_from_yaml
+        from elastic_deepfreeze import load_config_from_yaml
 
         yaml_content = """
 elasticsearch:
@@ -231,7 +231,7 @@ logging:
 
     def test_load_config_file_not_found(self):
         """Test that missing file raises ActionError"""
-        from deepfreeze import ActionError, load_config_from_yaml
+        from elastic_deepfreeze import ActionError, load_config_from_yaml
 
         with pytest.raises(ActionError) as exc_info:
             load_config_from_yaml("/nonexistent/path/config.yml")
@@ -240,7 +240,7 @@ logging:
 
     def test_load_config_invalid_yaml(self):
         """Test that invalid YAML raises ActionError"""
-        from deepfreeze import ActionError, load_config_from_yaml
+        from elastic_deepfreeze import ActionError, load_config_from_yaml
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             f.write("invalid: yaml: content: [")
@@ -254,10 +254,10 @@ logging:
         finally:
             os.unlink(config_path)
 
-    @patch("deepfreeze_core.esclient.Elasticsearch")
+    @patch("elastic_deepfreeze_core.esclient.Elasticsearch")
     def test_create_client_from_config(self, mock_es_class):
         """Test creating client directly from config file"""
-        from deepfreeze import create_es_client_from_config
+        from elastic_deepfreeze import create_es_client_from_config
 
         mock_client = MagicMock()
         mock_client.cluster.health.return_value = {
@@ -293,7 +293,7 @@ class TestValidateConnection:
 
     def test_validate_connection_returns_cluster_info(self):
         """Test that validate_connection returns cluster information"""
-        from deepfreeze import validate_connection
+        from elastic_deepfreeze import validate_connection
 
         mock_client = MagicMock()
         mock_client.cluster.health.return_value = {
@@ -316,10 +316,10 @@ class TestValidateConnection:
 class TestESClientWrapper:
     """Tests for ESClientWrapper class"""
 
-    @patch("deepfreeze_core.esclient.Elasticsearch")
+    @patch("elastic_deepfreeze_core.esclient.Elasticsearch")
     def test_wrapper_init_with_params(self, mock_es_class):
         """Test ESClientWrapper initialization with direct parameters"""
-        from deepfreeze import ESClientWrapper
+        from elastic_deepfreeze import ESClientWrapper
 
         mock_client = MagicMock()
         mock_client.cluster.health.return_value = {
@@ -343,10 +343,10 @@ class TestESClientWrapper:
         assert wrapper.cluster_status == "green"
         assert wrapper.version == "8.11.0"
 
-    @patch("deepfreeze_core.esclient.Elasticsearch")
+    @patch("elastic_deepfreeze_core.esclient.Elasticsearch")
     def test_wrapper_is_healthy(self, mock_es_class):
         """Test ESClientWrapper.is_healthy() method"""
-        from deepfreeze import ESClientWrapper
+        from elastic_deepfreeze import ESClientWrapper
 
         mock_client = MagicMock()
         mock_client.cluster.health.return_value = {
@@ -367,7 +367,7 @@ class TestESClientWrapper:
 
     def test_wrapper_requires_config_or_params(self):
         """Test that ESClientWrapper raises error without config or params"""
-        from deepfreeze import ESClientWrapper
+        from elastic_deepfreeze import ESClientWrapper
 
         with pytest.raises(ValueError) as exc_info:
             ESClientWrapper()

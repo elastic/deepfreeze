@@ -9,11 +9,11 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 
-from deepfreeze_core.constants import STATUS_INDEX
-from deepfreeze_core.exceptions import PreconditionError
-from deepfreeze_core.helpers import Settings
-from deepfreeze_core.s3client import s3_client_factory
-from deepfreeze_core.utilities import (
+from elastic_deepfreeze_core.constants import STATUS_INDEX
+from elastic_deepfreeze_core.exceptions import PreconditionError
+from elastic_deepfreeze_core.helpers import Settings
+from elastic_deepfreeze_core.s3client import s3_client_factory
+from elastic_deepfreeze_core.utilities import (
     create_or_update_ilm_policy,
     create_repo,
     ensure_settings_index,
@@ -53,7 +53,7 @@ class Setup:
         do_action: Perform create initial bucket and repository.
 
     :example:
-        >>> from deepfreeze_core.actions import Setup
+        >>> from elastic_deepfreeze_core.actions import Setup
         >>> setup = Setup(client, repo_name_prefix="deepfreeze", bucket_name_prefix="deepfreeze",
         ...               base_path_prefix="snapshots", canned_acl="private",
         ...               storage_class="intelligent_tiering", provider="aws", rotate_by="path",

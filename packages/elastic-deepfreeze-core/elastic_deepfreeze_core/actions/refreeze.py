@@ -10,19 +10,19 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
-from deepfreeze_core.constants import (
+from elastic_deepfreeze_core.constants import (
     STATUS_INDEX,
     THAW_STATUS_COMPLETED,
     THAW_STATUS_REFROZEN,
 )
-from deepfreeze_core.exceptions import (
+from elastic_deepfreeze_core.exceptions import (
     ActionError,
     MissingIndexError,
     MissingSettingsError,
 )
-from deepfreeze_core.helpers import Repository
-from deepfreeze_core.s3client import s3_client_factory
-from deepfreeze_core.utilities import (
+from elastic_deepfreeze_core.helpers import Repository
+from elastic_deepfreeze_core.s3client import s3_client_factory
+from elastic_deepfreeze_core.utilities import (
     get_all_indices_in_repo,
     get_repositories_by_names,
     get_settings,
@@ -50,7 +50,7 @@ class Refreeze:
         do_action: Perform the refreeze operation
 
     :example:
-        >>> from deepfreeze_core.actions import Refreeze
+        >>> from elastic_deepfreeze_core.actions import Refreeze
         >>> refreeze = Refreeze(client, request_id="abc12345")
         >>> refreeze.do_action()
     """

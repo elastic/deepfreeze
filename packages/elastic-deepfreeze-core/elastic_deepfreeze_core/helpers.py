@@ -14,7 +14,7 @@ from typing import Optional
 
 from elasticsearch8 import Elasticsearch
 
-from deepfreeze_core.constants import (
+from elastic_deepfreeze_core.constants import (
     STATUS_INDEX,
     THAW_STATE_ACTIVE,
     THAW_STATE_EXPIRED,

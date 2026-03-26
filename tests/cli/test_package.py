@@ -13,36 +13,36 @@ from pathlib import Path
 
 def test_package_imports_successfully():
     """Test that the deepfreeze package can be imported"""
-    import deepfreeze
+    import elastic_deepfreeze
 
-    assert deepfreeze is not None
-    assert hasattr(deepfreeze, "__version__")
-    assert len(deepfreeze.__version__) > 0  # Version should be a non-empty string
+    assert elastic_deepfreeze is not None
+    assert hasattr(elastic_deepfreeze, "__version__")
+    assert len(elastic_deepfreeze.__version__) > 0  # Version should be a non-empty string
 
 
 def test_submodules_import_successfully():
     """Test that all submodules can be imported"""
-    import deepfreeze.cli
-    import deepfreeze.config
-    import deepfreeze.validators
-    import deepfreeze_core.actions
-    import deepfreeze_core.constants
-    import deepfreeze_core.exceptions
+    import elastic_deepfreeze.cli
+    import elastic_deepfreeze.config
+    import elastic_deepfreeze.validators
+    import elastic_deepfreeze_core.actions
+    import elastic_deepfreeze_core.constants
+    import elastic_deepfreeze_core.exceptions
 
-    assert deepfreeze_core.exceptions is not None
-    assert deepfreeze_core.constants is not None
-    assert deepfreeze.cli is not None
-    assert deepfreeze_core.actions is not None
-    assert deepfreeze.config is not None
-    assert deepfreeze.validators is not None
+    assert elastic_deepfreeze_core.exceptions is not None
+    assert elastic_deepfreeze_core.constants is not None
+    assert elastic_deepfreeze.cli is not None
+    assert elastic_deepfreeze_core.actions is not None
+    assert elastic_deepfreeze.config is not None
+    assert elastic_deepfreeze.validators is not None
 
 
 def test_no_curator_imports_in_package():
     """Test that no curator imports are present in the package"""
     # Get the package directory
-    import deepfreeze
+    import elastic_deepfreeze
 
-    package_dir = Path(deepfreeze.__file__).parent
+    package_dir = Path(elastic_deepfreeze.__file__).parent
 
     # Check all Python files in the package
     curator_imports_found = []
@@ -77,7 +77,7 @@ def test_no_curator_imports_in_package():
 def test_entry_point_registration():
     """Test that the CLI entry point is properly configured"""
     import click
-    from deepfreeze.cli.main import cli
+    from elastic_deepfreeze.cli.main import cli
 
     assert cli is not None
     assert isinstance(cli, click.core.Group)

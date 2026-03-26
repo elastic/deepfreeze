@@ -1,17 +1,22 @@
-# Deepfreeze Core
+# Elastic Deepfreeze Core
 
 Core library for Elasticsearch S3 Glacier archival operations.
 
 ## Overview
 
 This package provides the shared functionality for deepfreeze operations, used by both:
-- **deepfreeze-cli**: Standalone CLI tool
+- **elastic-deepfreeze-cli**: Standalone CLI tool
 - **elasticsearch-curator**: Full Curator with deepfreeze support
 
 ## Installation
 
 ```bash
-pip install deepfreeze-core
+pip install elastic-deepfreeze-core
+```
+
+Or from source:
+```bash
+pip install git+https://github.com/elastic/deepfreeze.git#subdirectory=packages/elastic-deepfreeze-core
 ```
 
 ## Usage
@@ -19,7 +24,7 @@ pip install deepfreeze-core
 This package is typically used as a dependency by other packages. For direct usage:
 
 ```python
-from deepfreeze_core import (
+from elastic_deepfreeze_core import (
     Setup, Status, Rotate, Thaw, Refreeze, Cleanup, RepairMetadata,
     s3_client_factory, create_es_client
 )
@@ -58,6 +63,10 @@ pip install -e ".[dev]"
 pytest
 
 # Format code
-black deepfreeze_core/
-ruff check deepfreeze_core/
+black elastic_deepfreeze_core/
+ruff check elastic_deepfreeze_core/
 ```
+
+## Why "elastic-deepfreeze-core"?
+
+The package name includes the `elastic-` prefix to prevent dependency confusion attacks. See the [main README](../../README.md) for details.

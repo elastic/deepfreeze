@@ -11,19 +11,19 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
-from deepfreeze_core.constants import (
+from elastic_deepfreeze_core.constants import (
     STATUS_INDEX,
     THAW_STATE_EXPIRED,
     THAW_STATUS_COMPLETED,
     THAW_STATUS_FAILED,
     THAW_STATUS_REFROZEN,
 )
-from deepfreeze_core.exceptions import (
+from elastic_deepfreeze_core.exceptions import (
     MissingIndexError,
     MissingSettingsError,
 )
-from deepfreeze_core.s3client import s3_client_factory
-from deepfreeze_core.utilities import (
+from elastic_deepfreeze_core.s3client import s3_client_factory
+from elastic_deepfreeze_core.utilities import (
     get_matching_repos,
     get_settings,
     is_policy_safe_to_delete,
@@ -44,7 +44,7 @@ class Cleanup:
         do_action: Perform the cleanup operation
 
     :example:
-        >>> from deepfreeze_core.actions import Cleanup
+        >>> from elastic_deepfreeze_core.actions import Cleanup
         >>> cleanup = Cleanup(client)
         >>> cleanup.do_action()
     """

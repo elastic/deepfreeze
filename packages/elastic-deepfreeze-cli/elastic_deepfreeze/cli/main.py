@@ -10,10 +10,10 @@ from datetime import datetime
 from pathlib import Path
 
 import click
-from deepfreeze_core import ActionError, DeepfreezeException, create_es_client
+from elastic_deepfreeze_core import ActionError, DeepfreezeException, create_es_client
 
-from deepfreeze import __version__
-from deepfreeze.config import (
+from elastic_deepfreeze import __version__
+from elastic_deepfreeze.config import (
     configure_logging,
     get_elasticsearch_config,
     load_config,
@@ -302,7 +302,7 @@ def setup(
       - The template will be updated to use the specified ILM policy
       - Ensures new indices will automatically use the deepfreeze ILM policy
     """
-    from deepfreeze_core.actions import Setup
+    from elastic_deepfreeze_core.actions import Setup
 
     client = get_client_from_context(ctx)
 
@@ -374,7 +374,7 @@ def rotate(
     """
     Deepfreeze rotation (add a new repo and age oldest off)
     """
-    from deepfreeze_core.actions import Rotate
+    from elastic_deepfreeze_core.actions import Rotate
 
     client = get_client_from_context(ctx)
 
@@ -465,7 +465,7 @@ def status(
     By default, all sections are displayed. Use section flags (-r, -t, -b, -i, -c) to show specific sections only.
     Multiple section flags can be combined.
     """
-    from deepfreeze_core.actions import Status
+    from elastic_deepfreeze_core.actions import Status
 
     client = get_client_from_context(ctx)
 
@@ -516,7 +516,7 @@ def cleanup(
     """
     Clean up expired thawed repositories
     """
-    from deepfreeze_core.actions import Cleanup
+    from elastic_deepfreeze_core.actions import Cleanup
 
     client = get_client_from_context(ctx)
 
@@ -582,7 +582,7 @@ def refreeze(
 
       deepfreeze refreeze
     """
-    from deepfreeze_core.actions import Refreeze
+    from elastic_deepfreeze_core.actions import Refreeze
 
     client = get_client_from_context(ctx)
 
@@ -735,7 +735,7 @@ def thaw(
     """
     from datetime import datetime as dt
 
-    from deepfreeze_core.actions import Thaw
+    from elastic_deepfreeze_core.actions import Thaw
 
     # Validate mutual exclusivity
     # Note: check_status can be None (not provided), "" (flag without value), or a string ID
@@ -833,7 +833,7 @@ def repair_metadata(ctx, porcelain):
 
     Use --dry-run to see what would be changed without making modifications.
     """
-    from deepfreeze_core.actions import RepairMetadata
+    from elastic_deepfreeze_core.actions import RepairMetadata
 
     client = get_client_from_context(ctx)
 
