@@ -8,7 +8,7 @@
  */
 module.exports = {
   testEnvironment: 'node',
-  roots: ['<rootDir>/common', '<rootDir>/server/es'],
+  roots: ['<rootDir>/common', '<rootDir>/server/es', '<rootDir>/server/audit'],
   testMatch: ['**/__tests__/**/*.test.ts'],
   transform: {
     '^.+\\.tsx?$': [

@@ -13,6 +13,7 @@
   },
   "include": [
     "common/**/*.ts",
-    "server/es/**/*.ts"
+    "server/es/**/*.ts",
+    "server/audit/**/*.ts"
   ]
 }
