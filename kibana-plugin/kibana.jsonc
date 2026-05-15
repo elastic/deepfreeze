@@ -1,0 +1,21 @@
+{
+  "type": "plugin",
+  "id": "@kbn/deepfreeze-plugin",
+  "owner": "@elastic/deepfreeze",
+  "description": "Manage Elasticsearch snapshot lifecycle to S3 Glacier / Azure Archive / GCS Coldline cold storage.",
+  "plugin": {
+    "id": "deepfreeze",
+    "server": true,
+    "browser": true,
+    "configPath": ["deepfreeze"],
+    "requiredPlugins": [
+      "features",
+      "taskManager"
+    ],
+    "optionalPlugins": [
+      "security",
+      "usageCollection"
+    ],
+    "requiredBundles": []
+  }
+}

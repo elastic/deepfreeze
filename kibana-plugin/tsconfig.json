@@ -1,0 +1,29 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "target/types"
+  },
+  "include": [
+    "common/**/*",
+    "server/**/*",
+    "public/**/*",
+    "../../typings/**/*"
+  ],
+  "exclude": [
+    "target/**/*",
+    "**/*.test.ts",
+    "**/__tests__/**/*"
+  ],
+  "kbn_references": [
+    "@kbn/core",
+    "@kbn/config-schema",
+    "@kbn/features-plugin",
+    "@kbn/task-manager-plugin",
+    {
+      "path": "../security/tsconfig.json"
+    },
+    {
+      "path": "../usage_collection/tsconfig.json"
+    }
+  ]
+}
