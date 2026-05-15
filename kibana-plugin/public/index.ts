@@ -1,8 +1,8 @@
 import type { PluginInitializerContext } from '@kbn/core/public';
 
+import { DeepfreezePlugin } from './plugin';
+
 export type { DeepfreezePluginSetup, DeepfreezePluginStart } from './types';
 
-export async function plugin(initializerContext: PluginInitializerContext) {
-  const { DeepfreezePlugin } = await import('./plugin');
-  return new DeepfreezePlugin(initializerContext);
-}
+export const plugin = (initializerContext: PluginInitializerContext) =>
+  new DeepfreezePlugin(initializerContext);
