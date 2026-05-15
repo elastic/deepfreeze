@@ -1,84 +1,124 @@
 # Development
 
-## Layout assumption
+## Layout
 
-Kibana plugins normally live inside a Kibana checkout. This plugin's
-source-of-truth is here (under `deepfreeze/kibana-plugin/`), but to
-actually run/build/test it you point a Kibana checkout at this directory.
-
-Recommended layout:
+This plugin's source-of-truth lives here (`deepfreeze/kibana-plugin/`).
+To build, type-check, or run it, Kibana's tooling needs to see it as an
+in-tree plugin — so we mirror the source into a sibling Kibana checkout
+at `x-pack/platform/plugins/private/deepfreeze`.
 
 ```
 ~/git/
-├── deepfreeze/                ← this repo
-│   └── kibana-plugin/
-└── kibana/                    ← github.com/elastic/kibana, branch 9.x
-    └── x-pack/plugins/
-        └── deepfreeze/        ← symlink → ../../../deepfreeze/kibana-plugin
+├── deepfreeze/                                 ← canonical source
+│   └── kibana-plugin/                          ← edit files here
+│       └── scripts/sync-to-kibana.sh
+└── kibana/                                     ← Kibana 9.x checkout
+    └── x-pack/platform/plugins/private/
+        └── deepfreeze/                         ← rsync target
 ```
 
+### Why rsync, not a symlink
+
+Kibana's plugin discovery uses `git ls-files` from the Kibana repo root.
+git treats a symlink as a single entry and does **not** descend into it,
+so a symlinked plugin's `kibana.jsonc` is invisible to discovery. An
+rsync'd real directory is discovered correctly.
+
+## One-time setup
+
 ```sh
-cd ~/git/kibana/x-pack/plugins
-ln -s ../../../deepfreeze/kibana-plugin deepfreeze
+# 1. Install nvm + Kibana's Node version
+curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh"
+
+# 2. Clone Kibana 9.x
+cd ~/git
+git clone --single-branch --branch 9.4 https://github.com/elastic/kibana.git
+
+# 3. Use the Node version Kibana pins
+cd kibana
+nvm install   # reads .nvmrc
+
+# 4. Enable yarn classic
+corepack enable
+corepack prepare yarn@1.22.22 --activate
+
+# 5. Sync this plugin into Kibana
+cd ~/git/deepfreeze
+kibana-plugin/scripts/sync-to-kibana.sh
+
+# 6. Bootstrap Kibana (discovers the plugin, links it into node_modules,
+#    updates tsconfig.base.json and the root package.json)
+cd ~/git/kibana
+yarn kbn bootstrap --force-install
 ```
 
-Kibana's build tooling will then treat the plugin as if it lived in-tree.
+Bootstrap takes 3–10 minutes on a fast machine, longer on first run.
 
-## Toolchain setup
+## Iteration loop
 
-Inside your Kibana checkout:
+After editing files under `deepfreeze/kibana-plugin/`:
 
 ```sh
-nvm use                # uses .nvmrc, currently Node 20.x for Kibana 9
-yarn kbn bootstrap
+# Re-sync (fast — only changed files)
+cd ~/git/deepfreeze && kibana-plugin/scripts/sync-to-kibana.sh
+
+# Type-check
+cd ~/git/kibana && node scripts/type_check \
+  --project x-pack/platform/plugins/private/deepfreeze/tsconfig.json
+
+# Unit tests (Kibana-aware)
+cd ~/git/kibana && yarn test:jest \
+  --config x-pack/platform/plugins/private/deepfreeze/jest.config.js
 ```
 
-Bootstrap will discover the symlinked plugin and install its references.
+If you add or rename a `kibana.jsonc` entry (new required plugin, new
+plugin ID, etc.), re-run `yarn kbn bootstrap --force-install` after the
+sync.
 
-## Running
+## Standalone tests (no Kibana checkout)
+
+The harness in this directory tests Kibana-independent modules
+(`common/`, `server/es/`, `server/audit/`):
 
 ```sh
-# From the kibana checkout
+cd kibana-plugin
+npm install     # one-time
+npm test        # 30 tests, ~0.3s
+```
+
+These tests use plain Jest + ts-jest with a self-contained
+`tsconfig.test.json` and don't require Kibana to be installed.
+
+## Running Kibana with the plugin
+
+```sh
+cd ~/git/kibana
 yarn start --no-base-path
 ```
 
-The plugin's app will appear under Stack Management. While you're
-iterating, edits to TS/TSX files trigger hot reload.
+Once Kibana boots, the plugin's app appears under Stack Management.
 
-## Type checking
+## Type-check before commit
 
-```sh
-# From the kibana checkout
-node scripts/type_check --project x-pack/plugins/deepfreeze/tsconfig.json
-```
-
-## Tests
+CI for the plugin in the deepfreeze repo only runs the standalone Jest
+suite. Before committing, manually type-check against Kibana:
 
 ```sh
-# Unit (Jest)
-yarn test:jest --config x-pack/plugins/deepfreeze/jest.config.js
-
-# Functional (FTR)
-node scripts/functional_tests --config x-pack/test/deepfreeze/config.ts
+cd ~/git/deepfreeze && kibana-plugin/scripts/sync-to-kibana.sh
+cd ~/git/kibana && node scripts/type_check \
+  --project x-pack/platform/plugins/private/deepfreeze/tsconfig.json
 ```
 
-Jest and FTR configs land in Task #4.
-
-## Working without a Kibana checkout
-
-You can still edit code, write schemas/types, and run the parity tests
-in `common/schemas/__tests__/` once Jest is wired up (Task #4). The
-plugin lifecycle code (`server/plugin.ts`, `public/plugin.ts`) imports
-`@kbn/core` symbols and won't type-check in isolation — those errors are
-expected until the symlink-to-Kibana setup above is in place.
+A `pre-push` hook to do this automatically is on the wishlist (Phase 1).
 
 ## Configuration
 
 In `kibana.yml`:
 
 ```yaml
-deepfreeze.enabled: true
-deepfreeze.telemetry.enabled: false   # opt-in
+xpack.deepfreeze.enabled: true
+xpack.deepfreeze.telemetry.enabled: false   # opt-in
 ```
 
 Sensitive values (AWS keys, Azure connection strings, GCS service

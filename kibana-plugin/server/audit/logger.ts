@@ -215,7 +215,7 @@ export class AuditLogger {
         size: limit,
       });
 
-      return response.hits.hits.map((hit) => hit._source as AuditEntryDoc);
+      return response.hits.hits.map((hit) => hit._source as unknown as AuditEntryDoc);
     } catch (err) {
       this.log.warn(`Failed to fetch audit entries: ${stringifyError(err)}`);
       return [];

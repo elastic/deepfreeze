@@ -1,4 +1,4 @@
-import type { PluginSetupContract as FeaturesPluginSetup } from '@kbn/features-plugin/server';
+import type { FeaturesPluginSetup } from '@kbn/features-plugin/server';
 import type {
   TaskManagerSetupContract,
   TaskManagerStartContract,

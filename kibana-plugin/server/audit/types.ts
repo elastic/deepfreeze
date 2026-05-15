@@ -39,7 +39,7 @@ export interface AuditEsClient {
       mappings?: Record<string, unknown>;
     }) => Promise<unknown>;
   };
-  index: (params: { index: string; document: Record<string, unknown> }) => Promise<unknown>;
+  index: (params: { index: string; document: object }) => Promise<unknown>;
   search: (params: {
     index: string;
     query?: Record<string, unknown>;
