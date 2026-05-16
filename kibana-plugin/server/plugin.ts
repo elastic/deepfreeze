@@ -8,6 +8,7 @@ import type {
 
 import type { DeepfreezeConfig } from './config';
 import { registerAuditRoute, registerStatusRoute } from './routes';
+import { registerDeepfreezeUsageCollector } from './telemetry';
 import type {
   DeepfreezePluginSetup,
   DeepfreezePluginSetupDeps,
@@ -71,6 +72,11 @@ export class DeepfreezePlugin
     const router = core.http.createRouter();
     registerStatusRoute(router, this.logger);
     registerAuditRoute(router, this.logger, this.version);
+
+    if (this.config.telemetry.enabled && plugins.usageCollection) {
+      this.logger.debug('deepfreeze: registering usage collector');
+      registerDeepfreezeUsageCollector({ usageCollection: plugins.usageCollection });
+    }
 
     return {};
   }

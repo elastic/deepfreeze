@@ -14,6 +14,7 @@ module.exports = {
     '<rootDir>/server/audit',
     '<rootDir>/server/repositories',
     '<rootDir>/server/actions',
+    '<rootDir>/server/telemetry',
   ],
   testMatch: ['**/__tests__/**/*.test.ts'],
   transform: {
