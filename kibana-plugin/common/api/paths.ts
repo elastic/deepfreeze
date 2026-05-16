@@ -9,4 +9,5 @@ export const BASE_PATH = '/api/deepfreeze';
 
 export const API = {
   status: `${BASE_PATH}/status`,
+  audit: `${BASE_PATH}/audit`,
 } as const;

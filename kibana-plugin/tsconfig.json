@@ -22,7 +22,8 @@
     "@kbn/i18n",
     "@kbn/i18n-react",
     "@kbn/kibana-react-plugin",
-    "@kbn/navigation-plugin"
+    "@kbn/navigation-plugin",
+    "@kbn/shared-ux-router"
   ],
   "exclude": [
     "target/**/*",

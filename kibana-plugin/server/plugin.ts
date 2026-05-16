@@ -7,7 +7,7 @@ import type {
 } from '@kbn/core/server';
 
 import type { DeepfreezeConfig } from './config';
-import { registerStatusRoute } from './routes';
+import { registerAuditRoute, registerStatusRoute } from './routes';
 import type {
   DeepfreezePluginSetup,
   DeepfreezePluginSetupDeps,
@@ -35,10 +35,12 @@ export class DeepfreezePlugin
 {
   private readonly logger: Logger;
   private readonly config: DeepfreezeConfig;
+  private readonly version: string;
 
   constructor(initializerContext: PluginInitializerContext<DeepfreezeConfig>) {
     this.logger = initializerContext.logger.get();
     this.config = initializerContext.config.get();
+    this.version = initializerContext.env.packageInfo.version;
   }
 
   public setup(
@@ -68,6 +70,7 @@ export class DeepfreezePlugin
 
     const router = core.http.createRouter();
     registerStatusRoute(router, this.logger);
+    registerAuditRoute(router, this.logger, this.version);
 
     return {};
   }
