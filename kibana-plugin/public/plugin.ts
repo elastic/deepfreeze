@@ -1,11 +1,10 @@
+import { i18n } from '@kbn/i18n';
 import type {
-  AppMountParameters,
   CoreSetup,
   CoreStart,
   Plugin,
   PluginInitializerContext,
 } from '@kbn/core/public';
-import { DEFAULT_APP_CATEGORIES } from '@kbn/core/public';
 
 import type {
   DeepfreezePluginSetup,
@@ -15,7 +14,6 @@ import type {
 } from './types';
 
 export const PLUGIN_ID = 'deepfreeze';
-export const PLUGIN_NAME = 'Deepfreeze';
 
 export class DeepfreezePlugin
   implements
@@ -30,16 +28,17 @@ export class DeepfreezePlugin
 
   public setup(
     core: CoreSetup<DeepfreezePluginStartDeps, DeepfreezePluginStart>,
-    _plugins: DeepfreezePluginSetupDeps
+    plugins: DeepfreezePluginSetupDeps
   ): DeepfreezePluginSetup {
-    core.application.register({
+    plugins.management.sections.section.data.registerApp({
       id: PLUGIN_ID,
-      title: PLUGIN_NAME,
-      category: DEFAULT_APP_CATEGORIES.management,
-      order: 8500,
-      async mount(params: AppMountParameters) {
-        const { renderApp } = await import('./application');
+      title: i18n.translate('xpack.deepfreeze.appTitle', {
+        defaultMessage: 'Deepfreeze',
+      }),
+      order: 9, // after Snapshot and Restore (3); tune later
+      mount: async (params) => {
         const [coreStart, startPlugins] = await core.getStartServices();
+        const { renderApp } = await import('./application');
         return renderApp(coreStart, startPlugins, params);
       },
     });

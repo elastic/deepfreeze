@@ -1,11 +1,8 @@
+import type { ManagementSetup } from '@kbn/management-plugin/public';
 import type { NavigationPublicPluginStart } from '@kbn/navigation-plugin/public';
 
-/**
- * Plugins this plugin needs in the browser. Kept minimal in Phase 0 —
- * we add more as routes/components light up in later phases.
- */
 export interface DeepfreezePluginSetupDeps {
-  readonly _empty?: never;
+  management: ManagementSetup;
 }
 
 export interface DeepfreezePluginStartDeps {

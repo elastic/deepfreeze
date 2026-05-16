@@ -7,12 +7,22 @@ import type {
 } from '@kbn/core/server';
 
 import type { DeepfreezeConfig } from './config';
+import { registerStatusRoute } from './routes';
 import type {
   DeepfreezePluginSetup,
   DeepfreezePluginSetupDeps,
   DeepfreezePluginStart,
   DeepfreezePluginStartDeps,
 } from './types';
+
+const PLUGIN_ID = 'deepfreeze';
+
+/**
+ * Cluster privileges the requestor must hold for any deepfreeze API
+ * call. Phase 1 only needs read access; mutating actions will add
+ * write privileges (e.g. `manage`, `manage_slm`) in later phases.
+ */
+const REQUIRED_CLUSTER_PRIVILEGES = ['monitor'];
 
 export class DeepfreezePlugin
   implements
@@ -32,8 +42,8 @@ export class DeepfreezePlugin
   }
 
   public setup(
-    _core: CoreSetup<DeepfreezePluginStartDeps>,
-    _plugins: DeepfreezePluginSetupDeps
+    core: CoreSetup<DeepfreezePluginStartDeps>,
+    plugins: DeepfreezePluginSetupDeps
   ): DeepfreezePluginSetup {
     this.logger.debug('deepfreeze: setup');
 
@@ -42,12 +52,22 @@ export class DeepfreezePlugin
       return {};
     }
 
-    // Phase 1 work hooks in here:
-    //   - register routes  (Task: read-only routes for /status, /repositories, /thaw-requests)
-    //   - register feature privileges (deepfreeze.read / .operate / .admin)
-    //   - register saved-object types (deepfreeze-config singleton)
-    //   - register TaskManager task definitions (thaw-restore-poller, etc.)
-    //   - register usage collector if plugins.usageCollection && config.telemetry.enabled
+    plugins.features.registerElasticsearchFeature({
+      id: PLUGIN_ID,
+      management: {
+        data: [PLUGIN_ID],
+      },
+      catalogue: [PLUGIN_ID],
+      privileges: [
+        {
+          requiredClusterPrivileges: REQUIRED_CLUSTER_PRIVILEGES,
+          ui: [],
+        },
+      ],
+    });
+
+    const router = core.http.createRouter();
+    registerStatusRoute(router, this.logger);
 
     return {};
   }

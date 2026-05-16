@@ -15,6 +15,7 @@
 import type { RepositoryDoc } from '../schemas/repository';
 import type { ThawRequestDoc } from '../schemas/thaw_request';
 import type { SettingsDoc } from '../schemas/settings';
+import type { ServiceError } from './errors';
 
 export interface ClusterHealth {
   name: string;
@@ -44,7 +45,7 @@ export interface SystemStatus {
   buckets: BucketInfo[];
   ilm_policies: IlmPolicyInfo[];
   initialized: boolean;
-  errors: unknown[];
+  errors: ServiceError[];
   timestamp: string;
 }
 
