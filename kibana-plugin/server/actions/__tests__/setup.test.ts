@@ -47,6 +47,7 @@ interface Trace {
   status_index_created?: boolean;
   audit_index_created?: boolean;
   settings_indexed?: Record<string, unknown>;
+  repo_doc_indexed?: Record<string, unknown>;
   repo_created?: Record<string, unknown>;
   ilm_put?: { name: string; policy: Record<string, unknown> };
   template_put?: { name: string; body: Record<string, unknown> };
@@ -87,7 +88,13 @@ function makeClient(opts: FakeOpts = {}): { client: SetupActionEsClient; trace: 
     },
     get: async () => ({ found: true }),
     index: async (args) => {
-      trace.settings_indexed = args;
+      // Settings doc uses SETTINGS_ID; Repository doc uses the repo name —
+      // distinguish so tests can assert on each independently.
+      if ((args.document as { doctype?: string }).doctype === 'repository') {
+        trace.repo_doc_indexed = args;
+      } else {
+        trace.settings_indexed = args;
+      }
       return {};
     },
     snapshot: {

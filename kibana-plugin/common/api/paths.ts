@@ -13,4 +13,5 @@ export const API = {
   setupOptions: `${BASE_PATH}/setup/options`,
   setupDryRun: `${BASE_PATH}/setup/dry-run`,
   setup: `${BASE_PATH}/setup`,
+  rotate: `${BASE_PATH}/rotate`,
 } as const;

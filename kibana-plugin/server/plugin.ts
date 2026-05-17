@@ -8,7 +8,12 @@ import type {
 } from '@kbn/core/server';
 
 import type { DeepfreezeConfig } from './config';
-import { registerAuditRoute, registerSetupRoute, registerStatusRoute } from './routes';
+import {
+  registerAuditRoute,
+  registerRotateRoute,
+  registerSetupRoute,
+  registerStatusRoute,
+} from './routes';
 import { registerDeepfreezeUsageCollector } from './telemetry';
 import type {
   DeepfreezePluginSetup,
@@ -73,11 +78,18 @@ export class DeepfreezePlugin
     const router = core.http.createRouter();
     registerStatusRoute(router, this.logger);
     registerAuditRoute(router, this.logger, this.version);
+    const getCurrentUser = this.makeGetCurrentUser(core);
     registerSetupRoute({
       router,
       logger: this.logger,
       version: this.version,
-      getCurrentUser: this.makeGetCurrentUser(core),
+      getCurrentUser,
+    });
+    registerRotateRoute({
+      router,
+      logger: this.logger,
+      version: this.version,
+      getCurrentUser,
     });
 
     if (this.config.telemetry.enabled && plugins.usageCollection) {

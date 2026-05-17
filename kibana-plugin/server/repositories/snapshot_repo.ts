@@ -37,6 +37,7 @@ export interface SnapshotRepoEsClient {
       repository: { type: string; settings: Record<string, unknown> };
       verify?: boolean;
     }) => Promise<unknown>;
+    deleteRepository: (params: { name: string }) => Promise<unknown>;
   };
 }
 
@@ -158,4 +159,30 @@ export async function createSnapshotRepository(
     repository: { type, settings },
     verify: true,
   });
+}
+
+/**
+ * Remove a snapshot repository from ES. Returns 404 cleanly (the
+ * repository was already gone, no-op).
+ *
+ * ES rejects the request if any searchable-snapshot indices still
+ * reference the repo. Rotate catches that error and surfaces it as a
+ * per-repo warning rather than aborting the whole run.
+ */
+export async function deleteSnapshotRepository(
+  client: SnapshotRepoEsClient,
+  name: string
+): Promise<void> {
+  try {
+    await client.snapshot.deleteRepository({ name });
+  } catch (err) {
+    if (isNotFound(err)) return;
+    throw err;
+  }
+}
+
+function isNotFound(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { statusCode?: number; meta?: { statusCode?: number } };
+  return e.statusCode === 404 || e.meta?.statusCode === 404;
 }

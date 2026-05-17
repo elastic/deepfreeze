@@ -25,6 +25,16 @@ export interface RepositoryRepoEsClient {
   };
 }
 
+/** Write surface for saving Repository docs to the status index. */
+export interface RepositoryRepoWriteEsClient extends RepositoryRepoEsClient {
+  index: (params: {
+    index: string;
+    id: string;
+    document: Record<string, unknown>;
+    refresh?: 'wait_for' | 'true' | 'false' | boolean;
+  }) => Promise<unknown>;
+}
+
 /**
  * Return every repository document stored in `deepfreeze-status`.
  *
@@ -58,4 +68,23 @@ export async function getMatchingRepoNames(
   const repos = await client.snapshot.getRepository();
   const pattern = new RegExp(repoNamePrefix);
   return Object.keys(repos).filter((name) => pattern.test(name));
+}
+
+/**
+ * Persist a Repository document to the status index. The repo `name`
+ * is used as the document ID so subsequent saves upsert in place.
+ *
+ * Mirrors the `client.index(...)` call inside `create_repo` in the
+ * Python utilities.
+ */
+export async function saveRepositoryDoc(
+  client: RepositoryRepoWriteEsClient,
+  repo: RepositoryDoc
+): Promise<void> {
+  await client.index({
+    index: STATUS_INDEX,
+    id: repo.name,
+    document: { ...repo, doctype: 'repository' },
+    refresh: 'wait_for',
+  });
 }

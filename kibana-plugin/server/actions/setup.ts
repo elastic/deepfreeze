@@ -23,6 +23,11 @@ import {
   type SettingsRepoWriteEsClient,
 } from '../repositories/settings_repo';
 import {
+  saveRepositoryDoc,
+  type RepositoryRepoWriteEsClient,
+} from '../repositories/repository_repo';
+import type { RepositoryDoc } from '../../common/schemas/repository';
+import {
   createOrUpdateIlmPolicy,
   type CreateOrUpdateIlmPolicyResult,
   type IlmRepoWriteEsClient,
@@ -51,7 +56,8 @@ import {
  */
 export type SetupActionEsClient = SettingsRepoWriteEsClient &
   IlmRepoWriteEsClient &
-  SnapshotRepoEsClient & {
+  SnapshotRepoEsClient &
+  RepositoryRepoWriteEsClient & {
     indices: IndexAwareEsClient['indices'] & IndexTemplateEsClient['indices'];
   };
 
@@ -369,6 +375,21 @@ export async function runSetup(
     name: naming.new_repo_name,
     detail: `${naming.new_bucket}/${naming.new_base_path}`,
   });
+
+  const newRepoDoc: RepositoryDoc = {
+    doctype: 'repository',
+    name: naming.new_repo_name,
+    bucket: naming.new_bucket,
+    base_path: naming.new_base_path,
+    start: null,
+    end: null,
+    is_thawed: false,
+    is_mounted: true,
+    thaw_state: 'active',
+    thawed_at: null,
+    expires_at: null,
+  };
+  await saveRepositoryDoc(client, newRepoDoc);
 
   let ilmResult: CreateOrUpdateIlmPolicyResult | null = null;
   if (config.ilm_policy_name) {
