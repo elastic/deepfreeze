@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   EuiBadge,
   EuiBasicTable,
+  EuiButton,
   EuiDescriptionList,
   EuiFlexGroup,
   EuiFlexItem,
@@ -19,6 +20,7 @@ import type { CoreStart } from '@kbn/core/public';
 import { useStatus } from '../hooks/use_status';
 import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
+import { RefreezeModal } from '../components/refreeze_modal';
 import { trimDate } from '../utils/format';
 import type { StatusResult } from '../../server/actions/status';
 
@@ -26,6 +28,7 @@ type ThawReq = StatusResult['thaw_requests'][number];
 
 interface ThawRequestsPageProps {
   http: CoreStart['http'];
+  notifications: CoreStart['notifications'];
 }
 
 function statusColor(
@@ -45,9 +48,10 @@ function statusColor(
   }
 }
 
-export function ThawRequestsPage({ http }: ThawRequestsPageProps) {
+export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps) {
   const { status, loading, error, refresh } = useStatus(http);
   const [flyoutItem, setFlyoutItem] = useState<ThawReq | null>(null);
+  const [refreezeTarget, setRefreezeTarget] = useState<ThawReq | null>(null);
   const [sortField, setSortField] = useState<keyof ThawReq>('created_at');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [pageIndex, setPageIndex] = useState(0);
@@ -207,8 +211,36 @@ export function ThawRequestsPage({ http }: ThawRequestsPageProps) {
                 ))}
               </>
             )}
+
+            {flyoutItem.status === 'completed' && (
+              <>
+                <EuiSpacer size="l" />
+                <EuiButton
+                  color="danger"
+                  iconType="snowflake"
+                  onClick={() => {
+                    setRefreezeTarget(flyoutItem);
+                    setFlyoutItem(null);
+                  }}
+                  fullWidth
+                >
+                  Refreeze this request
+                </EuiButton>
+              </>
+            )}
           </EuiFlyoutBody>
         </EuiFlyout>
+      )}
+
+      {refreezeTarget && (
+        <RefreezeModal
+          http={http}
+          notifications={notifications}
+          request_id={refreezeTarget.request_id}
+          repo_names={refreezeTarget.repos}
+          onClose={() => setRefreezeTarget(null)}
+          onComplete={refresh}
+        />
       )}
     </>
   );

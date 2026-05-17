@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   EuiBadge,
   EuiBasicTable,
+  EuiButton,
   EuiCallOut,
   EuiDescriptionList,
   EuiFlexGroup,
@@ -23,12 +24,15 @@ import type { CoreStart } from '@kbn/core/public';
 import { useStatus } from '../hooks/use_status';
 import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
+import { RotateModal } from '../components/rotate_modal';
+import { CleanupModal } from '../components/cleanup_modal';
 import { trimDate } from '../utils/format';
 import { SetupWizard } from './setup_wizard';
 import type { StatusResult } from '../../server/actions/status';
 
 interface OverviewPageProps {
   http: CoreStart['http'];
+  notifications: CoreStart['notifications'];
 }
 
 type Repo = StatusResult['repositories'][number];
@@ -181,11 +185,12 @@ type FlyoutState =
   | { kind: 'thaw'; title: string; items: ThawReq[] }
   | { kind: 'ilm'; title: string; items: IlmPolicy[] };
 
-export function OverviewPage({ http }: OverviewPageProps) {
+export function OverviewPage({ http, notifications }: OverviewPageProps) {
   const { status, loading, error, refresh } = useStatus(http);
   const [flyout, setFlyout] = useState<FlyoutState | null>(null);
   const [detailRepo, setDetailRepo] = useState<Repo | null>(null);
   const [detailThaw, setDetailThaw] = useState<ThawReq | null>(null);
+  const [activeAction, setActiveAction] = useState<'rotate' | 'cleanup' | null>(null);
 
   if (loading && !status) return <PageLoading />;
   if (error && !status) return <PageError message={error} onRetry={refresh} />;
@@ -231,7 +236,25 @@ export function OverviewPage({ http }: OverviewPageProps) {
 
   return (
     <>
-      <RefreshHeader loading={loading} onRefresh={refresh} />
+      <EuiFlexGroup justifyContent="spaceBetween" alignItems="center">
+        <EuiFlexItem grow={false}>
+          <EuiFlexGroup gutterSize="s" alignItems="center">
+            <EuiFlexItem grow={false}>
+              <EuiButton iconType="refresh" onClick={() => setActiveAction('rotate')} size="s">
+                Rotate
+              </EuiButton>
+            </EuiFlexItem>
+            <EuiFlexItem grow={false}>
+              <EuiButton iconType="trash" onClick={() => setActiveAction('cleanup')} size="s">
+                Cleanup
+              </EuiButton>
+            </EuiFlexItem>
+          </EuiFlexGroup>
+        </EuiFlexItem>
+        <EuiFlexItem grow={false}>
+          <RefreshControl onRefresh={refresh} loading={loading} />
+        </EuiFlexItem>
+      </EuiFlexGroup>
 
       <EuiSpacer size="l" />
 
@@ -391,23 +414,24 @@ export function OverviewPage({ http }: OverviewPageProps) {
           </EuiFlyoutBody>
         </EuiFlyout>
       )}
-    </>
-  );
-}
 
-function RefreshHeader({
-  loading,
-  onRefresh,
-}: {
-  loading: boolean;
-  onRefresh: () => void;
-}) {
-  return (
-    <EuiFlexGroup justifyContent="flexEnd" alignItems="center">
-      <EuiFlexItem grow={false}>
-        <RefreshControl onRefresh={onRefresh} loading={loading} />
-      </EuiFlexItem>
-    </EuiFlexGroup>
+      {activeAction === 'rotate' && (
+        <RotateModal
+          http={http}
+          notifications={notifications}
+          onClose={() => setActiveAction(null)}
+          onComplete={refresh}
+        />
+      )}
+      {activeAction === 'cleanup' && (
+        <CleanupModal
+          http={http}
+          notifications={notifications}
+          onClose={() => setActiveAction(null)}
+          onComplete={refresh}
+        />
+      )}
+    </>
   );
 }
 

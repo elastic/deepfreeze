@@ -12,6 +12,7 @@ import { ActivityPage } from './pages/activity';
 
 interface AppProps {
   http: CoreStart['http'];
+  notifications: CoreStart['notifications'];
   setBreadcrumbs: ManagementAppMountParams['setBreadcrumbs'];
 }
 
@@ -28,7 +29,7 @@ const TABS: TabDef[] = [
   { id: 'activity', path: '/activity', label: 'Activity' },
 ];
 
-export function App({ http, setBreadcrumbs }: AppProps) {
+export function App({ http, notifications, setBreadcrumbs }: AppProps) {
   const history = useHistory();
   const location = useLocation();
 
@@ -70,13 +71,13 @@ export function App({ http, setBreadcrumbs }: AppProps) {
       <EuiPageTemplate.Section>
         <Routes>
           <Route path="/overview">
-            <OverviewPage http={http} />
+            <OverviewPage http={http} notifications={notifications} />
           </Route>
           <Route path="/repositories">
             <RepositoriesPage http={http} />
           </Route>
           <Route path="/thaw-requests">
-            <ThawRequestsPage http={http} />
+            <ThawRequestsPage http={http} notifications={notifications} />
           </Route>
           <Route path="/activity">
             <ActivityPage http={http} />

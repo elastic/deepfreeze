@@ -18,7 +18,11 @@ export function renderApp(
     <KibanaContextProvider services={{ ...coreStart, ...plugins }}>
       <I18nProvider>
         <Router history={params.history}>
-          <App http={coreStart.http} setBreadcrumbs={params.setBreadcrumbs} />
+          <App
+            http={coreStart.http}
+            notifications={coreStart.notifications}
+            setBreadcrumbs={params.setBreadcrumbs}
+          />
         </Router>
       </I18nProvider>
     </KibanaContextProvider>,
