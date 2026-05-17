@@ -55,6 +55,38 @@ yarn kbn bootstrap --force-install
 
 Bootstrap takes 3–10 minutes on a fast machine, longer on first run.
 
+## External Kibana dependencies
+
+The plugin needs one third-party package added to Kibana's root
+`package.json` that upstream Kibana doesn't currently ship:
+
+| Package                 | Version  | Why                                    |
+|-------------------------|----------|----------------------------------------|
+| `@aws-sdk/client-s3`    | `3.994.0`| Phase 4 Thaw: `s3:RestoreObject` calls |
+
+Add it under the `dependencies` block (alongside the existing
+`@aws-sdk/client-bedrock-*` entries) **and** under `resolutions`
+(same version), then re-bootstrap:
+
+```sh
+cd ~/git/kibana
+# Edit package.json — see above
+yarn kbn bootstrap --force-install
+```
+
+**This change does not survive a Kibana rebase.** Every time you pull
+fresh from `elastic/kibana`, re-apply the two `package.json` entries
+and re-run bootstrap. When the plugin is contributed upstream
+(Phase 7), the dep addition will land in the same PR; until then it's
+a manual step.
+
+Why this dep is mandatory and not optional: Elasticsearch's REST API
+has no Glacier-restore primitive — `s3:RestoreObject` calls must come
+from Node-side. Three alternatives (drop Glacier support, external
+restore handoff, hand-rolled SigV4) were considered and rejected;
+keeping the SDK matches what the Python implementation does with
+`boto3`, just at the Kibana layer.
+
 ## Iteration loop
 
 After editing files under `deepfreeze/kibana-plugin/`:
