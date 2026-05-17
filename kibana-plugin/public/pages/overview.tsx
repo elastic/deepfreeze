@@ -194,10 +194,17 @@ export function OverviewPage({ http }: OverviewPageProps) {
   const cardStyle: React.CSSProperties = { cursor: 'pointer' };
 
   if (!status.initialized) {
+    // MISSING_INDEX and MISSING_SETTINGS are the by-design uninitialized signal
+    // that drove us into this branch — the wizard is the answer to them, so
+    // hide them. Anything else (e.g. cluster-health fetch failure) still
+    // surfaces.
+    const unrelatedErrors = status.errors.filter(
+      (e) => e.code !== 'MISSING_INDEX' && e.code !== 'MISSING_SETTINGS'
+    );
     return (
       <>
         <SetupWizard http={http} onComplete={refresh} />
-        <ErrorCallouts errors={status.errors} />
+        <ErrorCallouts errors={unrelatedErrors} />
       </>
     );
   }

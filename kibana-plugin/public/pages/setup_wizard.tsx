@@ -46,11 +46,6 @@ const PROVIDER_OPTIONS = [
   { value: 'gcp', text: 'Google Cloud Storage (gcp)' },
 ] as const;
 
-const ROTATE_BY_OPTIONS = [
-  { value: 'path', text: 'Path within a shared bucket' },
-  { value: 'bucket', text: 'One bucket per rotation' },
-] as const;
-
 const STYLE_OPTIONS = [
   { value: 'oneup', text: 'Numeric counter (000001, 000002, ...)' },
   { value: 'date', text: 'Year.Month (YYYY.MM)' },
@@ -77,7 +72,6 @@ const STORAGE_CLASS_OPTIONS = [
 
 interface FormState {
   provider: 'aws' | 'azure' | 'gcp';
-  rotate_by: 'path' | 'bucket';
   style: 'oneup' | 'date';
   year: string;
   month: string;
@@ -92,7 +86,6 @@ interface FormState {
 
 const INITIAL_FORM: FormState = {
   provider: 'aws',
-  rotate_by: 'path',
   style: 'oneup',
   year: String(new Date().getUTCFullYear()),
   month: String(new Date().getUTCMonth() + 1),
@@ -122,7 +115,10 @@ function formToConfig(form: FormState): SetupConfig {
     canned_acl: form.canned_acl,
     storage_class: form.storage_class,
     provider: form.provider,
-    rotate_by: form.rotate_by,
+    // Path within a shared bucket is the only rotation strategy exposed by
+    // the wizard right now; the server still accepts 'bucket' if called
+    // directly, but the UI doesn't offer it.
+    rotate_by: 'path',
     style: form.style,
     ...(form.style === 'date'
       ? { year: Number(form.year), month: Number(form.month) }
@@ -370,16 +366,6 @@ function Step1ProviderRotation({
         />
       </EuiFormRow>
       <EuiFormRow
-        label="Rotate by"
-        helpText="Path: reuse one bucket, create new base paths. Bucket: one new bucket per rotation (you must pre-create each)."
-      >
-        <EuiSelect
-          options={[...ROTATE_BY_OPTIONS]}
-          value={form.rotate_by}
-          onChange={(e) => update('rotate_by', e.target.value as FormState['rotate_by'])}
-        />
-      </EuiFormRow>
-      <EuiFormRow
         label="Suffix style"
         helpText="How rotated repositories are named: 000001/000002/… or 2026.05/2026.06/…"
       >
@@ -601,7 +587,6 @@ function Step5Review({
 }) {
   const summary = [
     { title: 'Provider', description: form.provider },
-    { title: 'Rotate by', description: form.rotate_by },
     { title: 'Suffix style', description: form.style },
     ...(form.style === 'date'
       ? [{ title: 'Year / Month', description: `${form.year} / ${form.month}` }]
