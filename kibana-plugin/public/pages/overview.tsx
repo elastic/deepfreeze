@@ -24,6 +24,7 @@ import { useStatus } from '../hooks/use_status';
 import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
 import { trimDate } from '../utils/format';
+import { SetupWizard } from './setup_wizard';
 import type { StatusResult } from '../../server/actions/status';
 
 interface OverviewPageProps {
@@ -195,19 +196,8 @@ export function OverviewPage({ http }: OverviewPageProps) {
   if (!status.initialized) {
     return (
       <>
-        <RefreshHeader loading={loading} onRefresh={refresh} />
-        <EuiSpacer size="l" />
-        <EuiCallOut
-          title="Deepfreeze is not initialized in this cluster"
-          color="warning"
-          iconType="warning"
-        >
-          <p>
-            {status.errors[0]?.message ?? 'Run Setup to initialize.'} The Setup UI lands in
-            Phase 2; in the meantime use the Python CLI&apos;s <code>deepfreeze setup</code>.
-          </p>
-        </EuiCallOut>
-        <ErrorCallouts errors={status.errors.slice(1)} />
+        <SetupWizard http={http} onComplete={refresh} />
+        <ErrorCallouts errors={status.errors} />
       </>
     );
   }
