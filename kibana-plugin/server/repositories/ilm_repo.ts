@@ -133,26 +133,32 @@ export interface CreateOrUpdateIlmPolicyResult {
  *   packages/deepfreeze-core/deepfreeze_core/utilities.py
  *     — create_or_update_ilm_policy().
  */
+/**
+ * Note on the body shape: the @elastic/elasticsearch v9 client's
+ * `putLifecycle({ name, policy })` already wraps `policy` into the
+ * `{policy: {...}}` envelope that the underlying REST API expects.
+ * This helper therefore returns just the inner `{phases: {...}}` shape;
+ * double-wrapping causes ES to reject the request with
+ * `[lifecycle_policy] unknown field [policy]`.
+ */
 export function defaultIlmPolicyBody(repoName: string): Record<string, unknown> {
   return {
-    policy: {
-      phases: {
-        hot: {
-          min_age: '0ms',
-          actions: { rollover: { max_size: '45gb', max_age: '7d' } },
-        },
-        cold: {
-          min_age: '30d',
-          actions: { set_priority: { priority: 0 } },
-        },
-        frozen: {
-          min_age: '365d',
-          actions: { searchable_snapshot: { snapshot_repository: repoName } },
-        },
-        delete: {
-          min_age: '0d',
-          actions: { delete: { delete_searchable_snapshot: false } },
-        },
+    phases: {
+      hot: {
+        min_age: '0ms',
+        actions: { rollover: { max_size: '45gb', max_age: '7d' } },
+      },
+      cold: {
+        min_age: '30d',
+        actions: { set_priority: { priority: 0 } },
+      },
+      frozen: {
+        min_age: '365d',
+        actions: { searchable_snapshot: { snapshot_repository: repoName } },
+      },
+      delete: {
+        min_age: '0d',
+        actions: { delete: { delete_searchable_snapshot: false } },
       },
     },
   };
@@ -208,7 +214,9 @@ export async function createOrUpdateIlmPolicy(
     }
   }
 
-  const body = { policy: updated.policy ?? {} };
+  // The v9 client wraps `policy` into the {policy: ...} envelope on its
+  // own, so we pass the inner policy body (the {phases: ...} object).
+  const body = updated.policy ?? {};
   if (modified) {
     await client.ilm.putLifecycle({ name: policyName, policy: body });
     return { action: 'updated', policy_body: body };

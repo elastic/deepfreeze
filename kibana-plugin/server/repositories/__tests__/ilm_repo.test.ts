@@ -236,8 +236,9 @@ describe('createOrUpdateIlmPolicy', () => {
     const result = await createOrUpdateIlmPolicy(client, 'p', 'new-repo');
     expect(result.action).toBe('updated');
 
-    const phases = (captured[0].policy as { policy: { phases: Record<string, unknown> } }).policy
-      .phases;
+    // The v9 client expects the inner policy body — {phases: {...}} —
+    // not a {policy: {phases: {...}}} double-wrap.
+    const phases = (captured[0].policy as { phases: Record<string, unknown> }).phases;
     expect(
       (phases.frozen as { actions: { searchable_snapshot: { snapshot_repository: string } } })
         .actions.searchable_snapshot.snapshot_repository
