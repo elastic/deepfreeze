@@ -10,6 +10,7 @@ import type {
 import type { DeepfreezeConfig } from './config';
 import {
   registerAuditRoute,
+  registerCleanupRoute,
   registerRotateRoute,
   registerSetupRoute,
   registerStatusRoute,
@@ -86,6 +87,12 @@ export class DeepfreezePlugin
       getCurrentUser,
     });
     registerRotateRoute({
+      router,
+      logger: this.logger,
+      version: this.version,
+      getCurrentUser,
+    });
+    registerCleanupRoute({
       router,
       logger: this.logger,
       version: this.version,

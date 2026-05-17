@@ -21,6 +21,21 @@ export interface ThawRequestRepoEsClient {
   }>;
 }
 
+/** Write surface for Cleanup / Refreeze operations on thaw requests. */
+export interface ThawRequestRepoWriteEsClient extends ThawRequestRepoEsClient {
+  delete: (params: {
+    index: string;
+    id: string;
+    refresh?: 'wait_for' | 'true' | 'false' | boolean;
+  }) => Promise<unknown>;
+  index: (params: {
+    index: string;
+    id: string;
+    document: Record<string, unknown>;
+    refresh?: 'wait_for' | 'true' | 'false' | boolean;
+  }) => Promise<unknown>;
+}
+
 /**
  * List every thaw request stored in the `deepfreeze-status` index.
  *
@@ -49,6 +64,38 @@ export async function listThawRequests(
       `Failed to list thaw requests: ${err instanceof Error ? err.message : String(err)}`
     );
   }
+}
+
+/**
+ * Delete a thaw request doc by request_id (which is also the doc ID).
+ * 404 is treated as no-op (idempotent).
+ */
+export async function deleteThawRequest(
+  client: ThawRequestRepoWriteEsClient,
+  request_id: string
+): Promise<void> {
+  try {
+    await client.delete({ index: STATUS_INDEX, id: request_id, refresh: 'wait_for' });
+  } catch (err) {
+    if (isNotFound(err)) return;
+    throw err;
+  }
+}
+
+/**
+ * Upsert a thaw request doc. Used by Refreeze to flip status from
+ * `completed` to `refrozen`.
+ */
+export async function saveThawRequest(
+  client: ThawRequestRepoWriteEsClient,
+  request: ThawRequestDoc
+): Promise<void> {
+  await client.index({
+    index: STATUS_INDEX,
+    id: request.request_id,
+    document: { ...request, doctype: 'thaw_request' },
+    refresh: 'wait_for',
+  });
 }
 
 function isNotFound(err: unknown): boolean {
