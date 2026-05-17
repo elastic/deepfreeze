@@ -1,13 +1,14 @@
 import type {
   CoreSetup,
   CoreStart,
+  KibanaRequest,
   Logger,
   Plugin,
   PluginInitializerContext,
 } from '@kbn/core/server';
 
 import type { DeepfreezeConfig } from './config';
-import { registerAuditRoute, registerStatusRoute } from './routes';
+import { registerAuditRoute, registerSetupRoute, registerStatusRoute } from './routes';
 import { registerDeepfreezeUsageCollector } from './telemetry';
 import type {
   DeepfreezePluginSetup,
@@ -72,6 +73,12 @@ export class DeepfreezePlugin
     const router = core.http.createRouter();
     registerStatusRoute(router, this.logger);
     registerAuditRoute(router, this.logger, this.version);
+    registerSetupRoute({
+      router,
+      logger: this.logger,
+      version: this.version,
+      getCurrentUser: this.makeGetCurrentUser(core),
+    });
 
     if (this.config.telemetry.enabled && plugins.usageCollection) {
       this.logger.debug('deepfreeze: registering usage collector');
@@ -88,5 +95,18 @@ export class DeepfreezePlugin
 
   public stop() {
     this.logger.debug('deepfreeze: stop');
+  }
+
+  /**
+   * Build the request → username resolver passed to Setup routes.
+   * Returns 'kibana' when the optional security plugin is absent so
+   * audit rows are still attributable.
+   */
+  private makeGetCurrentUser(core: CoreSetup<DeepfreezePluginStartDeps>) {
+    return async (request: KibanaRequest): Promise<string> => {
+      const [, pluginsStart] = await core.getStartServices();
+      const user = pluginsStart.security?.authc.getCurrentUser(request);
+      return user?.username ?? 'kibana';
+    };
   }
 }
