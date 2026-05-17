@@ -1,4 +1,9 @@
-import { getSettings, type SettingsRepoEsClient } from '../settings_repo';
+import {
+  getSettings,
+  saveSettings,
+  type SettingsRepoEsClient,
+  type SettingsRepoWriteEsClient,
+} from '../settings_repo';
 import { SETTINGS_DEFAULTS } from '../../../common/schemas/settings';
 import { SETTINGS_ID, STATUS_INDEX } from '../../../common/constants';
 import { MissingIndexError } from '../../errors';
@@ -76,5 +81,48 @@ describe('getSettings', () => {
   it('propagates non-404 errors from get()', async () => {
     const client = makeClient({ getThrows: new Error('connection-refused') });
     await expect(getSettings(client)).rejects.toThrow('connection-refused');
+  });
+});
+
+describe('saveSettings', () => {
+  it('PUTs the settings document at the singleton id with doctype: settings', async () => {
+    const captured: Record<string, unknown>[] = [];
+    const client: SettingsRepoWriteEsClient = {
+      indices: { exists: async () => true },
+      get: async () => ({ found: true }),
+      index: async (args) => {
+        captured.push(args);
+        return {};
+      },
+    };
+
+    const settings = { ...SETTINGS_DEFAULTS, repo_name_prefix: 'mycorp', last_suffix: '000001' };
+    await saveSettings(client, settings);
+
+    expect(captured).toEqual([
+      {
+        index: STATUS_INDEX,
+        id: SETTINGS_ID,
+        document: { ...settings, doctype: 'settings' },
+        refresh: 'wait_for',
+      },
+    ]);
+  });
+
+  it('forces doctype to "settings" even if the caller passed something else', async () => {
+    const captured: Record<string, unknown>[] = [];
+    const client: SettingsRepoWriteEsClient = {
+      indices: { exists: async () => true },
+      get: async () => ({ found: true }),
+      index: async (args) => {
+        captured.push(args);
+        return {};
+      },
+    };
+
+    const bogus = { ...SETTINGS_DEFAULTS, doctype: 'wrong' as 'settings' };
+    await saveSettings(client, bogus);
+
+    expect((captured[0].document as Record<string, unknown>).doctype).toBe('settings');
   });
 });

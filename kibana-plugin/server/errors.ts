@@ -38,3 +38,21 @@ export class ActionError extends DeepfreezeError {
     this.name = 'ActionError';
   }
 }
+
+/**
+ * One or more setup preconditions weren't satisfied. The `issues`
+ * array holds plain-text descriptions intended for direct display in
+ * the wizard UI.
+ *
+ * Mirrors `PreconditionError` in
+ *   packages/deepfreeze-core/deepfreeze_core/exceptions.py
+ */
+export class PreconditionError extends DeepfreezeError {
+  public readonly issues: string[];
+
+  constructor(message: string, issues: string[]) {
+    super(message);
+    this.name = 'PreconditionError';
+    this.issues = issues;
+  }
+}

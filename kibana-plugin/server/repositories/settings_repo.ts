@@ -30,6 +30,16 @@ export interface SettingsRepoEsClient {
   }) => Promise<{ _source?: Record<string, unknown>; found?: boolean }>;
 }
 
+/** Methods needed to upsert the settings document. */
+export interface SettingsRepoWriteEsClient extends SettingsRepoEsClient {
+  index: (params: {
+    index: string;
+    id: string;
+    document: Record<string, unknown>;
+    refresh?: 'wait_for' | 'true' | 'false' | boolean;
+  }) => Promise<unknown>;
+}
+
 /**
  * Fetch the singleton settings document.
  *
@@ -76,6 +86,26 @@ function normalizeSettings(source: Record<string, unknown>): SettingsDoc {
     ...(rest as Partial<SettingsDoc>),
     doctype: 'settings',
   };
+}
+
+/**
+ * Persist the settings document. Uses `index` (PUT) which is upsert
+ * semantics — equivalent to the Python implementation's get-then-
+ * update-or-create dance, but with one ES round-trip instead of two.
+ *
+ * Always writes `doctype: 'settings'` regardless of what was passed in,
+ * since the discriminator must match the index mapping.
+ */
+export async function saveSettings(
+  client: SettingsRepoWriteEsClient,
+  settings: SettingsDoc
+): Promise<void> {
+  await client.index({
+    index: STATUS_INDEX,
+    id: SETTINGS_ID,
+    document: { ...settings, doctype: 'settings' },
+    refresh: 'wait_for',
+  });
 }
 
 function isNotFound(err: unknown): boolean {

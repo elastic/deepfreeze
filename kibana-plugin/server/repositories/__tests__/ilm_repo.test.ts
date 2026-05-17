@@ -1,6 +1,10 @@
 import {
+  createOrUpdateIlmPolicy,
+  defaultIlmPolicyBody,
   getDeepfreezeIlmPolicies,
+  getIlmPolicy,
   type IlmRepoEsClient,
+  type IlmRepoWriteEsClient,
 } from '../ilm_repo';
 
 function makeClient(lifecycle: Record<string, unknown>): IlmRepoEsClient {
@@ -9,6 +13,13 @@ function makeClient(lifecycle: Record<string, unknown>): IlmRepoEsClient {
       get_lifecycle: async () => lifecycle,
     },
   };
+}
+
+function notFound(): Error {
+  const e: Error & { statusCode?: number; meta?: { statusCode: number } } = new Error('nf');
+  e.statusCode = 404;
+  e.meta = { statusCode: 404 };
+  return e;
 }
 
 describe('getDeepfreezeIlmPolicies', () => {
@@ -144,5 +155,119 @@ describe('getDeepfreezeIlmPolicies', () => {
       data_streams_count: 0,
       templates_count: 0,
     });
+  });
+});
+
+describe('getIlmPolicy', () => {
+  it('returns the policy when present', async () => {
+    const client: IlmRepoEsClient = {
+      ilm: {
+        get_lifecycle: async ({ name }: { name?: string } = {}) => ({
+          [name!]: { policy: { phases: {} } },
+        }),
+      },
+    };
+    expect(await getIlmPolicy(client, 'p')).toEqual({ policy: { phases: {} } });
+  });
+
+  it('returns null on 404', async () => {
+    const client: IlmRepoEsClient = {
+      ilm: {
+        get_lifecycle: async () => {
+          throw notFound();
+        },
+      },
+    };
+    expect(await getIlmPolicy(client, 'p')).toBeNull();
+  });
+});
+
+describe('createOrUpdateIlmPolicy', () => {
+  function writeClient(opts: {
+    existing?: Record<string, unknown>;
+    captureKey?: (args: { name: string; policy: Record<string, unknown> }) => void;
+  } = {}): IlmRepoWriteEsClient {
+    return {
+      ilm: {
+        get_lifecycle: async ({ name }: { name?: string } = {}) => {
+          if (!opts.existing) throw notFound();
+          return { [name!]: opts.existing };
+        },
+        put_lifecycle: async (args) => {
+          opts.captureKey?.(args);
+          return {};
+        },
+      },
+    };
+  }
+
+  it('creates the default policy body when the named policy does not exist', async () => {
+    const captured: Array<{ name: string; policy: Record<string, unknown> }> = [];
+    const client = writeClient({ captureKey: (a) => captured.push(a) });
+
+    const result = await createOrUpdateIlmPolicy(client, 'new-policy', 'deepfreeze-000001');
+
+    expect(result.action).toBe('created');
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toEqual({
+      name: 'new-policy',
+      policy: defaultIlmPolicyBody('deepfreeze-000001'),
+    });
+  });
+
+  it('rewrites searchable_snapshot.snapshot_repository to the new repo when an existing policy differs', async () => {
+    const captured: Array<{ name: string; policy: Record<string, unknown> }> = [];
+    const client = writeClient({
+      existing: {
+        policy: {
+          phases: {
+            frozen: {
+              actions: { searchable_snapshot: { snapshot_repository: 'old-repo' } },
+            },
+            delete: {
+              actions: { delete: { delete_searchable_snapshot: true } },
+            },
+          },
+        },
+      },
+      captureKey: (a) => captured.push(a),
+    });
+
+    const result = await createOrUpdateIlmPolicy(client, 'p', 'new-repo');
+    expect(result.action).toBe('updated');
+
+    const phases = (captured[0].policy as { policy: { phases: Record<string, unknown> } }).policy
+      .phases;
+    expect(
+      (phases.frozen as { actions: { searchable_snapshot: { snapshot_repository: string } } })
+        .actions.searchable_snapshot.snapshot_repository
+    ).toBe('new-repo');
+    expect(
+      (phases.delete as { actions: { delete: { delete_searchable_snapshot: boolean } } }).actions
+        .delete.delete_searchable_snapshot
+    ).toBe(false);
+  });
+
+  it('returns unchanged + skips PUT when nothing differs', async () => {
+    const captured: Array<{ name: string; policy: Record<string, unknown> }> = [];
+    const client = writeClient({
+      existing: {
+        policy: {
+          phases: {
+            frozen: {
+              actions: { searchable_snapshot: { snapshot_repository: 'new-repo' } },
+            },
+            delete: {
+              actions: { delete: { delete_searchable_snapshot: false } },
+            },
+          },
+        },
+      },
+      captureKey: (a) => captured.push(a),
+    });
+
+    const result = await createOrUpdateIlmPolicy(client, 'p', 'new-repo');
+    expect(result.action).toBe('unchanged');
+    expect(captured).toHaveLength(0);
   });
 });
