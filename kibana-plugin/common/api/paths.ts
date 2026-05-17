@@ -15,4 +15,5 @@ export const API = {
   setup: `${BASE_PATH}/setup`,
   rotate: `${BASE_PATH}/rotate`,
   cleanup: `${BASE_PATH}/cleanup`,
+  refreeze: `${BASE_PATH}/refreeze`,
 } as const;

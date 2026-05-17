@@ -67,6 +67,24 @@ export async function listThawRequests(
 }
 
 /**
+ * Fetch a single thaw request by its request_id. Returns `null` if
+ * absent. Other errors propagate.
+ */
+export async function getThawRequest(
+  client: ThawRequestRepoEsClient,
+  request_id: string
+): Promise<ThawRequestDoc | null> {
+  const response = await client.search({
+    index: STATUS_INDEX,
+    query: { term: { request_id } },
+    size: 1,
+  });
+  const hit = response.hits.hits[0];
+  if (!hit) return null;
+  return hit._source as unknown as ThawRequestDoc;
+}
+
+/**
  * Delete a thaw request doc by request_id (which is also the doc ID).
  * 404 is treated as no-op (idempotent).
  */
