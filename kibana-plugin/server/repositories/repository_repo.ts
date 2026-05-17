@@ -19,7 +19,7 @@ export interface RepositoryRepoEsClient {
     };
   }>;
   snapshot: {
-    get_repository: (params?: {
+    getRepository: (params?: {
       name?: string;
     }) => Promise<Record<string, unknown>>;
   };
@@ -55,7 +55,7 @@ export async function getMatchingRepoNames(
   client: RepositoryRepoEsClient,
   repoNamePrefix: string
 ): Promise<string[]> {
-  const repos = await client.snapshot.get_repository();
+  const repos = await client.snapshot.getRepository();
   const pattern = new RegExp(repoNamePrefix);
   return Object.keys(repos).filter((name) => pattern.test(name));
 }

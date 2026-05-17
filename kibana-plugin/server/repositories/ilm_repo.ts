@@ -12,14 +12,14 @@ import type { IlmPolicyInfo } from '../../common/types/status';
 
 export interface IlmRepoEsClient {
   ilm: {
-    get_lifecycle: (params?: { name?: string }) => Promise<Record<string, unknown>>;
+    getLifecycle: (params?: { name?: string }) => Promise<Record<string, unknown>>;
   };
 }
 
 /** Write methods needed for `createOrUpdateIlmPolicy`. */
 export interface IlmRepoWriteEsClient extends IlmRepoEsClient {
   ilm: IlmRepoEsClient['ilm'] & {
-    put_lifecycle: (params: {
+    putLifecycle: (params: {
       name: string;
       policy: Record<string, unknown>;
     }) => Promise<unknown>;
@@ -69,7 +69,7 @@ export async function getDeepfreezeIlmPolicies(
   client: IlmRepoEsClient,
   repoNamePrefix: string
 ): Promise<DeepfreezeIlmPolicyInfo[]> {
-  const allPolicies = (await client.ilm.get_lifecycle()) as Record<
+  const allPolicies = (await client.ilm.getLifecycle()) as Record<
     string,
     IlmPolicyEntry
   >;
@@ -107,7 +107,7 @@ export async function getIlmPolicy(
   name: string
 ): Promise<IlmPolicyEntry | null> {
   try {
-    const result = (await client.ilm.get_lifecycle({ name })) as Record<string, IlmPolicyEntry>;
+    const result = (await client.ilm.getLifecycle({ name })) as Record<string, IlmPolicyEntry>;
     return result[name] ?? null;
   } catch (err) {
     if (isNotFound(err)) {
@@ -179,7 +179,7 @@ export async function createOrUpdateIlmPolicy(
 
   if (existing === null) {
     const body = defaultIlmPolicyBody(repoName);
-    await client.ilm.put_lifecycle({ name: policyName, policy: body });
+    await client.ilm.putLifecycle({ name: policyName, policy: body });
     return { action: 'created', policy_body: body };
   }
 
@@ -210,7 +210,7 @@ export async function createOrUpdateIlmPolicy(
 
   const body = { policy: updated.policy ?? {} };
   if (modified) {
-    await client.ilm.put_lifecycle({ name: policyName, policy: body });
+    await client.ilm.putLifecycle({ name: policyName, policy: body });
     return { action: 'updated', policy_body: body };
   }
 

@@ -10,7 +10,7 @@ import {
 function makeClient(lifecycle: Record<string, unknown>): IlmRepoEsClient {
   return {
     ilm: {
-      get_lifecycle: async () => lifecycle,
+      getLifecycle: async () => lifecycle,
     },
   };
 }
@@ -162,7 +162,7 @@ describe('getIlmPolicy', () => {
   it('returns the policy when present', async () => {
     const client: IlmRepoEsClient = {
       ilm: {
-        get_lifecycle: async ({ name }: { name?: string } = {}) => ({
+        getLifecycle: async ({ name }: { name?: string } = {}) => ({
           [name!]: { policy: { phases: {} } },
         }),
       },
@@ -173,7 +173,7 @@ describe('getIlmPolicy', () => {
   it('returns null on 404', async () => {
     const client: IlmRepoEsClient = {
       ilm: {
-        get_lifecycle: async () => {
+        getLifecycle: async () => {
           throw notFound();
         },
       },
@@ -189,11 +189,11 @@ describe('createOrUpdateIlmPolicy', () => {
   } = {}): IlmRepoWriteEsClient {
     return {
       ilm: {
-        get_lifecycle: async ({ name }: { name?: string } = {}) => {
+        getLifecycle: async ({ name }: { name?: string } = {}) => {
           if (!opts.existing) throw notFound();
           return { [name!]: opts.existing };
         },
-        put_lifecycle: async (args) => {
+        putLifecycle: async (args) => {
           opts.captureKey?.(args);
           return {};
         },

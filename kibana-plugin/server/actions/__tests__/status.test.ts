@@ -51,10 +51,10 @@ function makeClient(opts: FakeOpts = {}): StatusActionEsClient {
       return { hits: { hits: [] } };
     },
     snapshot: {
-      get_repository: async () => opts.snapshotRepos ?? {},
+      getRepository: async () => opts.snapshotRepos ?? {},
     },
     ilm: {
-      get_lifecycle: async () => {
+      getLifecycle: async () => {
         if (opts.failIlm) {
           throw new Error('boom-ilm');
         }

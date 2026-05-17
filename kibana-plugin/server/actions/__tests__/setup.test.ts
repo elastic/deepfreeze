@@ -35,11 +35,11 @@ interface FakeOpts {
   existingTemplates?: Record<string, Record<string, unknown>>;
   /** Existing ILM policies. */
   existingIlmPolicies?: Record<string, Record<string, unknown>>;
-  /** Make `snapshot.create_repository` fail (e.g. bucket unreachable). */
+  /** Make `snapshot.createRepository` fail (e.g. bucket unreachable). */
   failCreateRepo?: boolean;
-  /** Make `ilm.put_lifecycle` fail. */
+  /** Make `ilm.putLifecycle` fail. */
   failPutIlm?: boolean;
-  /** Make `indices.put_index_template` fail. */
+  /** Make `indices.putIndexTemplate` fail. */
   failPutTemplate?: boolean;
 }
 
@@ -74,12 +74,12 @@ function makeClient(opts: FakeOpts = {}): { client: SetupActionEsClient; trace: 
         if (index === AUDIT_INDEX) trace.audit_index_created = true;
         return {};
       },
-      get_index_template: async ({ name }) => {
+      getIndexTemplate: async ({ name }) => {
         const tmpl = opts.existingTemplates?.[name];
         if (!tmpl) throw notFound();
         return { index_templates: [{ name, index_template: tmpl }] };
       },
-      put_index_template: async (args) => {
+      putIndexTemplate: async (args) => {
         if (opts.failPutTemplate) throw new Error('boom-template');
         trace.template_put = args;
         return {};
@@ -91,21 +91,21 @@ function makeClient(opts: FakeOpts = {}): { client: SetupActionEsClient; trace: 
       return {};
     },
     snapshot: {
-      get_repository: async () => opts.existingSnapshotRepos ?? {},
-      create_repository: async (args) => {
+      getRepository: async () => opts.existingSnapshotRepos ?? {},
+      createRepository: async (args) => {
         if (opts.failCreateRepo) throw new Error('boom-create-repo');
         trace.repo_created = args;
         return {};
       },
     },
     ilm: {
-      get_lifecycle: async ({ name }: { name?: string } = {}) => {
+      getLifecycle: async ({ name }: { name?: string } = {}) => {
         if (!name) return opts.existingIlmPolicies ?? {};
         const p = opts.existingIlmPolicies?.[name];
         if (!p) throw notFound();
         return { [name]: p };
       },
-      put_lifecycle: async (args) => {
+      putLifecycle: async (args) => {
         if (opts.failPutIlm) throw new Error('boom-ilm');
         trace.ilm_put = args;
         return {};
@@ -373,7 +373,7 @@ describe('runSetup partial failure', () => {
     });
   });
 
-  it('rolls all the way through preconditions and propagates create_repository errors', async () => {
+  it('rolls all the way through preconditions and propagates createRepository errors', async () => {
     const { client } = makeClient({
       existingSnapshotRepos: { other: { type: 's3', settings: { bucket: 'my-bucket' } } },
       failCreateRepo: true,

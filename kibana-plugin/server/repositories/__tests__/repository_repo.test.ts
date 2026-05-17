@@ -19,7 +19,7 @@ function makeClient(opts: FakeOpts = {}): RepositoryRepoEsClient {
       return { hits: { hits: opts.repoHits ?? [] } };
     },
     snapshot: {
-      get_repository: async () => opts.snapshotRepos ?? {},
+      getRepository: async () => opts.snapshotRepos ?? {},
     },
   };
 }

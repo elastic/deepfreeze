@@ -62,7 +62,7 @@ export interface RegisterSetupRouteOptions {
  *   - POST /api/deepfreeze/setup
  *
  * Authz is delegated to ES — the requestor must hold the cluster
- * privileges ES checks for `_snapshot/_all`, `put_lifecycle`, and the
+ * privileges ES checks for `_snapshot/_all`, `putLifecycle`, and the
  * index-template endpoints. The plugin's own UI gate is `monitor`,
  * but Setup will surface ES 403s back to the wizard verbatim if the
  * user lacks the write privileges to complete the run.

@@ -12,8 +12,8 @@
 /** Minimal structural interface for composable-template operations. */
 export interface IndexTemplateEsClient {
   indices: {
-    get_index_template: (params: { name: string }) => Promise<unknown>;
-    put_index_template: (params: { name: string; body: Record<string, unknown> }) => Promise<unknown>;
+    getIndexTemplate: (params: { name: string }) => Promise<unknown>;
+    putIndexTemplate: (params: { name: string; body: Record<string, unknown> }) => Promise<unknown>;
   };
 }
 
@@ -58,7 +58,7 @@ export async function indexTemplateExists(
   name: string
 ): Promise<boolean> {
   try {
-    const result = (await client.indices.get_index_template({ name })) as GetTemplateResponse;
+    const result = (await client.indices.getIndexTemplate({ name })) as GetTemplateResponse;
     return (result.index_templates?.length ?? 0) > 0;
   } catch (err) {
     if (isNotFound(err)) return false;
@@ -90,7 +90,7 @@ export async function updateIndexTemplateIlmPolicy(
 ): Promise<UpdateIndexTemplateResult> {
   let templates: GetTemplateResponse;
   try {
-    templates = (await client.indices.get_index_template({
+    templates = (await client.indices.getIndexTemplate({
       name: templateName,
     })) as GetTemplateResponse;
   } catch (err) {
@@ -132,7 +132,7 @@ export async function updateIndexTemplateIlmPolicy(
     }
   }
 
-  await client.indices.put_index_template({ name: templateName, body: putBody });
+  await client.indices.putIndexTemplate({ name: templateName, body: putBody });
 
   return {
     action: 'updated',

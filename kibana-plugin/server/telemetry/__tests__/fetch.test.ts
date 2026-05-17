@@ -39,10 +39,10 @@ function makeClient(opts: FakeOpts = {}): StatusActionEsClient {
       return { hits: { hits: [] } };
     },
     snapshot: {
-      get_repository: async () => opts.snapshotRepos ?? {},
+      getRepository: async () => opts.snapshotRepos ?? {},
     },
     ilm: {
-      get_lifecycle: async () => ({}),
+      getLifecycle: async () => ({}),
     },
     cluster: {
       health: async () => ({
@@ -113,7 +113,7 @@ describe('fetchDeepfreezeUsage', () => {
       // mounted-set check picks them up.
       settingsDoc: { ...SETTINGS_DEFAULTS, repo_name_prefix: 'repo' },
       repoHits,
-      // is_mounted is overridden by snapshot.get_repository (see actions/status.ts).
+      // is_mounted is overridden by snapshot.getRepository (see actions/status.ts).
       snapshotRepos: { 'repo-a': {}, 'repo-d': {}, 'repo-e': {} },
     });
 

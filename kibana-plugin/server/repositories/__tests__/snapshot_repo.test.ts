@@ -15,8 +15,8 @@ interface FakeOpts {
 function makeClient(opts: FakeOpts = {}): SnapshotRepoEsClient {
   return {
     snapshot: {
-      get_repository: async () => opts.repos ?? {},
-      create_repository: async (args) => {
+      getRepository: async () => opts.repos ?? {},
+      createRepository: async (args) => {
         opts.capture?.(args);
         return {};
       },

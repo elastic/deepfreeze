@@ -72,7 +72,7 @@ const NOOP_LOG = {
  * Live-state repository view returned in `SystemStatus.repositories`.
  *
  * Same shape as the stored `RepositoryDoc` but `is_mounted` is the
- * **live** value derived from `snapshot.get_repository` rather than
+ * **live** value derived from `snapshot.getRepository` rather than
  * whatever was last written into ES. Phase 4 will add `storage_tier`.
  */
 export interface RepositorySummary extends RepositoryDoc {

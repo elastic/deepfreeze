@@ -31,8 +31,8 @@ export interface SnapshotRepositoryConfig {
  */
 export interface SnapshotRepoEsClient {
   snapshot: {
-    get_repository: (params?: { name?: string }) => Promise<Record<string, unknown>>;
-    create_repository: (params: {
+    getRepository: (params?: { name?: string }) => Promise<Record<string, unknown>>;
+    createRepository: (params: {
       name: string;
       repository: { type: string; settings: Record<string, unknown> };
       verify?: boolean;
@@ -54,7 +54,7 @@ interface RawRepoEntry {
 export async function getSnapshotRepositoryConfigs(
   client: SnapshotRepoEsClient
 ): Promise<SnapshotRepositoryConfig[]> {
-  const repos = (await client.snapshot.get_repository()) as Record<string, RawRepoEntry>;
+  const repos = (await client.snapshot.getRepository()) as Record<string, RawRepoEntry>;
   return Object.entries(repos).map(([name, raw]) => {
     const settings = raw.settings ?? {};
     const type = raw.type ?? 'unknown';
@@ -153,7 +153,7 @@ export async function createSnapshotRepository(
     };
   }
 
-  await client.snapshot.create_repository({
+  await client.snapshot.createRepository({
     name,
     repository: { type, settings },
     verify: true,

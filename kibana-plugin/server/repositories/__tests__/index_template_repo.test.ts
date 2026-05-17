@@ -20,12 +20,12 @@ function notFound(): Error {
 function makeClient(opts: FakeOpts = {}): IndexTemplateEsClient {
   return {
     indices: {
-      get_index_template: async ({ name }) => {
+      getIndexTemplate: async ({ name }) => {
         const tmpl = opts.templates?.[name];
         if (!tmpl) throw notFound();
         return { index_templates: [{ name, index_template: tmpl }] };
       },
-      put_index_template: async (args) => {
+      putIndexTemplate: async (args) => {
         opts.capture?.(args);
         return {};
       },
