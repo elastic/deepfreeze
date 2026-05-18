@@ -1,14 +1,17 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   EuiBadge,
   EuiBasicTable,
   EuiButton,
+  EuiButtonEmpty,
+  EuiCallOut,
   EuiDescriptionList,
   EuiFlexGroup,
   EuiFlexItem,
   EuiFlyout,
   EuiFlyoutBody,
   EuiFlyoutHeader,
+  EuiProgress,
   EuiSpacer,
   EuiText,
   EuiTitle,
@@ -18,11 +21,14 @@ import {
 import type { CoreStart } from '@kbn/core/public';
 
 import { useStatus } from '../hooks/use_status';
+import { postThawCheck, useThawProgress } from '../hooks/use_thaw_progress';
 import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
 import { RefreezeModal } from '../components/refreeze_modal';
+import { ThawModal } from '../components/thaw_modal';
 import { trimDate } from '../utils/format';
 import type { StatusResult } from '../../server/actions/status';
+import type { ThawProgressResult } from '../../server/actions/thaw';
 
 type ThawReq = StatusResult['thaw_requests'][number];
 
@@ -48,10 +54,143 @@ function statusColor(
   }
 }
 
+/**
+ * Live restore progress for a single thaw request, rendered inside the
+ * row flyout. Polls /progress every 30s while the request is
+ * in_progress; the "Check now" button fires /check, which mounts the
+ * repos and flips status to completed when every object is warm.
+ */
+function ThawProgressSection({
+  http,
+  notifications,
+  requestId,
+  status,
+  onStatusChange,
+}: {
+  http: CoreStart['http'];
+  notifications: CoreStart['notifications'];
+  requestId: string;
+  status: ThawReq['status'];
+  /** Called when /check flips the status so the parent can refetch. */
+  onStatusChange: () => void;
+}) {
+  const inFlight = status === 'in_progress';
+  const { progress, loading, error, refresh } = useThawProgress(
+    http,
+    requestId,
+    inFlight
+  );
+  const [checking, setChecking] = useState(false);
+  const [latestStatus, setLatestStatus] = useState<ThawProgressResult['status']>(status);
+
+  const doCheck = useCallback(async () => {
+    setChecking(true);
+    try {
+      const result = await postThawCheck(http, requestId);
+      setLatestStatus(result.status);
+      if (result.status === 'completed') {
+        notifications.toasts.addSuccess({
+          title: `Thaw completed (${requestId.slice(0, 8)})`,
+          text: 'All objects restored; repositories mounted.',
+        });
+        onStatusChange();
+      } else if (result.status === 'failed') {
+        notifications.toasts.addDanger({
+          title: `Thaw failed (${requestId.slice(0, 8)})`,
+          text:
+            result.errors.map((e) => e.message).join('; ') ||
+            'Mount step failed.',
+        });
+        onStatusChange();
+      } else {
+        notifications.toasts.addInfo({
+          title: 'Still restoring',
+          text:
+            'Restore is in progress; check back in a few minutes (Glacier Standard is 3–5h).',
+        });
+        refresh();
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      notifications.toasts.addDanger({ title: 'Check failed', text: msg });
+    } finally {
+      setChecking(false);
+    }
+  }, [http, notifications, requestId, refresh, onStatusChange]);
+
+  if (!inFlight && latestStatus !== 'in_progress') {
+    return null;
+  }
+
+  return (
+    <>
+      <EuiSpacer size="l" />
+      <EuiTitle size="xs">
+        <h3>Restore progress</h3>
+      </EuiTitle>
+      <EuiSpacer size="s" />
+
+      {error && (
+        <EuiCallOut color="danger" iconType="alert" title="Could not fetch progress" size="s">
+          <p>{error}</p>
+        </EuiCallOut>
+      )}
+
+      {progress && progress.repos.length > 0 && (
+        <>
+          {progress.repos.map((p) => (
+            <div key={p.repo} style={{ marginBottom: 12 }}>
+              <EuiText size="s">
+                <strong>{p.repo}</strong> — {p.restored}/{p.total} restored
+                {p.in_progress > 0 ? `, ${p.in_progress} in progress` : ''}
+                {p.not_restored > 0 ? `, ${p.not_restored} not yet started` : ''}
+              </EuiText>
+              <EuiProgress
+                value={p.total > 0 ? p.restored : 0}
+                max={p.total > 0 ? p.total : 1}
+                color={p.complete ? 'success' : 'primary'}
+                size="s"
+              />
+            </div>
+          ))}
+        </>
+      )}
+
+      {progress && progress.repos.length === 0 && (
+        <EuiText size="s" color="subdued">
+          <p>Waiting for first progress sample…</p>
+        </EuiText>
+      )}
+
+      <EuiSpacer size="s" />
+      <EuiFlexGroup gutterSize="s" alignItems="center">
+        <EuiFlexItem grow={false}>
+          <EuiButton
+            size="s"
+            iconType="refresh"
+            onClick={doCheck}
+            isLoading={checking || loading}
+          >
+            Check now
+          </EuiButton>
+        </EuiFlexItem>
+        <EuiFlexItem grow={false}>
+          <EuiText size="xs" color="subdued">
+            {progress?.checked_at
+              ? `Last checked ${trimDate(progress.checked_at)}`
+              : 'Polling every 30s'}
+          </EuiText>
+        </EuiFlexItem>
+      </EuiFlexGroup>
+    </>
+  );
+}
+
 export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps) {
   const { status, loading, error, refresh } = useStatus(http);
   const [flyoutItem, setFlyoutItem] = useState<ThawReq | null>(null);
   const [refreezeTarget, setRefreezeTarget] = useState<ThawReq | null>(null);
+  const [thawOpen, setThawOpen] = useState(false);
   const [sortField, setSortField] = useState<keyof ThawReq>('created_at');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [pageIndex, setPageIndex] = useState(0);
@@ -143,7 +282,16 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
           </EuiTitle>
         </EuiFlexItem>
         <EuiFlexItem grow={false}>
-          <RefreshControl onRefresh={refresh} loading={loading} />
+          <EuiFlexGroup gutterSize="s" alignItems="center">
+            <EuiFlexItem grow={false}>
+              <EuiButton iconType="plusInCircle" onClick={() => setThawOpen(true)}>
+                Initiate thaw
+              </EuiButton>
+            </EuiFlexItem>
+            <EuiFlexItem grow={false}>
+              <RefreshControl onRefresh={refresh} loading={loading} />
+            </EuiFlexItem>
+          </EuiFlexGroup>
         </EuiFlexItem>
       </EuiFlexGroup>
 
@@ -164,7 +312,22 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
           onClick: () => setFlyoutItem(item),
           style: { cursor: 'pointer' },
         })}
-        noItemsMessage="No thaw requests found"
+        noItemsMessage={
+          requests.length === 0 ? (
+            <EuiFlexGroup direction="column" alignItems="center" gutterSize="s">
+              <EuiFlexItem>
+                <EuiText size="s">No thaw requests yet.</EuiText>
+              </EuiFlexItem>
+              <EuiFlexItem>
+                <EuiButtonEmpty iconType="plusInCircle" onClick={() => setThawOpen(true)}>
+                  Initiate a thaw
+                </EuiButtonEmpty>
+              </EuiFlexItem>
+            </EuiFlexGroup>
+          ) : (
+            'No thaw requests found'
+          )
+        }
       />
 
       {flyoutItem && (
@@ -212,6 +375,17 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
               </>
             )}
 
+            <ThawProgressSection
+              http={http}
+              notifications={notifications}
+              requestId={String(flyoutItem.request_id || '')}
+              status={flyoutItem.status as ThawReq['status']}
+              onStatusChange={() => {
+                refresh();
+                setFlyoutItem(null);
+              }}
+            />
+
             {flyoutItem.status === 'completed' && (
               <>
                 <EuiSpacer size="l" />
@@ -239,6 +413,15 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
           request_id={refreezeTarget.request_id}
           repo_names={refreezeTarget.repos}
           onClose={() => setRefreezeTarget(null)}
+          onComplete={refresh}
+        />
+      )}
+
+      {thawOpen && (
+        <ThawModal
+          http={http}
+          notifications={notifications}
+          onClose={() => setThawOpen(false)}
           onComplete={refresh}
         />
       )}
