@@ -36,6 +36,8 @@ interface SetupWizardProps {
 
 interface SetupOptionsResponse {
   buckets_in_use: string[];
+  ilm_policy_names: string[];
+  index_template_names: string[];
 }
 
 const BASE_PATH_REQUIRED_PREFIX = 'deepfreeze/';
@@ -291,7 +293,15 @@ export function SetupWizard({ http, onComplete }: SetupWizardProps) {
           {
             title: 'Optional ILM policy and index template',
             status: stepStatuses[3],
-            children: stepIndex === 3 ? <Step4Ilm form={form} update={update} /> : null,
+            children:
+              stepIndex === 3 ? (
+                <Step4Ilm
+                  form={form}
+                  update={update}
+                  ilmPolicyNames={options?.ilm_policy_names ?? []}
+                  indexTemplateNames={options?.index_template_names ?? []}
+                />
+              ) : null,
           },
           {
             title: 'Review and run',
@@ -529,10 +539,33 @@ function Step3StorageDetails({
 function Step4Ilm({
   form,
   update,
+  ilmPolicyNames,
+  indexTemplateNames,
 }: {
   form: FormState;
   update: <K extends keyof FormState>(k: K, v: FormState[K]) => void;
+  ilmPolicyNames: string[];
+  indexTemplateNames: string[];
 }) {
+  const ilmOptions: EuiComboBoxOptionOption<string>[] = useMemo(
+    () => ilmPolicyNames.map((n) => ({ label: n, value: n })),
+    [ilmPolicyNames]
+  );
+  const selectedIlm: EuiComboBoxOptionOption<string>[] = form.ilm_policy_name.trim()
+    ? [{ label: form.ilm_policy_name, value: form.ilm_policy_name }]
+    : [];
+
+  const templateOptions: EuiComboBoxOptionOption<string>[] = useMemo(
+    () => indexTemplateNames.map((n) => ({ label: n, value: n })),
+    [indexTemplateNames]
+  );
+  const selectedTemplate: EuiComboBoxOptionOption<string>[] = form.index_template_name.trim()
+    ? [{ label: form.index_template_name, value: form.index_template_name }]
+    : [];
+
+  const ilmDisabled = form.ilm_policy_name.trim().length === 0;
+  const noTemplatesOnCluster = indexTemplateNames.length === 0;
+
   return (
     <EuiForm component="div">
       <EuiText size="s" color="subdued">
@@ -543,24 +576,49 @@ function Step4Ilm({
       </EuiText>
       <EuiSpacer size="s" />
       <EuiFormRow
-        label="ILM policy name"
-        helpText="Created with a default Hot → Cold → Frozen → Delete tiering strategy if missing; otherwise retargeted to the new deepfreeze repository."
+        label="ILM policy"
+        helpText="Pick an existing policy or type a new name. Existing policies are left untouched; a versioned copy <name>-<suffix> is created either way. New names get a default Hot → Cold → Frozen → Delete tiering strategy."
       >
-        <EuiFieldText
-          value={form.ilm_policy_name}
-          onChange={(e) => update('ilm_policy_name', e.target.value)}
+        <EuiComboBox<string>
+          singleSelection={{ asPlainText: true }}
+          options={ilmOptions}
+          selectedOptions={selectedIlm}
+          onChange={(sel) => update('ilm_policy_name', sel[0]?.value ?? '')}
+          onCreateOption={(name) => update('ilm_policy_name', name.trim())}
+          customOptionText="Create new policy {searchValue}"
+          isClearable
+          placeholder="Select a policy or type a new name"
         />
       </EuiFormRow>
       <EuiFormRow
-        label="Index template name"
-        helpText="If set, the template's index.lifecycle.name is rewritten to the ILM policy above. Requires ILM policy name."
-        isDisabled={form.ilm_policy_name.trim().length === 0}
+        label="Index template"
+        helpText="If set, the template's index.lifecycle.name is rewritten to the versioned ILM policy. Only existing templates can be selected — deepfreeze never creates new templates. Requires ILM policy."
+        isDisabled={ilmDisabled || noTemplatesOnCluster}
       >
-        <EuiFieldText
-          value={form.index_template_name}
-          onChange={(e) => update('index_template_name', e.target.value)}
-          disabled={form.ilm_policy_name.trim().length === 0}
-        />
+        {noTemplatesOnCluster ? (
+          <EuiCallOut
+            color="warning"
+            iconType="warning"
+            size="s"
+            title="No composable index templates on this cluster"
+          >
+            <p>
+              Create a composable index template via Stack Management → Index Management → Index
+              Templates, then return to deepfreeze setup. Or leave this field blank — you can wire
+              the template binding up later.
+            </p>
+          </EuiCallOut>
+        ) : (
+          <EuiComboBox<string>
+            singleSelection={{ asPlainText: true }}
+            options={templateOptions}
+            selectedOptions={selectedTemplate}
+            onChange={(sel) => update('index_template_name', sel[0]?.value ?? '')}
+            isClearable
+            isDisabled={ilmDisabled}
+            placeholder="Select a template (optional)"
+          />
+        )}
       </EuiFormRow>
     </EuiForm>
   );

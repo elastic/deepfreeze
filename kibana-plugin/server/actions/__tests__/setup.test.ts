@@ -76,7 +76,14 @@ function makeClient(opts: FakeOpts = {}): { client: SetupActionEsClient; trace: 
         if (index === AUDIT_INDEX) trace.audit_index_created = true;
         return {};
       },
-      getIndexTemplate: async ({ name }) => {
+      getIndexTemplate: async ({ name }: { name?: string } = {}) => {
+        // Bulk read: return every template the test seeded.
+        if (name === undefined) {
+          const items = Object.entries(opts.existingTemplates ?? {});
+          return {
+            index_templates: items.map(([n, body]) => ({ name: n, index_template: body })),
+          };
+        }
         const tmpl = opts.existingTemplates?.[name];
         if (!tmpl) throw notFound();
         return { index_templates: [{ name, index_template: tmpl }] };
@@ -171,15 +178,37 @@ describe('resolveNaming', () => {
 // -- getSetupOptions -------------------------------------------------------
 
 describe('getSetupOptions', () => {
-  it('returns buckets in use from existing snapshot repos', async () => {
+  it('returns buckets, ILM policy names, and index template names', async () => {
     const { client } = makeClient({
       existingSnapshotRepos: {
         a: { type: 's3', settings: { bucket: 'b1', base_path: 'p1' } },
         b: { type: 's3', settings: { bucket: 'b2', base_path: 'p2' } },
       },
+      existingIlmPolicies: {
+        'zeta-policy': { phases: {} },
+        'alpha-policy': { phases: {} },
+      },
+      existingTemplates: {
+        'logs-template': { index_patterns: ['logs-*'] },
+        'metrics-template': { index_patterns: ['metrics-*'] },
+      },
     });
 
-    expect(await getSetupOptions(client)).toEqual({ buckets_in_use: ['b1', 'b2'] });
+    // All lists arrive sorted for stable display.
+    expect(await getSetupOptions(client)).toEqual({
+      buckets_in_use: ['b1', 'b2'],
+      ilm_policy_names: ['alpha-policy', 'zeta-policy'],
+      index_template_names: ['logs-template', 'metrics-template'],
+    });
+  });
+
+  it('returns empty arrays on a bare cluster', async () => {
+    const { client } = makeClient({});
+    expect(await getSetupOptions(client)).toEqual({
+      buckets_in_use: [],
+      ilm_policy_names: [],
+      index_template_names: [],
+    });
   });
 });
 

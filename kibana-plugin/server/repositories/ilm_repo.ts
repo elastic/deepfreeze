@@ -99,6 +99,18 @@ export async function getDeepfreezeIlmPolicies(
 }
 
 /**
+ * Return every ILM policy name in the cluster, sorted for stable
+ * display. Used by the Setup wizard's dropdown so the operator can
+ * pick an existing policy or type a new one.
+ */
+export async function getAllIlmPolicyNames(
+  client: IlmRepoEsClient
+): Promise<string[]> {
+  const allPolicies = (await client.ilm.getLifecycle()) as Record<string, unknown>;
+  return Object.keys(allPolicies).sort();
+}
+
+/**
  * Fetch a single ILM policy by name. Returns `null` on 404; other
  * errors propagate so the caller can decide.
  */

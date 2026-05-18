@@ -114,6 +114,17 @@ export async function getAllIndexTemplates(
 }
 
 /**
+ * Return every composable index template name in the cluster, sorted
+ * for stable display. Used by the Setup wizard's dropdown.
+ */
+export async function getAllIndexTemplateNames(
+  client: IndexTemplateEsClient
+): Promise<string[]> {
+  const templates = await getAllIndexTemplates(client);
+  return templates.map((t) => t.name).sort();
+}
+
+/**
  * Return the names of every composable template whose
  * `template.settings.index.lifecycle.name` equals `policyName`. Used by
  * Rotate to find which templates need to be repointed at the

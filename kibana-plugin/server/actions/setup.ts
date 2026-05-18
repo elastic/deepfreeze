@@ -40,10 +40,12 @@ import type { RepositoryDoc } from '../../common/schemas/repository';
 import {
   createVersionedIlmPolicy,
   defaultIlmPolicyBody,
+  getAllIlmPolicyNames,
   getIlmPolicy,
   type IlmRepoWriteEsClient,
 } from '../repositories/ilm_repo';
 import {
+  getAllIndexTemplateNames,
   indexTemplateExists,
   updateIndexTemplateIlmPolicy,
   type IndexTemplateEsClient,
@@ -133,18 +135,29 @@ export interface SetupResult {
 }
 
 /**
- * Available choices for the wizard's bucket and index-template
- * dropdowns. Both fields may be empty when the cluster has no
- * snapshot repos / composable templates configured yet.
+ * Available choices for the wizard's bucket, ILM policy, and index
+ * template dropdowns. Any list may be empty on a fresh cluster — the
+ * wizard surfaces that to the user as a callout where it matters.
+ *
+ * `ilm_policy_names` allows the wizard to combine "pick an existing
+ * policy" with "type a new name" (the latter triggers Setup's
+ * create-from-default-body path). `index_template_names` is dropdown-
+ * only because Setup never creates templates — it only rebinds them.
  */
 export interface SetupOptions {
   buckets_in_use: string[];
+  ilm_policy_names: string[];
+  index_template_names: string[];
 }
 
 /** Helpers exposed for the wizard's pre-flight dropdowns. */
-export async function getSetupOptions(client: SnapshotRepoEsClient): Promise<SetupOptions> {
+export async function getSetupOptions(
+  client: SnapshotRepoEsClient & IlmRepoWriteEsClient & IndexTemplateEsClient
+): Promise<SetupOptions> {
   const buckets_in_use = await getBucketsInUse(client);
-  return { buckets_in_use };
+  const ilm_policy_names = await getAllIlmPolicyNames(client);
+  const index_template_names = await getAllIndexTemplateNames(client);
+  return { buckets_in_use, ilm_policy_names, index_template_names };
 }
 
 /** Compute the suffix used in repo/base_path naming for this setup. */
