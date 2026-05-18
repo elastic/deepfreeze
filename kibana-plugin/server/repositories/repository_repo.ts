@@ -88,3 +88,40 @@ export async function saveRepositoryDoc(
     refresh: 'wait_for',
   });
 }
+
+/**
+ * Find repository docs whose `start` / `end` range overlaps with the
+ * requested `[startIso, endIso]` window.
+ *
+ * Overlap rule (same as Python `find_repos_by_date_range`):
+ *   repo.start <= endIso  AND  repo.end >= startIso
+ *
+ * A 404 on the status index is treated as "no repos yet" (returns []),
+ * matching Python's `NotFoundError` branch.
+ */
+export async function findReposByDateRange(
+  client: RepositoryRepoEsClient,
+  startIso: string,
+  endIso: string
+): Promise<RepositoryDoc[]> {
+  try {
+    const response = await client.search({
+      index: STATUS_INDEX,
+      query: {
+        bool: {
+          must: [
+            { term: { doctype: DOCTYPE.repository } },
+            { range: { start: { lte: endIso } } },
+            { range: { end: { gte: startIso } } },
+          ],
+        },
+      },
+      size: 10000,
+    });
+    return response.hits.hits.map((hit) => hit._source as unknown as RepositoryDoc);
+  } catch (err) {
+    const e = err as { statusCode?: number; meta?: { statusCode?: number } };
+    if (e?.statusCode === 404 || e?.meta?.statusCode === 404) return [];
+    throw err;
+  }
+}
