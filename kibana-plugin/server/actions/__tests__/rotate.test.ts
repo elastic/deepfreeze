@@ -289,6 +289,19 @@ describe('runRotateDryRun', () => {
     expect(result.archived).toEqual(['deepfreeze-000001', 'deepfreeze-000002']);
   });
 
+  it('defaults keep to 6 when the caller omits it', async () => {
+    // 8 repos, no keep specified → 6 newest survive, oldest 2 archived.
+    const { client } = makeClient({
+      settings: settings({ last_suffix: '000008' }),
+      repositoryDocs: Array.from({ length: 8 }, (_, i) =>
+        repoDoc(`deepfreeze-${String(i + 1).padStart(6, '0')}`)
+      ),
+    });
+
+    const result = await runRotateDryRun(client);
+    expect(result.archived).toEqual(['deepfreeze-000001', 'deepfreeze-000002']);
+  });
+
   it('skips repos in thawing/thawed state from the archive list', async () => {
     const { client } = makeClient({
       settings: settings({ last_suffix: '000003' }),

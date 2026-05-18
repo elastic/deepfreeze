@@ -38,7 +38,9 @@ function extractErrorMessage(err: unknown): string {
 }
 
 export function RotateModal({ http, notifications, onClose, onComplete }: RotateModalProps) {
-  const [keep, setKeep] = useState('1');
+  // Default chosen to match the server-side DEFAULT_KEEP (6 months of
+  // active repos for a typical monthly-rotation site).
+  const [keep, setKeep] = useState('6');
   const [year, setYear] = useState('');
   const [month, setMonth] = useState('');
   const [preview, setPreview] = useState<RotateResult | null>(null);

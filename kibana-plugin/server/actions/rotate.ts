@@ -68,8 +68,16 @@ export type RotateActionEsClient = SettingsRepoWriteEsClient &
   IlmRepoWriteEsClient &
   IndexTemplateEsClient;
 
+/**
+ * Default value for `keep` when the route caller doesn't supply one.
+ * The UI seeds its own input with this; the server falls back to it
+ * for direct API calls that omit `keep`. Chosen as 6 so a typical
+ * monthly-rotation site retains six months of hot data by default.
+ */
+export const DEFAULT_KEEP = 6;
+
 export interface RotateConfig {
-  /** Number of newest active repositories to keep mounted. Defaults to 1. */
+  /** Number of newest active repositories to keep mounted. Defaults to 6. */
   keep?: number;
   /** Required when `settings.style === 'date'`; otherwise ignored. */
   year?: number;
@@ -210,7 +218,7 @@ export async function runRotateDryRun(
   const settings = await loadInitializedSettings(client);
   const resolved = resolveRotation(settings, config);
 
-  const keep = config.keep ?? 1;
+  const keep = config.keep ?? DEFAULT_KEEP;
   const { archived, skipped } = await pickReposToArchive(client, settings, keep);
 
   const steps: RotateStepRecord[] = [
@@ -511,7 +519,7 @@ export async function runRotate(
     });
   }
 
-  const keep = config.keep ?? 1;
+  const keep = config.keep ?? DEFAULT_KEEP;
   const { archived: candidates } = await pickReposToArchive(client, settings, keep);
   const archived: string[] = [];
   const skipped: string[] = [];
