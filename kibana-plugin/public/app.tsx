@@ -65,7 +65,7 @@ export function App({ http, notifications, setBreadcrumbs }: AppProps) {
     <EuiPageTemplate restrictWidth={false}>
       <EuiPageTemplate.Header
         pageTitle="Deepfreeze"
-        description="Cold-storage lifecycle for Elasticsearch snapshots."
+        description="Long-term, offline storage for Elasticsearch data."
         tabs={tabs}
       />
       <EuiPageTemplate.Section>
