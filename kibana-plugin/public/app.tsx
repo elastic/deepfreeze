@@ -74,7 +74,7 @@ export function App({ http, notifications, setBreadcrumbs }: AppProps) {
             <OverviewPage http={http} notifications={notifications} />
           </Route>
           <Route path="/repositories">
-            <RepositoriesPage http={http} />
+            <RepositoriesPage http={http} notifications={notifications} />
           </Route>
           <Route path="/thaw-requests">
             <ThawRequestsPage http={http} notifications={notifications} />

@@ -12,6 +12,7 @@ import {
   registerAuditRoute,
   registerCleanupRoute,
   registerRefreezeRoute,
+  registerRepairMetadataRoute,
   registerRotateRoute,
   registerSetupRoute,
   registerStatusRoute,
@@ -107,6 +108,12 @@ export class DeepfreezePlugin
       getCurrentUser,
     });
     registerThawRoute({
+      router,
+      logger: this.logger,
+      version: this.version,
+      getCurrentUser,
+    });
+    registerRepairMetadataRoute({
       router,
       logger: this.logger,
       version: this.version,

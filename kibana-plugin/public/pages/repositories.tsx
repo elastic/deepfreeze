@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   EuiBadge,
   EuiBasicTable,
+  EuiButton,
   EuiDescriptionList,
   EuiFieldSearch,
   EuiFlexGroup,
@@ -21,6 +22,7 @@ import type { CoreStart } from '@kbn/core/public';
 import { useStatus } from '../hooks/use_status';
 import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
+import { RepairMetadataModal } from '../components/repair_metadata_modal';
 import { trimDate } from '../utils/format';
 import type { StatusResult } from '../../server/actions/status';
 
@@ -28,6 +30,7 @@ type Repo = StatusResult['repositories'][number];
 
 interface RepositoriesPageProps {
   http: CoreStart['http'];
+  notifications: CoreStart['notifications'];
 }
 
 function stateHealthColor(
@@ -49,10 +52,11 @@ function stateHealthColor(
   }
 }
 
-export function RepositoriesPage({ http }: RepositoriesPageProps) {
+export function RepositoriesPage({ http, notifications }: RepositoriesPageProps) {
   const { status, loading, error, refresh } = useStatus(http);
   const [search, setSearch] = useState('');
   const [flyoutRepo, setFlyoutRepo] = useState<Repo | null>(null);
+  const [repairOpen, setRepairOpen] = useState(false);
   const [sortField, setSortField] = useState<keyof Repo>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [pageIndex, setPageIndex] = useState(0);
@@ -160,7 +164,16 @@ export function RepositoriesPage({ http }: RepositoriesPageProps) {
           </EuiTitle>
         </EuiFlexItem>
         <EuiFlexItem grow={false}>
-          <RefreshControl onRefresh={refresh} loading={loading} />
+          <EuiFlexGroup gutterSize="s" alignItems="center">
+            <EuiFlexItem grow={false}>
+              <EuiButton iconType="wrench" onClick={() => setRepairOpen(true)}>
+                Repair metadata
+              </EuiButton>
+            </EuiFlexItem>
+            <EuiFlexItem grow={false}>
+              <RefreshControl onRefresh={refresh} loading={loading} />
+            </EuiFlexItem>
+          </EuiFlexGroup>
         </EuiFlexItem>
       </EuiFlexGroup>
 
@@ -218,6 +231,15 @@ export function RepositoriesPage({ http }: RepositoriesPageProps) {
             />
           </EuiFlyoutBody>
         </EuiFlyout>
+      )}
+
+      {repairOpen && (
+        <RepairMetadataModal
+          http={http}
+          notifications={notifications}
+          onClose={() => setRepairOpen(false)}
+          onComplete={refresh}
+        />
       )}
     </>
   );

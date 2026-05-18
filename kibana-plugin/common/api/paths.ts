@@ -17,6 +17,7 @@ export const API = {
   cleanup: `${BASE_PATH}/cleanup`,
   refreeze: `${BASE_PATH}/refreeze`,
   thaw: `${BASE_PATH}/thaw`,
+  repairMetadata: `${BASE_PATH}/repair-metadata`,
   /**
    * `${id}` placeholder; routes register the literal `/{id}` path and
    * callers `paths.thawProgress(id)` for typed URL construction.
