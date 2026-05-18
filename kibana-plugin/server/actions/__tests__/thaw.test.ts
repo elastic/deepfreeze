@@ -1,16 +1,19 @@
 import {
+  checkAndMaybeMount,
   DEFAULT_RESTORE_DAYS,
   DEFAULT_RETRIEVAL_TIER,
+  inspectThawProgress,
   runThaw,
   runThawDryRun,
   type ThawActionEsClient,
 } from '../thaw';
-import { MissingIndexError, MissingSettingsError } from '../../errors';
+import { ActionError, MissingIndexError, MissingSettingsError } from '../../errors';
 import {
   SETTINGS_DEFAULTS,
   type SettingsDoc,
 } from '../../../common/schemas/settings';
 import type { RepositoryDoc } from '../../../common/schemas/repository';
+import type { ThawRequestDoc } from '../../../common/schemas/thaw_request';
 import type {
   ObjectRestoreState,
   RestoreOptions,
@@ -24,14 +27,17 @@ interface FakeOpts {
   /** When true, `indices.exists` returns false (no status index). */
   noStatusIndex?: boolean;
   repos?: RepositoryDoc[];
+  /** Thaw request docs the client should serve from search by request_id. */
+  thawRequests?: ThawRequestDoc[];
 }
 
 interface ClientTrace {
   index_calls: Array<{ index: string; id: string; document: Record<string, unknown> }>;
+  createRepo_calls: Array<{ name: string; repository: { type: string; settings: Record<string, unknown> } }>;
 }
 
 function makeClient(opts: FakeOpts = {}): { client: ThawActionEsClient; trace: ClientTrace } {
-  const trace: ClientTrace = { index_calls: [] };
+  const trace: ClientTrace = { index_calls: [], createRepo_calls: [] };
 
   const client: ThawActionEsClient = {
     indices: {
@@ -48,11 +54,23 @@ function makeClient(opts: FakeOpts = {}): { client: ThawActionEsClient; trace: C
       return { found: false };
     },
     search: async (params) => {
-      // We model both `getAllRepos`-style and `findReposByDateRange`-style
-      // searches against the status index. For the date-range bool query
-      // we return the configured repos verbatim; the test suite drives
-      // overlap selection itself via `opts.repos`.
       if (params.index !== STATUS_INDEX) return { hits: { hits: [] } };
+      const query = (params.query ?? {}) as Record<string, unknown>;
+      // thaw_request lookup by request_id
+      const term = query.term as Record<string, unknown> | undefined;
+      if (term && typeof term.request_id === 'string') {
+        const found = (opts.thawRequests ?? []).find(
+          (r) => r.request_id === term.request_id
+        );
+        return {
+          hits: {
+            hits: found
+              ? [{ _id: found.request_id, _source: found as unknown as Record<string, unknown> }]
+              : [],
+          },
+        };
+      }
+      // findReposByDateRange / getAllRepos — both resolve to the repos list.
       const repos = opts.repos ?? [];
       return {
         hits: {
@@ -62,6 +80,11 @@ function makeClient(opts: FakeOpts = {}): { client: ThawActionEsClient; trace: C
     },
     snapshot: {
       getRepository: async () => ({}),
+      createRepository: async ({ name, repository }) => {
+        trace.createRepo_calls.push({ name, repository });
+        return {};
+      },
+      deleteRepository: async () => ({}),
     },
     index: async ({ index, id, document }) => {
       trace.index_calls.push({ index, id, document });
@@ -425,6 +448,240 @@ describe('runThawDryRun', () => {
         start_date: '2026-01-01T00:00:00Z',
         end_date: '2026-01-31T00:00:00Z',
       })
+    ).rejects.toBeInstanceOf(MissingSettingsError);
+  });
+});
+
+function makeThawRequest(over: Partial<ThawRequestDoc> = {}): ThawRequestDoc {
+  return {
+    doctype: 'thaw_request',
+    request_id: 'req-a',
+    repos: ['deepfreeze-000001'],
+    status: 'in_progress',
+    created_at: '2026-05-17T12:00:00Z',
+    start_date: '2026-01-15T00:00:00Z',
+    end_date: '2026-01-20T00:00:00Z',
+    ...over,
+  };
+}
+
+describe('inspectThawProgress', () => {
+  it('throws ActionError when the request_id is unknown', async () => {
+    const { client } = makeClient({ thawRequests: [] });
+    const { storage } = makeStorage();
+    await expect(
+      inspectThawProgress(client, storage, 'missing-id')
+    ).rejects.toBeInstanceOf(ActionError);
+  });
+
+  it('short-circuits for terminal status (returns empty repos, all_complete derived)', async () => {
+    const request = makeThawRequest({ status: 'completed' });
+    const { client } = makeClient({ thawRequests: [request] });
+    const { storage, trace } = makeStorage();
+    const result = await inspectThawProgress(client, storage, 'req-a');
+    expect(result.status).toBe('completed');
+    expect(result.all_complete).toBe(true);
+    expect(result.repos).toEqual([]);
+    expect(trace.headCalls).toEqual([]);
+  });
+
+  it('counts restored vs in_progress vs not_restored per repo', async () => {
+    const repo = makeRepo({ name: 'r1' });
+    const request = makeThawRequest({ repos: ['r1'] });
+    const { client } = makeClient({ thawRequests: [request], repos: [repo] });
+    const { storage } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: 'a', size: 1, storage_class: 'STANDARD' },
+          { key: 'b', size: 1, storage_class: 'GLACIER' },
+          { key: 'c', size: 1, storage_class: 'GLACIER' },
+        ],
+      },
+      heads: {
+        [`${repo.bucket}/a`]: { storage_class: 'STANDARD', accessible: true, restore: null },
+        [`${repo.bucket}/b`]: {
+          storage_class: 'GLACIER',
+          accessible: false,
+          restore: { ongoing: true },
+        },
+        [`${repo.bucket}/c`]: { storage_class: 'GLACIER', accessible: false, restore: null },
+      },
+    });
+
+    const result = await inspectThawProgress(client, storage, 'req-a');
+    expect(result.status).toBe('in_progress');
+    expect(result.all_complete).toBe(false);
+    expect(result.repos).toEqual([
+      {
+        repo: 'r1',
+        bucket: repo.bucket,
+        base_path: repo.base_path,
+        total: 3,
+        restored: 1,
+        in_progress: 1,
+        not_restored: 1,
+        complete: false,
+      },
+    ]);
+  });
+
+  it('flags all_complete=true when every object is in a hot tier', async () => {
+    const repo = makeRepo({ name: 'r1' });
+    const request = makeThawRequest({ repos: ['r1'] });
+    const { client } = makeClient({ thawRequests: [request], repos: [repo] });
+    const { storage } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: 'a', size: 1, storage_class: 'STANDARD' },
+          { key: 'b', size: 1, storage_class: 'STANDARD' },
+        ],
+      },
+      defaultStorageClass: 'STANDARD',
+    });
+
+    const result = await inspectThawProgress(client, storage, 'req-a');
+    expect(result.all_complete).toBe(true);
+    expect(result.repos[0].complete).toBe(true);
+  });
+
+  it('records per-repo head failures as warnings and continues', async () => {
+    const repo = makeRepo({ name: 'r1' });
+    const request = makeThawRequest({ repos: ['r1'] });
+    const { client } = makeClient({ thawRequests: [request], repos: [repo] });
+    const failingStorage: StorageClient = {
+      testConnection: async () => true,
+      listObjects: async () => {
+        throw new Error('list boom');
+      },
+      headObject: async () => ({
+        storage_class: 'GLACIER',
+        accessible: false,
+        restore: null,
+      }),
+      restoreObject: async () => {},
+    };
+
+    const result = await inspectThawProgress(client, failingStorage, 'req-a');
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0].target).toBe('r1');
+    expect(result.all_complete).toBe(false);
+  });
+});
+
+describe('checkAndMaybeMount', () => {
+  it('returns in_progress without mounting when objects are still restoring', async () => {
+    const repo = makeRepo({ name: 'r1' });
+    const request = makeThawRequest({ repos: ['r1'] });
+    const { client, trace } = makeClient({ thawRequests: [request], repos: [repo] });
+    const { storage } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: 'a', size: 1, storage_class: 'GLACIER' },
+        ],
+      },
+      heads: {
+        [`${repo.bucket}/a`]: {
+          storage_class: 'GLACIER',
+          accessible: false,
+          restore: { ongoing: true },
+        },
+      },
+    });
+
+    const result = await checkAndMaybeMount(client, storage, 'req-a');
+    expect(result.status).toBe('in_progress');
+    expect(result.all_complete).toBe(false);
+    expect(result.mounted).toBeUndefined();
+    expect(trace.createRepo_calls).toEqual([]);
+  });
+
+  it('mounts repos and flips status to completed when all restores are done', async () => {
+    const repo = makeRepo({ name: 'r1' });
+    const request = makeThawRequest({ repos: ['r1'] });
+    const { client, trace } = makeClient({ thawRequests: [request], repos: [repo] });
+    const { storage } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: 'a', size: 1, storage_class: 'STANDARD' },
+        ],
+      },
+      defaultStorageClass: 'STANDARD',
+    });
+
+    const result = await checkAndMaybeMount(client, storage, 'req-a', {
+      now: () => new Date('2026-05-17T12:00:00Z'),
+    });
+    expect(result.status).toBe('completed');
+    expect(result.all_complete).toBe(true);
+    expect(result.mounted).toBe(true);
+    expect(trace.createRepo_calls).toEqual([
+      {
+        name: 'r1',
+        repository: {
+          type: 's3',
+          settings: {
+            bucket: repo.bucket,
+            base_path: repo.base_path,
+            canned_acl: SETTINGS_DEFAULTS.canned_acl,
+            storage_class: SETTINGS_DEFAULTS.storage_class,
+          },
+        },
+      },
+    ]);
+    const reqWrite = trace.index_calls.find((c) => c.id === 'req-a');
+    expect(reqWrite!.document).toMatchObject({ status: 'completed' });
+    const repoWrite = trace.index_calls.find((c) => c.id === 'r1');
+    expect(repoWrite!.document).toMatchObject({
+      thaw_state: 'thawed',
+      is_mounted: true,
+      is_thawed: true,
+      thawed_at: '2026-05-17T12:00:00.000Z',
+    });
+  });
+
+  it('flips status to failed when a repo mount throws', async () => {
+    const repo = makeRepo({ name: 'r1' });
+    const request = makeThawRequest({ repos: ['r1'] });
+    const { client, trace } = makeClient({ thawRequests: [request], repos: [repo] });
+    client.snapshot.createRepository = async () => {
+      throw new Error('verify failed: bucket unreachable');
+    };
+    const { storage } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: 'a', size: 1, storage_class: 'STANDARD' },
+        ],
+      },
+      defaultStorageClass: 'STANDARD',
+    });
+
+    const result = await checkAndMaybeMount(client, storage, 'req-a');
+    expect(result.status).toBe('failed');
+    expect(result.all_complete).toBe(true);
+    expect(result.mounted).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0].severity).toBe('error');
+    expect(result.errors[0].target).toBe('r1');
+    const reqWrite = trace.index_calls.find((c) => c.id === 'req-a');
+    expect(reqWrite!.document).toMatchObject({ status: 'failed' });
+  });
+
+  it('does not mount or write if the request is already in terminal state', async () => {
+    const request = makeThawRequest({ status: 'refrozen' });
+    const { client, trace } = makeClient({ thawRequests: [request] });
+    const { storage } = makeStorage();
+    const result = await checkAndMaybeMount(client, storage, 'req-a');
+    expect(result.status).toBe('refrozen');
+    expect(trace.createRepo_calls).toEqual([]);
+    expect(trace.index_calls).toEqual([]);
+  });
+
+  it('throws MissingSettingsError when settings are absent', async () => {
+    const request = makeThawRequest();
+    const { client } = makeClient({ thawRequests: [request], settings: null });
+    const { storage } = makeStorage();
+    await expect(
+      checkAndMaybeMount(client, storage, 'req-a')
     ).rejects.toBeInstanceOf(MissingSettingsError);
   });
 });

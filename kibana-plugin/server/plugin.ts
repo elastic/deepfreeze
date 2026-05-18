@@ -15,6 +15,7 @@ import {
   registerRotateRoute,
   registerSetupRoute,
   registerStatusRoute,
+  registerThawRoute,
 } from './routes';
 import { registerDeepfreezeUsageCollector } from './telemetry';
 import type {
@@ -100,6 +101,12 @@ export class DeepfreezePlugin
       getCurrentUser,
     });
     registerRefreezeRoute({
+      router,
+      logger: this.logger,
+      version: this.version,
+      getCurrentUser,
+    });
+    registerThawRoute({
       router,
       logger: this.logger,
       version: this.version,

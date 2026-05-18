@@ -17,17 +17,23 @@ import { randomUUID } from 'node:crypto';
 import type { ServiceError } from '../../common/types/errors';
 import type { RepositoryDoc } from '../../common/schemas/repository';
 import type { ThawRequestDoc } from '../../common/schemas/thaw_request';
-import { MissingSettingsError } from '../errors';
+import { ActionError, MissingSettingsError } from '../errors';
 import {
   getSettings,
   type SettingsRepoEsClient,
 } from '../repositories/settings_repo';
 import {
   findReposByDateRange,
+  getAllRepos,
   saveRepositoryDoc,
   type RepositoryRepoWriteEsClient,
 } from '../repositories/repository_repo';
 import {
+  createSnapshotRepository,
+  type SnapshotRepoEsClient,
+} from '../repositories/snapshot_repo';
+import {
+  getThawRequest,
   saveThawRequest,
   type ThawRequestRepoWriteEsClient,
 } from '../repositories/thaw_request_repo';
@@ -46,7 +52,8 @@ const RESTORE_BATCH = 10;
 
 export type ThawActionEsClient = SettingsRepoEsClient &
   RepositoryRepoWriteEsClient &
-  ThawRequestRepoWriteEsClient;
+  ThawRequestRepoWriteEsClient &
+  SnapshotRepoEsClient;
 
 export interface ThawConfig {
   /** ISO 8601 inclusive start of the date range to thaw. */
@@ -372,5 +379,317 @@ export async function runThaw(
     repo_object_stats: repoObjectStats,
     started_at,
     completed_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Per-repo restore progress as returned by `inspectThawProgress` and
+ * `checkAndMaybeMount`. Counts mirror `check_restore_status` in
+ *   packages/deepfreeze-core/deepfreeze_core/utilities.py
+ *   - total: all objects under bucket/base_path
+ *   - restored: in a hot/accessible tier (no restore needed, or restored)
+ *   - in_progress: archive-tier with an active restore (ongoing-request="true")
+ *   - not_restored: archive-tier with no restore on file
+ */
+export interface RepoRestoreProgress {
+  repo: string;
+  bucket: string;
+  base_path: string;
+  total: number;
+  restored: number;
+  in_progress: number;
+  not_restored: number;
+  complete: boolean;
+}
+
+export interface ThawProgressResult {
+  request_id: string;
+  /**
+   * Status at the time of the call. `checkAndMaybeMount` may flip this
+   * from `in_progress` to `completed` (or `failed`) before returning.
+   */
+  status: ThawRequestDoc['status'];
+  start_date?: string;
+  end_date?: string;
+  repos: RepoRestoreProgress[];
+  /** True iff every repo has every object accessible. */
+  all_complete: boolean;
+  /** Set by `checkAndMaybeMount` when it just transitioned to completed. */
+  mounted?: boolean;
+  errors: ServiceError[];
+  checked_at: string;
+}
+
+async function computeRepoProgress(
+  storage: StorageClient,
+  repo: RepositoryDoc
+): Promise<RepoRestoreProgress> {
+  const objects = await storage.listObjects(repo.bucket, repo.base_path);
+  const total = objects.length;
+
+  if (total === 0) {
+    // Mirrors Python: no objects → not complete (avoids accidentally
+    // marking an empty/missing prefix as "all restored").
+    return {
+      repo: repo.name,
+      bucket: repo.bucket,
+      base_path: repo.base_path,
+      total: 0,
+      restored: 0,
+      in_progress: 0,
+      not_restored: 0,
+      complete: false,
+    };
+  }
+
+  let restored = 0;
+  let in_progress = 0;
+  let not_restored = 0;
+
+  for (let i = 0; i < objects.length; i += RESTORE_BATCH) {
+    const batch = objects.slice(i, i + RESTORE_BATCH);
+    const states = await Promise.all(
+      batch.map((obj) => storage.headObject(repo.bucket, obj.key))
+    );
+    for (const state of states) {
+      if (state.accessible) restored += 1;
+      else if (state.restore && state.restore.ongoing) in_progress += 1;
+      else not_restored += 1;
+    }
+  }
+
+  return {
+    repo: repo.name,
+    bucket: repo.bucket,
+    base_path: repo.base_path,
+    total,
+    restored,
+    in_progress,
+    not_restored,
+    complete: restored === total,
+  };
+}
+
+async function loadRequestAndRepos(
+  client: ThawActionEsClient,
+  request_id: string
+): Promise<{ request: ThawRequestDoc; repos: RepositoryDoc[] }> {
+  const request = await getThawRequest(client, request_id);
+  if (!request) {
+    throw new ActionError(`Thaw request ${request_id} not found`);
+  }
+  const all = await getAllRepos(client);
+  const byName = new Map(all.map((r) => [r.name, r]));
+  const repos: RepositoryDoc[] = [];
+  for (const name of request.repos) {
+    const doc = byName.get(name);
+    if (doc) repos.push(doc);
+  }
+  return { request, repos };
+}
+
+/**
+ * Read-only inspection of a thaw request's restore progress.
+ *
+ * Returns the current per-repo object counts without mounting or
+ * touching the request status. Use this for periodic UI polling that
+ * doesn't try to advance the workflow — `checkAndMaybeMount` is the
+ * side-effecting version.
+ *
+ * If the request's status is already terminal (`completed`, `failed`,
+ * `refrozen`), we short-circuit and skip the S3 head loop since
+ * progress no longer changes.
+ */
+export async function inspectThawProgress(
+  client: ThawActionEsClient,
+  storage: StorageClient,
+  request_id: string
+): Promise<ThawProgressResult> {
+  await loadInitializedSettings(client);
+  const { request, repos } = await loadRequestAndRepos(client, request_id);
+  const checked_at = new Date().toISOString();
+
+  if (request.status !== 'in_progress') {
+    return {
+      request_id,
+      status: request.status,
+      start_date: request.start_date,
+      end_date: request.end_date,
+      repos: [],
+      all_complete: request.status === 'completed' || request.status === 'refrozen',
+      errors: [],
+      checked_at,
+    };
+  }
+
+  const progress: RepoRestoreProgress[] = [];
+  const errors: ServiceError[] = [];
+  for (const repo of repos) {
+    try {
+      progress.push(await computeRepoProgress(storage, repo));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push({
+        code: 'ACTION_FAILED',
+        message: `Progress check failed for ${repo.name}: ${msg}`,
+        severity: 'warning',
+        target: repo.name,
+      });
+      progress.push({
+        repo: repo.name,
+        bucket: repo.bucket,
+        base_path: repo.base_path,
+        total: 0,
+        restored: 0,
+        in_progress: 0,
+        not_restored: 0,
+        complete: false,
+      });
+    }
+  }
+
+  const all_complete = progress.length > 0 && progress.every((p) => p.complete);
+  return {
+    request_id,
+    status: request.status,
+    start_date: request.start_date,
+    end_date: request.end_date,
+    repos: progress,
+    all_complete,
+    errors,
+    checked_at,
+  };
+}
+
+/**
+ * Inspect progress AND, when every repo's restore is complete and the
+ * request is still `in_progress`, mount the snapshot repositories and
+ * flip the request status to `completed`. If any mount fails, the
+ * request is moved to `failed` so the UI can surface the error.
+ *
+ * Mounting here means re-registering the snapshot repository in ES
+ * (`PUT _snapshot/{name}`) so Kibana / kibana users can re-discover
+ * the snapshots. Searchable-snapshot index mounting (the `_mount`
+ * step in Python's `find_and_mount_indices_in_date_range`) is left to
+ * the user / operator for now — this MVP only ensures the repository
+ * is reachable.
+ */
+export async function checkAndMaybeMount(
+  client: ThawActionEsClient,
+  storage: StorageClient,
+  request_id: string,
+  options: RunThawOptions = {}
+): Promise<ThawProgressResult> {
+  const log = options.log ?? NOOP_LOG;
+  const now = options.now ?? (() => new Date());
+
+  const settings = await getSettings(client);
+  if (!settings) {
+    throw new MissingSettingsError('Settings document not found in status index');
+  }
+
+  const { request, repos } = await loadRequestAndRepos(client, request_id);
+  const checked_at = new Date().toISOString();
+
+  if (request.status !== 'in_progress') {
+    return {
+      request_id,
+      status: request.status,
+      start_date: request.start_date,
+      end_date: request.end_date,
+      repos: [],
+      all_complete: request.status === 'completed' || request.status === 'refrozen',
+      errors: [],
+      checked_at,
+    };
+  }
+
+  const progress: RepoRestoreProgress[] = [];
+  const errors: ServiceError[] = [];
+  for (const repo of repos) {
+    try {
+      progress.push(await computeRepoProgress(storage, repo));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push({
+        code: 'ACTION_FAILED',
+        message: `Progress check failed for ${repo.name}: ${msg}`,
+        severity: 'warning',
+        target: repo.name,
+      });
+      progress.push({
+        repo: repo.name,
+        bucket: repo.bucket,
+        base_path: repo.base_path,
+        total: 0,
+        restored: 0,
+        in_progress: 0,
+        not_restored: 0,
+        complete: false,
+      });
+    }
+  }
+
+  const all_complete = progress.length > 0 && progress.every((p) => p.complete);
+
+  if (!all_complete) {
+    return {
+      request_id,
+      status: 'in_progress',
+      start_date: request.start_date,
+      end_date: request.end_date,
+      repos: progress,
+      all_complete: false,
+      errors,
+      checked_at,
+    };
+  }
+
+  // All restores complete: mount each repo and flip statuses.
+  log.debug(`All restores complete for ${request_id}; mounting ${repos.length} repo(s)`);
+  let mountFailed = false;
+  for (const repo of repos) {
+    try {
+      await createSnapshotRepository(client, {
+        name: repo.name,
+        provider: settings.provider,
+        bucket: repo.bucket,
+        base_path: repo.base_path,
+        canned_acl: settings.canned_acl,
+        storage_class: settings.storage_class,
+      });
+      await saveRepositoryDoc(client, {
+        ...repo,
+        thaw_state: 'thawed',
+        is_thawed: true,
+        is_mounted: true,
+        thawed_at: now().toISOString(),
+      });
+    } catch (err) {
+      mountFailed = true;
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(`Mount failed for ${repo.name}: ${msg}`);
+      errors.push({
+        code: 'ACTION_FAILED',
+        message: `Mount failed for ${repo.name}: ${msg}`,
+        severity: 'error',
+        target: repo.name,
+      });
+    }
+  }
+
+  const finalStatus: ThawRequestDoc['status'] = mountFailed ? 'failed' : 'completed';
+  await saveThawRequest(client, { ...request, status: finalStatus });
+
+  return {
+    request_id,
+    status: finalStatus,
+    start_date: request.start_date,
+    end_date: request.end_date,
+    repos: progress,
+    all_complete: true,
+    mounted: !mountFailed,
+    errors,
+    checked_at,
   };
 }

@@ -16,4 +16,13 @@ export const API = {
   rotate: `${BASE_PATH}/rotate`,
   cleanup: `${BASE_PATH}/cleanup`,
   refreeze: `${BASE_PATH}/refreeze`,
+  thaw: `${BASE_PATH}/thaw`,
+  /**
+   * `${id}` placeholder; routes register the literal `/{id}` path and
+   * callers `paths.thawProgress(id)` for typed URL construction.
+   */
+  thawProgress: (id: string) => `${BASE_PATH}/thaw-requests/${id}/progress`,
+  thawCheck: (id: string) => `${BASE_PATH}/thaw-requests/${id}/check`,
+  thawProgressPattern: `${BASE_PATH}/thaw-requests/{id}/progress`,
+  thawCheckPattern: `${BASE_PATH}/thaw-requests/{id}/check`,
 } as const;
