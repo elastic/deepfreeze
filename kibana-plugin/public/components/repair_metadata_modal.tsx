@@ -344,10 +344,14 @@ export function RepairMetadataModal({
           onClick={doRun}
           iconType="wrench"
           isLoading={running}
+          // If a preview was run AND showed nothing to repair, keep
+          // disabled. Otherwise allow Run without a preview first.
           isDisabled={
-            !preview ||
-            (preview.discrepancies.length === 0 && preview.date_ranges.length === 0) ||
-            !!completed
+            running ||
+            !!completed ||
+            (preview !== null &&
+              preview.discrepancies.length === 0 &&
+              preview.date_ranges.length === 0)
           }
         >
           Apply repairs

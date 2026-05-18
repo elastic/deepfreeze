@@ -173,7 +173,7 @@ export function RotateModal({ http, notifications, onClose, onComplete }: Rotate
         <EuiButton onClick={doPreview} iconType="inspect" isLoading={running}>
           Preview
         </EuiButton>
-        <EuiButton fill onClick={doRun} iconType="play" isLoading={running} isDisabled={!preview}>
+        <EuiButton fill onClick={doRun} iconType="play" isLoading={running} isDisabled={running}>
           Run rotate
         </EuiButton>
       </EuiModalFooter>

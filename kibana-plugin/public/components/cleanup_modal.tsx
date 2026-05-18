@@ -178,7 +178,7 @@ export function CleanupModal({ http, notifications, onClose, onComplete }: Clean
         <EuiButton onClick={doPreview} iconType="inspect" isLoading={running}>
           Preview
         </EuiButton>
-        <EuiButton fill onClick={doRun} iconType="play" isLoading={running} isDisabled={!preview}>
+        <EuiButton fill onClick={doRun} iconType="play" isLoading={running} isDisabled={running}>
           Run cleanup
         </EuiButton>
       </EuiModalFooter>

@@ -690,7 +690,7 @@ function Step5Review({
             iconType="play"
             onClick={onSubmit}
             isLoading={running}
-            isDisabled={running || dryRunResult === null}
+            isDisabled={running}
           >
             Run setup
           </EuiButton>

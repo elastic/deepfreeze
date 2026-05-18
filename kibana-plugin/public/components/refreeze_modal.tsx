@@ -161,7 +161,13 @@ export function RefreezeModal({
           onClick={doRun}
           iconType="snowflake"
           isLoading={running}
-          isDisabled={!preview || !preview.refrozen_requests.includes(request_id)}
+          // If a preview was run AND it tells us this request can't be
+          // refrozen, keep the button disabled. Otherwise let the user
+          // submit and surface any server-side rejection as a toast.
+          isDisabled={
+            running ||
+            (preview !== null && !preview.refrozen_requests.includes(request_id))
+          }
         >
           Refreeze
         </EuiButton>

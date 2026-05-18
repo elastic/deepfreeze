@@ -225,7 +225,14 @@ export function ThawModal({
           onClick={doRun}
           iconType="play"
           isLoading={running}
-          isDisabled={!preview || preview.repos.length === 0}
+          // The range must validate, but a preview is not required —
+          // if the user already previewed and saw zero matches, keep
+          // disabled; otherwise let them submit and toast the result.
+          isDisabled={
+            running ||
+            !rangeValid ||
+            (preview !== null && preview.repos.length === 0)
+          }
         >
           Initiate thaw
         </EuiButton>
