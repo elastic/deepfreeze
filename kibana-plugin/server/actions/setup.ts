@@ -10,6 +10,16 @@
  *   other snapshot repositories. Setup creates the ES-side state only:
  *   audit + status indices, the settings doc, the new snapshot
  *   repository, and optionally the ILM policy + index-template update.
+ *
+ * ILM policy lifecycle:
+ *   The user-selected base ILM policy is NEVER modified in place. If
+ *   it doesn't exist yet, Setup creates it from the default tiering
+ *   strategy (one-time, write-once). It then clones the base body to
+ *   produce `<base>-<suffix>` (the first versioned policy) pointing at
+ *   the first repo. The index template is bound to the versioned name,
+ *   not the base, so future Rotate calls can keep producing new
+ *   versioned policies without ever touching the user's base. Mirrors
+ *   the per-rotation versioning seen in rotate.ts.
  */
 
 import type { Provider } from '../../common/constants';
@@ -28,8 +38,9 @@ import {
 } from '../repositories/repository_repo';
 import type { RepositoryDoc } from '../../common/schemas/repository';
 import {
-  createOrUpdateIlmPolicy,
-  type CreateOrUpdateIlmPolicyResult,
+  createVersionedIlmPolicy,
+  defaultIlmPolicyBody,
+  getIlmPolicy,
   type IlmRepoWriteEsClient,
 } from '../repositories/ilm_repo';
 import {
@@ -294,17 +305,23 @@ export async function runSetupDryRun(
     },
   ];
   if (config.ilm_policy_name) {
+    const versioned = `${config.ilm_policy_name}-${naming.suffix}`;
     steps.push({
       type: 'ilm_policy',
-      action: 'would_update',
-      name: config.ilm_policy_name,
+      action: 'would_create',
+      name: versioned,
+      detail: `cloned from ${config.ilm_policy_name}, → ${naming.new_repo_name}`,
     });
   }
   if (config.index_template_name) {
+    const versioned = config.ilm_policy_name
+      ? `${config.ilm_policy_name}-${naming.suffix}`
+      : '';
     steps.push({
       type: 'index_template',
       action: 'would_update',
       name: config.index_template_name,
+      detail: versioned ? `→ ${versioned}` : undefined,
     });
   }
 
@@ -391,18 +408,60 @@ export async function runSetup(
   };
   await saveRepositoryDoc(client, newRepoDoc);
 
-  let ilmResult: CreateOrUpdateIlmPolicyResult | null = null;
+  // ILM policy: NEVER mutate the user-selected base policy in place.
+  // Setup creates the first versioned policy `<base>-<suffix>` (where
+  // <suffix> matches the first repo, e.g. `-000001`) and points the
+  // index template at that versioned name. The base policy stays
+  // untouched as the stable source-of-truth for future Rotate calls.
+  // If the user-selected base policy doesn't yet exist, create it from
+  // the default deepfreeze tiering strategy first — then clone it to
+  // produce the versioned copy.
+  const versionedPolicyName = config.ilm_policy_name
+    ? `${config.ilm_policy_name}-${naming.suffix}`
+    : null;
+
   if (config.ilm_policy_name) {
     try {
-      ilmResult = await createOrUpdateIlmPolicy(
+      let baseBody: { phases?: Record<string, unknown> } | null = null;
+      const existing = await getIlmPolicy(client, config.ilm_policy_name);
+      if (existing?.policy) {
+        baseBody = existing.policy as { phases?: Record<string, unknown> };
+        steps.push({
+          type: 'ilm_policy',
+          action: 'unchanged',
+          name: config.ilm_policy_name,
+          detail: 'base policy left as-is',
+        });
+      } else {
+        // No base policy yet — create one from the default tiering
+        // strategy. This is the one and only time Setup writes to the
+        // base name; subsequent rotations only touch versioned copies.
+        baseBody = defaultIlmPolicyBody(naming.new_repo_name);
+        await client.ilm.putLifecycle({
+          name: config.ilm_policy_name,
+          policy: baseBody,
+        });
+        steps.push({
+          type: 'ilm_policy',
+          action: 'created',
+          name: config.ilm_policy_name,
+          detail: 'base policy created from default tiering strategy',
+        });
+      }
+
+      // Create the first versioned policy `<base>-<suffix>`.
+      await createVersionedIlmPolicy(
         client,
         config.ilm_policy_name,
-        naming.new_repo_name
+        baseBody,
+        naming.new_repo_name,
+        naming.suffix
       );
       steps.push({
         type: 'ilm_policy',
-        action: ilmResult.action,
-        name: config.ilm_policy_name,
+        action: 'created',
+        name: versionedPolicyName!,
+        detail: `cloned from ${config.ilm_policy_name}, → ${naming.new_repo_name}`,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -419,10 +478,14 @@ export async function runSetup(
   let templateResult: UpdateIndexTemplateResult | null = null;
   if (config.index_template_name) {
     try {
+      // Point the template at the versioned policy (not the base), so
+      // new indices created post-setup bind to `<base>-<suffix>` and
+      // future rotations rebind only the versioned name, leaving the
+      // base policy permanently stable.
       templateResult = await updateIndexTemplateIlmPolicy(
         client,
         config.index_template_name,
-        config.ilm_policy_name ?? ''
+        versionedPolicyName ?? config.ilm_policy_name ?? ''
       );
       steps.push({
         type: 'index_template',

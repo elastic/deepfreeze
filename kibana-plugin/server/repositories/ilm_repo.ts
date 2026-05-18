@@ -16,7 +16,7 @@ export interface IlmRepoEsClient {
   };
 }
 
-/** Write methods needed for `createOrUpdateIlmPolicy`. */
+/** Write methods needed for putting ILM policies (Setup and Rotate). */
 export interface IlmRepoWriteEsClient extends IlmRepoEsClient {
   ilm: IlmRepoEsClient['ilm'] & {
     putLifecycle: (params: {
@@ -117,23 +117,17 @@ export async function getIlmPolicy(
   }
 }
 
-/** Outcome of `createOrUpdateIlmPolicy`. */
-export interface CreateOrUpdateIlmPolicyResult {
-  action: 'created' | 'updated' | 'unchanged';
-  policy_body: Record<string, unknown>;
-}
-
 /**
- * The default tiering strategy used when creating a fresh ILM policy
- * during Setup. Hot → Cold (30d) → Frozen (365d, searchable snapshot
- * to the new deepfreeze repo) → Delete (with delete_searchable_snapshot
- * forced to false so the underlying snapshot survives).
+ * The default tiering strategy used when Setup needs to bootstrap a
+ * brand-new base ILM policy (because the user-selected name didn't yet
+ * exist in the cluster). Hot → Cold (30d) → Frozen (365d, searchable
+ * snapshot to the first deepfreeze repo) → Delete (with
+ * delete_searchable_snapshot=false so the underlying snapshot survives).
  *
  * Mirrors the same dictionary in
  *   packages/deepfreeze-core/deepfreeze_core/utilities.py
  *     — create_or_update_ilm_policy().
- */
-/**
+ *
  * Note on the body shape: the @elastic/elasticsearch v9 client's
  * `putLifecycle({ name, policy })` already wraps `policy` into the
  * `{policy: {...}}` envelope that the underlying REST API expects.
@@ -162,67 +156,6 @@ export function defaultIlmPolicyBody(repoName: string): Record<string, unknown> 
       },
     },
   };
-}
-
-/**
- * Either create a new ILM policy with the default deepfreeze tiering
- * strategy, or update an existing policy's `searchable_snapshot`
- * actions and `delete.delete_searchable_snapshot` flag to point at the
- * new repository.
- *
- * Mirrors `create_or_update_ilm_policy` in the Python utilities.
- *
- * Returns `'unchanged'` (with the unmodified body) if the policy exists
- * but has no `searchable_snapshot` actions to retarget — the caller
- * surfaces that to the user as a warning rather than an error.
- */
-export async function createOrUpdateIlmPolicy(
-  client: IlmRepoWriteEsClient,
-  policyName: string,
-  repoName: string
-): Promise<CreateOrUpdateIlmPolicyResult> {
-  const existing = await getIlmPolicy(client, policyName);
-
-  if (existing === null) {
-    const body = defaultIlmPolicyBody(repoName);
-    await client.ilm.putLifecycle({ name: policyName, policy: body });
-    return { action: 'created', policy_body: body };
-  }
-
-  // Deep clone so we can safely mutate.
-  const updated = JSON.parse(JSON.stringify(existing)) as IlmPolicyEntry;
-  const phases = updated.policy?.phases ?? {};
-  let modified = false;
-
-  for (const phaseConfig of Object.values(phases)) {
-    const ss = phaseConfig.actions?.searchable_snapshot;
-    if (ss && 'snapshot_repository' in ss) {
-      if (ss.snapshot_repository !== repoName) {
-        ss.snapshot_repository = repoName;
-        modified = true;
-      }
-    }
-  }
-
-  const deletePhase = phases.delete as
-    | { actions?: { delete?: { delete_searchable_snapshot?: boolean } } }
-    | undefined;
-  if (deletePhase?.actions?.delete) {
-    if (deletePhase.actions.delete.delete_searchable_snapshot !== false) {
-      deletePhase.actions.delete.delete_searchable_snapshot = false;
-      modified = true;
-    }
-  }
-
-  // The v9 client wraps `policy` into the {policy: ...} envelope on its
-  // own, so we pass the inner policy body (the {phases: ...} object).
-  const body = updated.policy ?? {};
-  if (modified) {
-    await client.ilm.putLifecycle({ name: policyName, policy: body });
-    return { action: 'updated', policy_body: body };
-  }
-
-  return { action: 'unchanged', policy_body: body };
 }
 
 /**

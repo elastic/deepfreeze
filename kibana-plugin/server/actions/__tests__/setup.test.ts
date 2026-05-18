@@ -49,7 +49,8 @@ interface Trace {
   settings_indexed?: Record<string, unknown>;
   repo_doc_indexed?: Record<string, unknown>;
   repo_created?: Record<string, unknown>;
-  ilm_put?: { name: string; policy: Record<string, unknown> };
+  /** All putLifecycle calls in order. Setup may write both base and versioned. */
+  ilm_puts: Array<{ name: string; policy: Record<string, unknown> }>;
   template_put?: { name: string; body: Record<string, unknown> };
 }
 
@@ -61,7 +62,7 @@ function notFound(): Error {
 }
 
 function makeClient(opts: FakeOpts = {}): { client: SetupActionEsClient; trace: Trace } {
-  const trace: Trace = {};
+  const trace: Trace = { ilm_puts: [] };
 
   const client: SetupActionEsClient = {
     indices: {
@@ -107,14 +108,22 @@ function makeClient(opts: FakeOpts = {}): { client: SetupActionEsClient; trace: 
     },
     ilm: {
       getLifecycle: async ({ name }: { name?: string } = {}) => {
-        if (!name) return opts.existingIlmPolicies ?? {};
+        if (!name) {
+          // Bulk read — wrap each policy in {policy: ...} as ES does.
+          return Object.fromEntries(
+            Object.entries(opts.existingIlmPolicies ?? {}).map(([n, p]) => [
+              n,
+              { policy: p },
+            ])
+          );
+        }
         const p = opts.existingIlmPolicies?.[name];
         if (!p) throw notFound();
-        return { [name]: p };
+        return { [name]: { policy: p } };
       },
       putLifecycle: async (args) => {
         if (opts.failPutIlm) throw new Error('boom-ilm');
-        trace.ilm_put = args;
+        trace.ilm_puts.push(args);
         return {};
       },
     },
@@ -267,7 +276,12 @@ describe('runSetupDryRun success', () => {
       'snapshot_repository',
     ]);
     // No writes happened
-    expect(trace).toEqual({});
+    expect(trace.ilm_puts).toEqual([]);
+    expect(trace.template_put).toBeUndefined();
+    expect(trace.repo_created).toBeUndefined();
+    expect(trace.settings_indexed).toBeUndefined();
+    expect(trace.status_index_created).toBeUndefined();
+    expect(trace.audit_index_created).toBeUndefined();
   });
 
   it('includes ilm_policy and index_template steps when configured', async () => {
@@ -329,7 +343,9 @@ describe('runSetup happy path', () => {
     });
   });
 
-  it('creates a new ILM policy when configured and the policy did not exist', async () => {
+  it('creates base + versioned ILM policy when configured and the base did not exist', async () => {
+    // No existing policy → Setup creates the base from defaults, then
+    // creates `<base>-<suffix>` as the first versioned copy.
     const { client, trace } = makeClient({
       existingSnapshotRepos: { other: { type: 's3', settings: { bucket: 'my-bucket' } } },
     });
@@ -337,11 +353,62 @@ describe('runSetup happy path', () => {
     const result = await runSetup(client, defaultConfig({ ilm_policy_name: 'logs-policy' }));
 
     expect(result.errors).toEqual([]);
-    expect(trace.ilm_put?.name).toBe('logs-policy');
-    expect(result.steps.find((s) => s.type === 'ilm_policy')?.action).toBe('created');
+    expect(trace.ilm_puts.map((p) => p.name)).toEqual([
+      'logs-policy',
+      'logs-policy-000001',
+    ]);
+    // Both reference the new repo in their frozen phase.
+    for (const put of trace.ilm_puts) {
+      const phases = (put.policy as { phases: Record<string, unknown> }).phases;
+      const frozen = phases.frozen as {
+        actions: { searchable_snapshot: { snapshot_repository: string } };
+      };
+      expect(frozen.actions.searchable_snapshot.snapshot_repository).toBe(
+        'deepfreeze-000001'
+      );
+    }
+    const ilmSteps = result.steps.filter((s) => s.type === 'ilm_policy');
+    expect(ilmSteps.map((s) => s.name)).toEqual(['logs-policy', 'logs-policy-000001']);
+    expect(ilmSteps.map((s) => s.action)).toEqual(['created', 'created']);
   });
 
-  it('updates a composable index template when configured', async () => {
+  it('leaves the existing base ILM policy as-is and only creates the versioned copy', async () => {
+    const operatorEditedBase = {
+      // Operator edited frozen.min_age to 90d before running Setup.
+      phases: {
+        frozen: {
+          min_age: '90d',
+          actions: { searchable_snapshot: { snapshot_repository: 'placeholder' } },
+        },
+      },
+    };
+    const { client, trace } = makeClient({
+      existingSnapshotRepos: { other: { type: 's3', settings: { bucket: 'my-bucket' } } },
+      existingIlmPolicies: { 'logs-policy': operatorEditedBase },
+    });
+
+    const result = await runSetup(client, defaultConfig({ ilm_policy_name: 'logs-policy' }));
+
+    expect(result.errors).toEqual([]);
+    // ONLY the versioned policy was written; the base is untouched.
+    expect(trace.ilm_puts.map((p) => p.name)).toEqual(['logs-policy-000001']);
+    // The versioned copy preserved the operator's min_age=90d edit and
+    // retargeted snapshot_repository.
+    const versioned = trace.ilm_puts[0];
+    const phases = (versioned.policy as { phases: Record<string, unknown> }).phases;
+    const frozen = phases.frozen as {
+      min_age: string;
+      actions: { searchable_snapshot: { snapshot_repository: string } };
+    };
+    expect(frozen.min_age).toBe('90d');
+    expect(frozen.actions.searchable_snapshot.snapshot_repository).toBe(
+      'deepfreeze-000001'
+    );
+    const ilmSteps = result.steps.filter((s) => s.type === 'ilm_policy');
+    expect(ilmSteps.map((s) => s.action)).toEqual(['unchanged', 'created']);
+  });
+
+  it('binds the index template to the versioned policy, not the base', async () => {
     const { client, trace } = makeClient({
       existingSnapshotRepos: { other: { type: 's3', settings: { bucket: 'my-bucket' } } },
       existingTemplates: {
@@ -359,6 +426,16 @@ describe('runSetup happy path', () => {
 
     expect(result.errors).toEqual([]);
     expect(trace.template_put?.name).toBe('logs-template');
+    // The template's lifecycle.name should now point at the versioned policy.
+    const lifecycle = (
+      (
+        (trace.template_put!.body.template as Record<string, unknown>).settings as Record<
+          string,
+          unknown
+        >
+      ).index as Record<string, unknown>
+    ).lifecycle as { name: string };
+    expect(lifecycle.name).toBe('logs-policy-000001');
     expect(result.steps.find((s) => s.type === 'index_template')?.action).toBe('updated');
   });
 });

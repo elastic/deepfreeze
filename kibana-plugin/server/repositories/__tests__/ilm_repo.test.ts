@@ -1,6 +1,5 @@
 import {
-  createOrUpdateIlmPolicy,
-  defaultIlmPolicyBody,
+  createVersionedIlmPolicy,
   getDeepfreezeIlmPolicies,
   getIlmPolicy,
   type IlmRepoEsClient,
@@ -182,93 +181,99 @@ describe('getIlmPolicy', () => {
   });
 });
 
-describe('createOrUpdateIlmPolicy', () => {
-  function writeClient(opts: {
-    existing?: Record<string, unknown>;
-    captureKey?: (args: { name: string; policy: Record<string, unknown> }) => void;
-  } = {}): IlmRepoWriteEsClient {
-    return {
+describe('createVersionedIlmPolicy', () => {
+  function writeClient(): {
+    client: IlmRepoWriteEsClient;
+    puts: Array<{ name: string; policy: Record<string, unknown> }>;
+  } {
+    const puts: Array<{ name: string; policy: Record<string, unknown> }> = [];
+    const client: IlmRepoWriteEsClient = {
       ilm: {
-        getLifecycle: async ({ name }: { name?: string } = {}) => {
-          if (!opts.existing) throw notFound();
-          return { [name!]: opts.existing };
+        getLifecycle: async () => {
+          throw notFound();
         },
         putLifecycle: async (args) => {
-          opts.captureKey?.(args);
+          puts.push(args);
           return {};
         },
       },
     };
+    return { client, puts };
   }
 
-  it('creates the default policy body when the named policy does not exist', async () => {
-    const captured: Array<{ name: string; policy: Record<string, unknown> }> = [];
-    const client = writeClient({ captureKey: (a) => captured.push(a) });
-
-    const result = await createOrUpdateIlmPolicy(client, 'new-policy', 'deepfreeze-000001');
-
-    expect(result.action).toBe('created');
-    expect(captured).toHaveLength(1);
-    expect(captured[0]).toEqual({
-      name: 'new-policy',
-      policy: defaultIlmPolicyBody('deepfreeze-000001'),
-    });
-  });
-
-  it('rewrites searchable_snapshot.snapshot_repository to the new repo when an existing policy differs', async () => {
-    const captured: Array<{ name: string; policy: Record<string, unknown> }> = [];
-    const client = writeClient({
-      existing: {
-        policy: {
-          phases: {
-            frozen: {
-              actions: { searchable_snapshot: { snapshot_repository: 'old-repo' } },
-            },
-            delete: {
-              actions: { delete: { delete_searchable_snapshot: true } },
-            },
-          },
+  it('writes <base>-<suffix> with searchable_snapshot.snapshot_repository retargeted', async () => {
+    const { client, puts } = writeClient();
+    const baseBody = {
+      phases: {
+        hot: { min_age: '0ms', actions: { rollover: { max_size: '50gb' } } },
+        frozen: {
+          min_age: '30d',
+          actions: { searchable_snapshot: { snapshot_repository: 'old-repo' } },
         },
       },
-      captureKey: (a) => captured.push(a),
-    });
+    };
 
-    const result = await createOrUpdateIlmPolicy(client, 'p', 'new-repo');
-    expect(result.action).toBe('updated');
+    const name = await createVersionedIlmPolicy(
+      client,
+      'logs-policy',
+      baseBody,
+      'deepfreeze-000002',
+      '000002'
+    );
 
-    // The v9 client expects the inner policy body — {phases: {...}} —
-    // not a {policy: {phases: {...}}} double-wrap.
-    const phases = (captured[0].policy as { phases: Record<string, unknown> }).phases;
-    expect(
-      (phases.frozen as { actions: { searchable_snapshot: { snapshot_repository: string } } })
-        .actions.searchable_snapshot.snapshot_repository
-    ).toBe('new-repo');
-    expect(
-      (phases.delete as { actions: { delete: { delete_searchable_snapshot: boolean } } }).actions
-        .delete.delete_searchable_snapshot
-    ).toBe(false);
+    expect(name).toBe('logs-policy-000002');
+    expect(puts).toHaveLength(1);
+    expect(puts[0].name).toBe('logs-policy-000002');
+    const policy = puts[0].policy as {
+      phases: {
+        hot: { actions: { rollover: { max_size: string } } };
+        frozen: { actions: { searchable_snapshot: { snapshot_repository: string } } };
+      };
+    };
+    // Frozen phase repointed.
+    expect(policy.phases.frozen.actions.searchable_snapshot.snapshot_repository).toBe(
+      'deepfreeze-000002'
+    );
+    // Non-searchable_snapshot fields preserved.
+    expect(policy.phases.hot.actions.rollover.max_size).toBe('50gb');
   });
 
-  it('returns unchanged + skips PUT when nothing differs', async () => {
-    const captured: Array<{ name: string; policy: Record<string, unknown> }> = [];
-    const client = writeClient({
-      existing: {
-        policy: {
-          phases: {
-            frozen: {
-              actions: { searchable_snapshot: { snapshot_repository: 'new-repo' } },
-            },
-            delete: {
-              actions: { delete: { delete_searchable_snapshot: false } },
-            },
-          },
+  it('does not mutate the input body (deep clone)', async () => {
+    const { client } = writeClient();
+    const baseBody = {
+      phases: {
+        frozen: {
+          actions: { searchable_snapshot: { snapshot_repository: 'old-repo' } },
         },
       },
-      captureKey: (a) => captured.push(a),
-    });
+    };
+    await createVersionedIlmPolicy(client, 'p', baseBody, 'new-repo', '000003');
+    // The caller's copy of baseBody should still reference the OLD repo.
+    expect(
+      baseBody.phases.frozen.actions.searchable_snapshot.snapshot_repository
+    ).toBe('old-repo');
+  });
 
-    const result = await createOrUpdateIlmPolicy(client, 'p', 'new-repo');
-    expect(result.action).toBe('unchanged');
-    expect(captured).toHaveLength(0);
+  it('handles bodies with multiple phases referencing snapshot_repository', async () => {
+    const { client, puts } = writeClient();
+    const baseBody = {
+      phases: {
+        cold: {
+          actions: { searchable_snapshot: { snapshot_repository: 'old-repo' } },
+        },
+        frozen: {
+          actions: { searchable_snapshot: { snapshot_repository: 'old-repo' } },
+        },
+      },
+    };
+    await createVersionedIlmPolicy(client, 'p', baseBody, 'new-repo', '000004');
+    const policy = puts[0].policy as {
+      phases: Record<
+        string,
+        { actions: { searchable_snapshot: { snapshot_repository: string } } }
+      >;
+    };
+    expect(policy.phases.cold.actions.searchable_snapshot.snapshot_repository).toBe('new-repo');
+    expect(policy.phases.frozen.actions.searchable_snapshot.snapshot_repository).toBe('new-repo');
   });
 });
