@@ -1,11 +1,12 @@
 /**
- * Rotate action — create the next-suffix snapshot repository, retarget
- * the configured ILM policy, and unmount older repositories that fall
+ * Rotate action — create the next-suffix snapshot repository, create a
+ * versioned ILM policy pointing at it, retarget index templates onto
+ * that new versioned policy, and unmount older repositories that fall
  * outside the `keep` window.
  *
  * Mirrors `Rotate.do_action` in
  *   packages/deepfreeze-core/deepfreeze_core/actions/rotate.py
- * with three deliberate simplifications for the Kibana port:
+ * with two deliberate simplifications for the Kibana port:
  *
  *   1. **rotate_by='bucket' is unsupported.** Bucket-rotation needs the
  *      storage SDK (deferred to Phase 4). If `settings.rotate_by` is
@@ -14,12 +15,20 @@
  *      via the Python CLI.
  *   2. **No `push_to_glacier`.** That requires the storage SDK too.
  *      Bucket lifecycle policies (set externally) handle archival.
- *   3. **No versioned ILM policies.** The base ILM policy is retargeted
- *      to the new repo via the same `createOrUpdateIlmPolicy` helper
- *      Setup uses. The Python CLI's per-rotation policy versioning
- *      (`policy-000001`, `policy-000002`, …) is dropped — existing
- *      mounted indices continue to use whatever repo they bound to at
- *      mount time, and new frozen-phase transitions use the new repo.
+ *
+ * Versioned ILM policy lifecycle:
+ *   - Setup creates the base policy `<ilm_policy_name>` pointing at the
+ *     first repo.
+ *   - First rotation: read the base policy, create `<base>-<new_suffix>`
+ *     pointing at the new repo, repoint any templates currently
+ *     referencing `<base>` to the new versioned name.
+ *   - Nth rotation: read `<base>-<old_suffix>` (or fall back to base if
+ *     missing), create `<base>-<new_suffix>` pointing at the new repo,
+ *     repoint templates currently referencing `<base>-<old_suffix>`.
+ *   - Old versioned policies stay alive so indices already bound to
+ *     them keep snapshotting to their original repo. Orphaned versioned
+ *     policies (no indices/data-streams/templates left) get reaped by
+ *     Cleanup — see cleanup.ts for the (still pending) implementation.
  */
 
 import type { ServiceError } from '../../common/types/errors';
@@ -42,15 +51,22 @@ import {
   type SnapshotRepoEsClient,
 } from '../repositories/snapshot_repo';
 import {
-  createOrUpdateIlmPolicy,
+  createVersionedIlmPolicy,
+  getIlmPolicy,
   type IlmRepoWriteEsClient,
 } from '../repositories/ilm_repo';
+import {
+  findTemplatesUsingPolicy,
+  updateIndexTemplateIlmPolicy,
+  type IndexTemplateEsClient,
+} from '../repositories/index_template_repo';
 
 /** Full ES surface required by `runRotate`. */
 export type RotateActionEsClient = SettingsRepoWriteEsClient &
   RepositoryRepoWriteEsClient &
   SnapshotRepoEsClient &
-  IlmRepoWriteEsClient;
+  IlmRepoWriteEsClient &
+  IndexTemplateEsClient;
 
 export interface RotateConfig {
   /** Number of newest active repositories to keep mounted. Defaults to 1. */
@@ -68,7 +84,12 @@ export interface RunRotateOptions {
 const NOOP_LOG = { debug: () => {}, warn: () => {} };
 
 export interface RotateStepRecord {
-  type: 'snapshot_repository' | 'settings' | 'repository_doc' | 'ilm_policy';
+  type:
+    | 'snapshot_repository'
+    | 'settings'
+    | 'repository_doc'
+    | 'ilm_policy'
+    | 'index_template';
   action:
     | 'would_create'
     | 'would_update'
@@ -203,11 +224,24 @@ export async function runRotateDryRun(
     { type: 'settings', action: 'would_update', detail: `last_suffix → ${resolved.next_suffix}` },
   ];
   if (settings.ilm_policy_name) {
+    const oldSuffix = settings.last_suffix;
+    const newVersioned = `${settings.ilm_policy_name}-${resolved.next_suffix}`;
+    const sourceName = oldSuffix
+      ? `${settings.ilm_policy_name}-${oldSuffix}`
+      : settings.ilm_policy_name;
     steps.push({
       type: 'ilm_policy',
+      action: 'would_create',
+      name: newVersioned,
+      detail: `cloned from ${sourceName}, → ${resolved.new_repo_name}`,
+    });
+    // We can't enumerate templates here without an extra ES round-trip
+    // in dry-run; surface the prospective rebind generically. The real
+    // run reports per-template details.
+    steps.push({
+      type: 'index_template',
       action: 'would_update',
-      name: settings.ilm_policy_name,
-      detail: `→ ${resolved.new_repo_name}`,
+      detail: `templates bound to ${sourceName} → ${newVersioned}`,
     });
   }
   for (const r of archived) {
@@ -227,6 +261,145 @@ export async function runRotateDryRun(
     started_at,
     completed_at: new Date().toISOString(),
   };
+}
+
+/**
+ * Versioned ILM policy creation + template rebind, as a single atomic
+ * step. Step failures within this block degrade to warnings on
+ * `errors[]` so they don't abort the larger rotation.
+ *
+ * Read order:
+ *   1. Try `<base>-<oldSuffix>` (the most recent versioned policy);
+ *      this preserves any operator edits made since the last rotation.
+ *   2. Fall back to the base `<base>` policy on first rotation.
+ *   3. If neither exists, log a warning and skip ILM work entirely —
+ *      matches Python's behaviour when the configured policy is absent.
+ */
+async function rotateVersionedIlmPolicy(params: {
+  client: RotateActionEsClient;
+  basePolicyName: string;
+  oldSuffix: string | null;
+  newSuffix: string;
+  newRepoName: string;
+  steps: RotateStepRecord[];
+  errors: ServiceError[];
+  log: { debug: (m: string) => void; warn: (m: string) => void };
+}): Promise<void> {
+  const { client, basePolicyName, oldSuffix, newSuffix, newRepoName, steps, errors, log } =
+    params;
+  const newPolicyName = `${basePolicyName}-${newSuffix}`;
+  const oldVersionedName = oldSuffix ? `${basePolicyName}-${oldSuffix}` : null;
+
+  // Resolve the source policy: prefer the most recent versioned copy.
+  let sourceName: string | null = null;
+  let sourceBody: { phases?: Record<string, unknown> } | null = null;
+  if (oldVersionedName) {
+    const candidate = await getIlmPolicy(client, oldVersionedName);
+    if (candidate?.policy) {
+      sourceName = oldVersionedName;
+      sourceBody = candidate.policy as { phases?: Record<string, unknown> };
+    }
+  }
+  if (!sourceBody) {
+    const base = await getIlmPolicy(client, basePolicyName);
+    if (base?.policy) {
+      sourceName = basePolicyName;
+      sourceBody = base.policy as { phases?: Record<string, unknown> };
+    }
+  }
+  if (!sourceBody || !sourceName) {
+    log.warn(
+      `ILM policy ${basePolicyName} not found; skipping versioned-policy creation. ` +
+        'New indices will be created without a deepfreeze ILM binding until the policy is restored.'
+    );
+    errors.push({
+      code: 'ACTION_FAILED',
+      message: `ILM policy ${basePolicyName} not found; versioned policy not created.`,
+      severity: 'warning',
+      target: basePolicyName,
+    });
+    return;
+  }
+
+  // Step 1: create the new versioned policy.
+  try {
+    await createVersionedIlmPolicy(
+      client,
+      basePolicyName,
+      sourceBody,
+      newRepoName,
+      newSuffix
+    );
+    steps.push({
+      type: 'ilm_policy',
+      action: 'created',
+      name: newPolicyName,
+      detail: `cloned from ${sourceName}, → ${newRepoName}`,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn(`Failed to create versioned ILM policy ${newPolicyName}: ${msg}`);
+    errors.push({
+      code: 'ACTION_FAILED',
+      message: `Failed to create versioned ILM policy ${newPolicyName}: ${msg}`,
+      severity: 'warning',
+      target: newPolicyName,
+    });
+    return;
+  }
+
+  // Step 2: find every composable template currently bound to the old
+  // policy (either the previous versioned name or the base, depending
+  // on whether this is the first rotation) and repoint them.
+  try {
+    const toUpdate = await findTemplatesUsingPolicy(client, sourceName);
+    if (toUpdate.length === 0) {
+      log.debug(`No index templates currently bound to ${sourceName}`);
+      return;
+    }
+    for (const templateName of toUpdate) {
+      try {
+        const result = await updateIndexTemplateIlmPolicy(
+          client,
+          templateName,
+          newPolicyName
+        );
+        if (result.action === 'updated') {
+          steps.push({
+            type: 'index_template',
+            action: 'updated',
+            name: templateName,
+            detail: `${sourceName} → ${newPolicyName}`,
+          });
+        } else {
+          steps.push({
+            type: 'index_template',
+            action: 'skipped',
+            name: templateName,
+            detail: 'template no longer exists',
+          });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.warn(`Failed to update template ${templateName}: ${msg}`);
+        errors.push({
+          code: 'ACTION_FAILED',
+          message: `Failed to update template ${templateName}: ${msg}`,
+          severity: 'warning',
+          target: templateName,
+        });
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn(`Failed to enumerate templates for rebind: ${msg}`);
+    errors.push({
+      code: 'ACTION_FAILED',
+      message: `Failed to enumerate templates for rebind: ${msg}`,
+      severity: 'warning',
+      target: sourceName,
+    });
+  }
 }
 
 /**
@@ -326,28 +499,16 @@ export async function runRotate(
   });
 
   if (settings.ilm_policy_name) {
-    try {
-      const ilmResult = await createOrUpdateIlmPolicy(
-        client,
-        settings.ilm_policy_name,
-        resolved.new_repo_name
-      );
-      steps.push({
-        type: 'ilm_policy',
-        action: ilmResult.action,
-        name: settings.ilm_policy_name,
-        detail: `→ ${resolved.new_repo_name}`,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.warn(`Failed to retarget ILM policy ${settings.ilm_policy_name}: ${msg}`);
-      errors.push({
-        code: 'ACTION_FAILED',
-        message: `Failed to retarget ILM policy ${settings.ilm_policy_name}: ${msg}`,
-        severity: 'warning',
-        target: settings.ilm_policy_name,
-      });
-    }
+    await rotateVersionedIlmPolicy({
+      client,
+      basePolicyName: settings.ilm_policy_name,
+      oldSuffix: settings.last_suffix, // pre-rotation suffix (or null if first rotation)
+      newSuffix: resolved.next_suffix,
+      newRepoName: resolved.new_repo_name,
+      steps,
+      errors,
+      log,
+    });
   }
 
   const keep = config.keep ?? 1;

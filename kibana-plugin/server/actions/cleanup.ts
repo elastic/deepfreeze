@@ -6,10 +6,15 @@
  *   packages/deepfreeze-core/deepfreeze_core/actions/cleanup.py
  * Two deliberate omissions for the Phase 3 MVP:
  *
- *   1. **No orphaned ILM policy detection.** Without versioned ILM
- *      policies (see Rotate's notes), there shouldn't be any orphaned
- *      ones to clean up in the first place; we can revisit if a future
- *      rotation strategy reintroduces versioning.
+ *   1. **No orphaned ILM policy detection — PENDING.** Rotate now creates
+ *      versioned policies (`<base>-<suffix>`) on every rotation, so
+ *      orphaned versioned policies accumulate over time once their
+ *      bound indices are deleted. The reaper that compares against
+ *      `in_use_by.{indices, data_streams, composable_templates}` and
+ *      deletes safe-to-remove policies is scheduled for a follow-up
+ *      commit alongside Phase 5 (Scheduler). Until then, periodically
+ *      delete orphaned `<ilm_policy_name>-*` policies manually via the
+ *      Kibana ILM UI if they build up.
  *   2. **No S3 lifecycle integration.** Expired repos are detected
  *      purely from the stored `expires_at` field on the RepositoryDoc
  *      (populated by Thaw in Phase 4). We don't ask the storage SDK

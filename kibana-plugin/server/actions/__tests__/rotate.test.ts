@@ -29,8 +29,18 @@ interface FakeOpts {
   repositoryDocs?: RepositoryDoc[];
   /** What `snapshot.getRepository()` returns. */
   liveRepos?: Record<string, { type: string; settings: Record<string, unknown> }>;
-  /** Existing ILM policies (by name). */
+  /**
+   * Existing ILM policies (by name). The fake wraps each entry into
+   * the `{policy: {...}}` envelope ES returns, so pass the inner
+   * `{phases: ...}` shape directly here.
+   */
   existingIlmPolicies?: Record<string, Record<string, unknown>>;
+  /**
+   * Existing composable templates by name; each value's
+   * `template.settings.index.lifecycle.name` is read to decide which
+   * templates currently bind to a given policy.
+   */
+  existingIndexTemplates?: Record<string, Record<string, unknown>>;
   /** Make `snapshot.createRepository` fail. */
   failCreate?: boolean;
   /** Make `snapshot.deleteRepository` fail for these names. */
@@ -44,6 +54,7 @@ interface Trace {
   deleted_repos: string[];
   index_calls: Array<{ index: string; id: string; document: Record<string, unknown> }>;
   ilm_puts: Array<{ name: string; policy: Record<string, unknown> }>;
+  template_puts: Array<{ name: string; body: Record<string, unknown> }>;
 }
 
 function makeClient(
@@ -54,6 +65,17 @@ function makeClient(
     deleted_repos: [],
     index_calls: [],
     ilm_puts: [],
+    template_puts: [],
+  };
+
+  // Live store of policies that subsequent getLifecycle calls will see.
+  // Seeded from existingIlmPolicies; putLifecycle writes here too so a
+  // create-then-read flow within one test works as expected.
+  const ilmPolicies: Record<string, Record<string, unknown>> = {
+    ...(opts.existingIlmPolicies ?? {}),
+  };
+  const indexTemplates: Record<string, Record<string, unknown>> = {
+    ...(opts.existingIndexTemplates ?? {}),
   };
 
   const liveRepos = opts.liveRepos ?? {};
@@ -63,6 +85,28 @@ function makeClient(
       exists: async ({ index }) => {
         if (index === STATUS_INDEX) return !opts.statusIndexMissing;
         return false;
+      },
+      getIndexTemplate: async ({ name }: { name?: string } = {}) => {
+        const items = Object.entries(indexTemplates).filter(
+          ([n]) => name === undefined || n === name
+        );
+        if (items.length === 0 && name !== undefined) {
+          throw notFound();
+        }
+        return {
+          index_templates: items.map(([n, body]) => ({ name: n, index_template: body })),
+        };
+      },
+      putIndexTemplate: async ({
+        name,
+        body,
+      }: {
+        name: string;
+        body: Record<string, unknown>;
+      }) => {
+        trace.template_puts.push({ name, body });
+        indexTemplates[name] = body;
+        return {};
       },
     } as RotateActionEsClient['indices'],
     get: async ({ index, id }) => {
@@ -114,14 +158,20 @@ function makeClient(
     },
     ilm: {
       getLifecycle: async ({ name }: { name?: string } = {}) => {
-        if (!name) return opts.existingIlmPolicies ?? {};
-        const p = opts.existingIlmPolicies?.[name];
+        if (!name) {
+          // Bulk read — wrap each policy in {policy: ...} as ES does.
+          return Object.fromEntries(
+            Object.entries(ilmPolicies).map(([n, p]) => [n, { policy: p }])
+          );
+        }
+        const p = ilmPolicies[name];
         if (!p) throw notFound();
-        return { [name]: p };
+        return { [name]: { policy: p } };
       },
       putLifecycle: async (args) => {
         if (opts.failPutIlm) throw new Error('boom-ilm');
         trace.ilm_puts.push(args);
+        ilmPolicies[args.name] = args.policy as Record<string, unknown>;
         return {};
       },
     },
@@ -322,16 +372,199 @@ describe('runRotate happy path', () => {
     ]);
   });
 
-  it('retargets the configured ILM policy to the new repo', async () => {
+  it('creates a versioned ILM policy from the base on first rotation', async () => {
+    // No `<base>-<old_suffix>` exists, so fall back to base policy.
+    // Versioned policy `logs-policy-000006` should be created pointing at
+    // the new repo; the base policy itself stays unmodified.
+    const basePolicyBody = {
+      phases: {
+        hot: { min_age: '0ms', actions: { rollover: { max_size: '50gb' } } },
+        frozen: {
+          min_age: '30d',
+          actions: { searchable_snapshot: { snapshot_repository: 'deepfreeze-000005' } },
+        },
+      },
+    };
     const { client, trace } = makeClient({
       settings: settings({ ilm_policy_name: 'logs-policy', last_suffix: '000005' }),
       repositoryDocs: [],
+      existingIlmPolicies: { 'logs-policy': basePolicyBody },
     });
 
     await runRotate(client);
 
     expect(trace.ilm_puts).toHaveLength(1);
-    expect(trace.ilm_puts[0].name).toBe('logs-policy');
+    expect(trace.ilm_puts[0].name).toBe('logs-policy-000006');
+    const writtenBody = trace.ilm_puts[0].policy as {
+      phases: { frozen: { actions: { searchable_snapshot: { snapshot_repository: string } } } };
+    };
+    expect(writtenBody.phases.frozen.actions.searchable_snapshot.snapshot_repository).toBe(
+      'deepfreeze-000006'
+    );
+
+    // Base policy stays unmodified — it's still in our fake's policy
+    // store with the original repo reference.
+    // (We assert this by NOT seeing a putLifecycle for 'logs-policy'.)
+    expect(trace.ilm_puts.find((p) => p.name === 'logs-policy')).toBeUndefined();
+  });
+
+  it('prefers the previous versioned policy as the source on subsequent rotations', async () => {
+    // base 'logs-policy' (points at -000001, original)
+    // 'logs-policy-000005' (points at -000005, possibly operator-edited)
+    // Rotate should clone from `-000005`, not from base.
+    const editedFrozenPolicy = {
+      phases: {
+        // Hypothetical operator edit: frozen min_age changed since base.
+        frozen: {
+          min_age: '90d',
+          actions: { searchable_snapshot: { snapshot_repository: 'deepfreeze-000005' } },
+        },
+      },
+    };
+    const basePolicyBody = {
+      phases: {
+        frozen: {
+          min_age: '30d',
+          actions: { searchable_snapshot: { snapshot_repository: 'deepfreeze-000001' } },
+        },
+      },
+    };
+    const { client, trace } = makeClient({
+      settings: settings({ ilm_policy_name: 'logs-policy', last_suffix: '000005' }),
+      repositoryDocs: [],
+      existingIlmPolicies: {
+        'logs-policy': basePolicyBody,
+        'logs-policy-000005': editedFrozenPolicy,
+      },
+    });
+
+    await runRotate(client);
+
+    expect(trace.ilm_puts).toHaveLength(1);
+    expect(trace.ilm_puts[0].name).toBe('logs-policy-000006');
+    const writtenBody = trace.ilm_puts[0].policy as {
+      phases: { frozen: { min_age: string; actions: { searchable_snapshot: { snapshot_repository: string } } } };
+    };
+    // The operator-edited min_age was preserved (proves we sourced from -000005, not base).
+    expect(writtenBody.phases.frozen.min_age).toBe('90d');
+    expect(writtenBody.phases.frozen.actions.searchable_snapshot.snapshot_repository).toBe(
+      'deepfreeze-000006'
+    );
+  });
+
+  it('rebinds composable templates from old policy → new versioned policy', async () => {
+    const basePolicyBody = {
+      phases: {
+        frozen: {
+          min_age: '30d',
+          actions: { searchable_snapshot: { snapshot_repository: 'deepfreeze-000005' } },
+        },
+      },
+    };
+    const { client, trace } = makeClient({
+      settings: settings({ ilm_policy_name: 'logs-policy', last_suffix: '000005' }),
+      repositoryDocs: [],
+      existingIlmPolicies: { 'logs-policy': basePolicyBody },
+      existingIndexTemplates: {
+        // This one currently binds to the base policy.
+        'logs-template': {
+          index_patterns: ['logs-*'],
+          template: {
+            settings: { index: { lifecycle: { name: 'logs-policy' } } },
+          },
+          composed_of: ['logs-mapping'],
+        },
+        // Unrelated template — should NOT be rebound.
+        'metrics-template': {
+          index_patterns: ['metrics-*'],
+          template: {
+            settings: { index: { lifecycle: { name: 'metrics-policy' } } },
+          },
+        },
+      },
+    });
+
+    await runRotate(client);
+
+    // logs-template got rebound to the new versioned policy
+    const rebound = trace.template_puts.find((p) => p.name === 'logs-template');
+    expect(rebound).toBeDefined();
+    const reboundLifecycle = (
+      ((rebound!.body.template as Record<string, unknown>).settings as Record<string, unknown>)
+        .index as Record<string, unknown>
+    ).lifecycle as { name: string };
+    expect(reboundLifecycle.name).toBe('logs-policy-000006');
+
+    // metrics-template was untouched
+    expect(trace.template_puts.find((p) => p.name === 'metrics-template')).toBeUndefined();
+  });
+
+  it('rebinds templates currently bound to the previous versioned policy', async () => {
+    // After several rotations the template should be pointing at
+    // `logs-policy-000005` (not the base). This rotation should
+    // rebind it to `logs-policy-000006`.
+    const versionedBody = {
+      phases: {
+        frozen: {
+          min_age: '30d',
+          actions: { searchable_snapshot: { snapshot_repository: 'deepfreeze-000005' } },
+        },
+      },
+    };
+    const { client, trace } = makeClient({
+      settings: settings({ ilm_policy_name: 'logs-policy', last_suffix: '000005' }),
+      repositoryDocs: [],
+      existingIlmPolicies: { 'logs-policy-000005': versionedBody },
+      existingIndexTemplates: {
+        'logs-template': {
+          index_patterns: ['logs-*'],
+          template: {
+            settings: { index: { lifecycle: { name: 'logs-policy-000005' } } },
+          },
+        },
+      },
+    });
+
+    await runRotate(client);
+
+    const rebound = trace.template_puts.find((p) => p.name === 'logs-template');
+    expect(rebound).toBeDefined();
+    const reboundLifecycle = (
+      ((rebound!.body.template as Record<string, unknown>).settings as Record<string, unknown>)
+        .index as Record<string, unknown>
+    ).lifecycle as { name: string };
+    expect(reboundLifecycle.name).toBe('logs-policy-000006');
+  });
+
+  it('warns and skips ILM work when neither base nor previous versioned policy exists', async () => {
+    const { client, trace } = makeClient({
+      settings: settings({ ilm_policy_name: 'logs-policy', last_suffix: '000005' }),
+      repositoryDocs: [],
+      // No policies seeded.
+    });
+
+    const result = await runRotate(client);
+
+    expect(trace.ilm_puts).toEqual([]);
+    expect(trace.template_puts).toEqual([]);
+    expect(
+      result.errors.some((e) => e.target === 'logs-policy' && /not found/.test(e.message))
+    ).toBe(true);
+    // The rotation itself still succeeds.
+    expect(result.success).toBe(true);
+    expect(result.new_repo_name).toBe('deepfreeze-000006');
+  });
+
+  it('does not touch ILM at all when settings.ilm_policy_name is null', async () => {
+    const { client, trace } = makeClient({
+      settings: settings({ ilm_policy_name: null, last_suffix: '000005' }),
+      repositoryDocs: [],
+    });
+
+    await runRotate(client);
+
+    expect(trace.ilm_puts).toEqual([]);
+    expect(trace.template_puts).toEqual([]);
   });
 });
 

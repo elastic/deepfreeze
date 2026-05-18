@@ -12,7 +12,7 @@
 /** Minimal structural interface for composable-template operations. */
 export interface IndexTemplateEsClient {
   indices: {
-    getIndexTemplate: (params: { name: string }) => Promise<unknown>;
+    getIndexTemplate: (params: { name?: string }) => Promise<unknown>;
     putIndexTemplate: (params: { name: string; body: Record<string, unknown> }) => Promise<unknown>;
   };
 }
@@ -75,6 +75,63 @@ export interface UpdateIndexTemplateResult {
   template_type: 'composable' | null;
   old_policy: string;
   new_policy: string;
+}
+
+/**
+ * Read the template's current `template.settings.index.lifecycle.name`.
+ * Returns null if the template doesn't carry an ILM binding (or doesn't
+ * exist). Used by `findTemplatesUsingPolicy` and exposed separately so
+ * other callers can introspect template→policy bindings.
+ */
+export function readTemplateIlmPolicy(
+  templateData: Record<string, unknown>
+): string | null {
+  const template = templateData.template as Record<string, unknown> | undefined;
+  const settings = template?.settings as Record<string, unknown> | undefined;
+  const index = settings?.index as Record<string, unknown> | undefined;
+  const lifecycle = index?.lifecycle as Record<string, unknown> | undefined;
+  const name = lifecycle?.name;
+  return typeof name === 'string' ? name : null;
+}
+
+/**
+ * Fetch every composable index template. Returns the list in the
+ * `index_templates: [{name, index_template}]` shape ES emits.
+ *
+ * 404 from ES (e.g. no templates at all on a fresh cluster) is treated
+ * as an empty list — same convention as the rest of this repo layer.
+ */
+export async function getAllIndexTemplates(
+  client: IndexTemplateEsClient
+): Promise<Array<{ name: string; index_template: Record<string, unknown> }>> {
+  try {
+    const result = (await client.indices.getIndexTemplate({})) as GetTemplateResponse;
+    return result.index_templates ?? [];
+  } catch (err) {
+    if (isNotFound(err)) return [];
+    throw err;
+  }
+}
+
+/**
+ * Return the names of every composable template whose
+ * `template.settings.index.lifecycle.name` equals `policyName`. Used by
+ * Rotate to find which templates need to be repointed at the
+ * just-created versioned ILM policy.
+ */
+export async function findTemplatesUsingPolicy(
+  client: IndexTemplateEsClient,
+  policyName: string
+): Promise<string[]> {
+  const all = await getAllIndexTemplates(client);
+  const matching: string[] = [];
+  for (const entry of all) {
+    const bound = readTemplateIlmPolicy(entry.index_template);
+    if (bound === policyName) {
+      matching.push(entry.name);
+    }
+  }
+  return matching;
 }
 
 /**

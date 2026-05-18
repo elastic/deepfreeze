@@ -5,11 +5,10 @@
  *
  * Mirrors `Refreeze.do_action` in
  *   packages/deepfreeze-core/deepfreeze_core/actions/refreeze.py
- * with one deliberate simplification: instead of calling
- * `is_policy_safe_to_delete` and pruning orphaned versioned ILM
- * policies, we leave ILM policy cleanup entirely to the Cleanup
- * action. The TS Rotate doesn't create versioned policies in the
- * first place, so there's nothing to clean up.
+ * with one deliberate simplification: ILM policy cleanup is handled by
+ * Cleanup, not Refreeze. Refreeze leaves any versioned ILM policies in
+ * place (some may still be bound to other indices); the orphaned-policy
+ * sweep is Cleanup's responsibility — see cleanup.ts.
  *
  * Per-repo failures (individual index deletes, individual unmounts)
  * degrade to warnings in the result's `errors[]`. If every repo

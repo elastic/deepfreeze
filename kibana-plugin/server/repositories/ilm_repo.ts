@@ -225,6 +225,48 @@ export async function createOrUpdateIlmPolicy(
   return { action: 'unchanged', policy_body: body };
 }
 
+/**
+ * Create a versioned ILM policy by deep-cloning an existing policy body
+ * and retargeting every `searchable_snapshot.snapshot_repository` to the
+ * new repository.
+ *
+ * The new policy is written at `<basePolicyName>-<suffix>` and returned.
+ * Mirrors `create_versioned_ilm_policy` in
+ *   packages/deepfreeze-core/deepfreeze_core/utilities.py
+ *
+ * Why versioned policies matter: indices are bound to an ILM policy by
+ * name. Mutating the base policy to point at the new repo would cause
+ * indices created under the old repo to start snapshotting to the new
+ * one on their next phase transition — silently shifting prior data's
+ * snapshots across repos. Versioning isolates each rotation's policy so
+ * existing indices keep using whatever versioned policy they were
+ * created with.
+ */
+export async function createVersionedIlmPolicy(
+  client: IlmRepoWriteEsClient,
+  basePolicyName: string,
+  basePolicyBody: { phases?: Record<string, unknown> } | Record<string, unknown>,
+  newRepoName: string,
+  suffix: string
+): Promise<string> {
+  const newPolicyName = `${basePolicyName}-${suffix}`;
+  const cloned = JSON.parse(JSON.stringify(basePolicyBody)) as {
+    phases?: Record<
+      string,
+      { actions?: { searchable_snapshot?: { snapshot_repository?: string } } }
+    >;
+  };
+  const phases = cloned.phases ?? {};
+  for (const phaseConfig of Object.values(phases)) {
+    const ss = phaseConfig.actions?.searchable_snapshot;
+    if (ss) {
+      ss.snapshot_repository = newRepoName;
+    }
+  }
+  await client.ilm.putLifecycle({ name: newPolicyName, policy: cloned });
+  return newPolicyName;
+}
+
 function isNotFound(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const e = err as { statusCode?: number; meta?: { statusCode?: number } };
