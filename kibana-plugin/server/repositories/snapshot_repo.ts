@@ -150,7 +150,7 @@ export async function createSnapshotRepository(
       bucket,
       base_path,
       canned_acl: params.canned_acl ?? 'private',
-      storage_class: params.storage_class ?? 'intelligent_tiering',
+      storage_class: params.storage_class ?? 'standard',
     };
   }
 

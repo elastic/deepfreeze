@@ -93,7 +93,7 @@ const INITIAL_FORM: FormState = {
   bucket_name_prefix: '',
   base_path_suffix: 'snapshots',
   canned_acl: 'private',
-  storage_class: 'intelligent_tiering',
+  storage_class: 'standard',
   ilm_policy_name: '',
   index_template_name: '',
 };

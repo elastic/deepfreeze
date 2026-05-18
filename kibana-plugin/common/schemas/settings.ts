@@ -34,7 +34,7 @@ export const SETTINGS_DEFAULTS: SettingsDoc = {
   bucket_name_prefix: 'deepfreeze',
   base_path_prefix: 'snapshots',
   canned_acl: 'private',
-  storage_class: 'intelligent_tiering',
+  storage_class: 'standard',
   provider: 'aws',
   rotate_by: 'path',
   style: 'oneup',
