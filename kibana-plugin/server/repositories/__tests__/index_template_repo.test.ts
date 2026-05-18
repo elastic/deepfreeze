@@ -7,7 +7,11 @@ import {
 interface FakeOpts {
   /** Map of template name → composable template doc (the inner index_template). */
   templates?: Record<string, Record<string, unknown>>;
+  /** Map of legacy template name → legacy template body. */
+  legacyTemplates?: Record<string, Record<string, unknown>>;
   capture?: (args: Record<string, unknown>) => void;
+  /** Optional separate capture for legacy putTemplate calls. */
+  captureLegacy?: (args: Record<string, unknown>) => void;
 }
 
 function notFound(): Error {
@@ -20,13 +24,27 @@ function notFound(): Error {
 function makeClient(opts: FakeOpts = {}): IndexTemplateEsClient {
   return {
     indices: {
-      getIndexTemplate: async ({ name }) => {
+      getIndexTemplate: async ({ name }: { name?: string } = {}) => {
+        if (name === undefined) {
+          const items = Object.entries(opts.templates ?? {});
+          return { index_templates: items.map(([n, t]) => ({ name: n, index_template: t })) };
+        }
         const tmpl = opts.templates?.[name];
         if (!tmpl) throw notFound();
         return { index_templates: [{ name, index_template: tmpl }] };
       },
       putIndexTemplate: async (args) => {
         opts.capture?.(args);
+        return {};
+      },
+      getTemplate: async ({ name }: { name?: string } = {}) => {
+        if (name === undefined) return opts.legacyTemplates ?? {};
+        const tmpl = opts.legacyTemplates?.[name];
+        if (!tmpl) throw notFound();
+        return { [name]: tmpl };
+      },
+      putTemplate: async (args) => {
+        opts.captureLegacy?.(args);
         return {};
       },
     },
@@ -111,6 +129,57 @@ describe('updateIndexTemplateIlmPolicy', () => {
       body: {
         template: { settings: { index: { lifecycle: { name: 'p' } } } },
       },
+    });
+  });
+
+  it('auto-detects and updates a legacy template via PUT _template', async () => {
+    const legacyCaptured: Record<string, unknown>[] = [];
+    const composableCaptured: Record<string, unknown>[] = [];
+    const client = makeClient({
+      // Only legacy template exists by this name; composable lookup returns 404.
+      legacyTemplates: {
+        'df-test': {
+          index_patterns: ['df-*'],
+          order: 10,
+          settings: { index: { lifecycle: { name: 'old' } } },
+          mappings: { properties: { '@timestamp': { type: 'date' } } },
+        },
+      },
+      capture: (a) => composableCaptured.push(a),
+      captureLegacy: (a) => legacyCaptured.push(a),
+    });
+
+    const result = await updateIndexTemplateIlmPolicy(client, 'df-test', 'new-policy');
+
+    expect(result).toMatchObject({
+      action: 'updated',
+      template_type: 'legacy',
+      old_policy: 'old',
+      new_policy: 'new-policy',
+    });
+    // Composable PUT not used; legacy PUT used with allowed fields only.
+    expect(composableCaptured).toEqual([]);
+    expect(legacyCaptured).toHaveLength(1);
+    const body = legacyCaptured[0].body as Record<string, unknown>;
+    // Legacy shape: settings at the root, not nested under `template`.
+    expect(
+      (
+        ((body.settings as Record<string, unknown>).index as Record<string, unknown>)
+          .lifecycle as { name: string }
+      ).name
+    ).toBe('new-policy');
+    expect(body.index_patterns).toEqual(['df-*']);
+    expect(body.order).toBe(10);
+    expect(body.mappings).toBeDefined();
+  });
+
+  it('returns not_found when neither composable nor legacy template exists', async () => {
+    const client = makeClient({});
+    const result = await updateIndexTemplateIlmPolicy(client, 'missing', 'p');
+    expect(result).toMatchObject({
+      action: 'not_found',
+      template_type: null,
+      old_policy: 'none',
     });
   });
 });

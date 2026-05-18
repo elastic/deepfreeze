@@ -600,12 +600,12 @@ function Step4Ilm({
             color="warning"
             iconType="warning"
             size="s"
-            title="No composable index templates on this cluster"
+            title="No index templates on this cluster"
           >
             <p>
-              Create a composable index template via Stack Management → Index Management → Index
-              Templates, then return to deepfreeze setup. Or leave this field blank — you can wire
-              the template binding up later.
+              Create an index template (composable or legacy) via Stack Management → Index
+              Management → Index Templates, then return to deepfreeze setup. Or leave this field
+              blank — you can wire the template binding up later.
             </p>
           </EuiCallOut>
         ) : (

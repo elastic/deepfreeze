@@ -33,13 +33,15 @@ interface FakeOpts {
   existingSnapshotRepos?: Record<string, { type: string; settings: Record<string, unknown> }>;
   /** Composable templates by name. */
   existingTemplates?: Record<string, Record<string, unknown>>;
+  /** Legacy (pre-7.8) templates by name. */
+  existingLegacyTemplates?: Record<string, Record<string, unknown>>;
   /** Existing ILM policies. */
   existingIlmPolicies?: Record<string, Record<string, unknown>>;
   /** Make `snapshot.createRepository` fail (e.g. bucket unreachable). */
   failCreateRepo?: boolean;
   /** Make `ilm.putLifecycle` fail. */
   failPutIlm?: boolean;
-  /** Make `indices.putIndexTemplate` fail. */
+  /** Make `indices.putIndexTemplate` / `indices.putTemplate` fail. */
   failPutTemplate?: boolean;
 }
 
@@ -52,6 +54,7 @@ interface Trace {
   /** All putLifecycle calls in order. Setup may write both base and versioned. */
   ilm_puts: Array<{ name: string; policy: Record<string, unknown> }>;
   template_put?: { name: string; body: Record<string, unknown> };
+  legacy_template_put?: { name: string; body: Record<string, unknown> };
 }
 
 function notFound(): Error {
@@ -91,6 +94,17 @@ function makeClient(opts: FakeOpts = {}): { client: SetupActionEsClient; trace: 
       putIndexTemplate: async (args) => {
         if (opts.failPutTemplate) throw new Error('boom-template');
         trace.template_put = args;
+        return {};
+      },
+      getTemplate: async ({ name }: { name?: string } = {}) => {
+        if (name === undefined) return opts.existingLegacyTemplates ?? {};
+        const tmpl = opts.existingLegacyTemplates?.[name];
+        if (!tmpl) throw notFound();
+        return { [name]: tmpl };
+      },
+      putTemplate: async (args) => {
+        if (opts.failPutTemplate) throw new Error('boom-template');
+        trace.legacy_template_put = args;
         return {};
       },
     },
@@ -209,6 +223,15 @@ describe('getSetupOptions', () => {
       ilm_policy_names: [],
       index_template_names: [],
     });
+  });
+
+  it('merges composable + legacy templates into a single sorted list', async () => {
+    const { client } = makeClient({
+      existingTemplates: { 'zeta-tmpl': { index_patterns: ['z*'] } },
+      existingLegacyTemplates: { 'alpha-tmpl': { index_patterns: ['a*'] } },
+    });
+    const opts = await getSetupOptions(client);
+    expect(opts.index_template_names).toEqual(['alpha-tmpl', 'zeta-tmpl']);
   });
 });
 

@@ -1,19 +1,25 @@
 /**
- * Composable index-template inspection and ILM-policy patching.
+ * Index-template inspection and ILM-policy patching.
  *
- * Mirrors the composable-template branches of
+ * Mirrors both composable and legacy-template branches of
  *   packages/deepfreeze-core/deepfreeze_core/utilities.py
  *     — update_index_template_ilm_policy()
  *
- * Legacy (pre-7.8) templates are intentionally omitted: ES 9.x deprecated
- * legacy index templates and Kibana 9.4 only manages composable ones.
+ * Legacy (pre-7.8) templates remain in production use even on 9.x
+ * clusters; deepfreeze must be able to discover and rebind them too.
+ * This module enumerates both kinds and auto-detects which API to use
+ * when updating a template by name.
  */
 
-/** Minimal structural interface for composable-template operations. */
+/** Minimal structural interface for index-template operations (both kinds). */
 export interface IndexTemplateEsClient {
   indices: {
     getIndexTemplate: (params: { name?: string }) => Promise<unknown>;
     putIndexTemplate: (params: { name: string; body: Record<string, unknown> }) => Promise<unknown>;
+    /** Legacy templates: `GET /_template[/{name}]`. */
+    getTemplate: (params?: { name?: string }) => Promise<unknown>;
+    /** Legacy templates: `PUT /_template/{name}`. */
+    putTemplate: (params: { name: string; body: Record<string, unknown> }) => Promise<unknown>;
   };
 }
 
@@ -72,7 +78,7 @@ export async function indexTemplateExists(
  */
 export interface UpdateIndexTemplateResult {
   action: 'updated' | 'not_found';
-  template_type: 'composable' | null;
+  template_type: IndexTemplateKind | null;
   old_policy: string;
   new_policy: string;
 }
@@ -114,31 +120,112 @@ export async function getAllIndexTemplates(
 }
 
 /**
- * Return every composable index template name in the cluster, sorted
- * for stable display. Used by the Setup wizard's dropdown.
+ * Return every legacy (pre-7.8) template in the cluster as a
+ * `{name, body}` list. ES emits these as `{ [name]: {...} }` — we flatten.
+ *
+ * 404 / no templates → empty list, same convention as composable.
+ */
+export async function getAllLegacyIndexTemplates(
+  client: IndexTemplateEsClient
+): Promise<Array<{ name: string; template: Record<string, unknown> }>> {
+  try {
+    const result = (await client.indices.getTemplate({})) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    return Object.entries(result).map(([name, template]) => ({ name, template }));
+  } catch (err) {
+    if (isNotFound(err)) return [];
+    throw err;
+  }
+}
+
+/**
+ * Return every index template name in the cluster (both composable and
+ * legacy), deduped and sorted for stable display. Used by the Setup
+ * wizard's dropdown.
+ *
+ * Legacy templates aren't tagged in the result — the binding code
+ * detects which kind a name refers to via `resolveTemplateKind`.
  */
 export async function getAllIndexTemplateNames(
   client: IndexTemplateEsClient
 ): Promise<string[]> {
-  const templates = await getAllIndexTemplates(client);
-  return templates.map((t) => t.name).sort();
+  const [composable, legacy] = await Promise.all([
+    getAllIndexTemplates(client),
+    getAllLegacyIndexTemplates(client),
+  ]);
+  const names = new Set<string>();
+  for (const t of composable) names.add(t.name);
+  for (const t of legacy) names.add(t.name);
+  return Array.from(names).sort();
+}
+
+/** Discriminator between composable and legacy templates. */
+export type IndexTemplateKind = 'composable' | 'legacy';
+
+/**
+ * Determine whether a template name refers to a composable or legacy
+ * template. Returns null if neither API knows about it.
+ *
+ * Composable wins when both exist with the same name (rare but
+ * possible during migrations); composable is the modern API and ES
+ * prefers it for new indices.
+ */
+export async function resolveTemplateKind(
+  client: IndexTemplateEsClient,
+  name: string
+): Promise<IndexTemplateKind | null> {
+  if (await indexTemplateExists(client, name)) return 'composable';
+  try {
+    const result = (await client.indices.getTemplate({ name })) as Record<
+      string,
+      unknown
+    >;
+    if (name in result) return 'legacy';
+  } catch (err) {
+    if (!isNotFound(err)) throw err;
+  }
+  return null;
 }
 
 /**
- * Return the names of every composable template whose
- * `template.settings.index.lifecycle.name` equals `policyName`. Used by
- * Rotate to find which templates need to be repointed at the
- * just-created versioned ILM policy.
+ * Read the `settings.index.lifecycle.name` from a legacy template body.
+ * Legacy templates put settings at the root, not nested under `template`
+ * (which is the composable shape).
+ */
+function readLegacyTemplateIlmPolicy(
+  templateData: Record<string, unknown>
+): string | null {
+  const settings = templateData.settings as Record<string, unknown> | undefined;
+  const index = settings?.index as Record<string, unknown> | undefined;
+  const lifecycle = index?.lifecycle as Record<string, unknown> | undefined;
+  const name = lifecycle?.name;
+  return typeof name === 'string' ? name : null;
+}
+
+/**
+ * Return the names of every index template (composable or legacy)
+ * whose ILM lifecycle binding equals `policyName`. Used by Rotate to
+ * find which templates need to be repointed at the just-created
+ * versioned ILM policy.
  */
 export async function findTemplatesUsingPolicy(
   client: IndexTemplateEsClient,
   policyName: string
 ): Promise<string[]> {
-  const all = await getAllIndexTemplates(client);
   const matching: string[] = [];
-  for (const entry of all) {
-    const bound = readTemplateIlmPolicy(entry.index_template);
-    if (bound === policyName) {
+  const [composable, legacy] = await Promise.all([
+    getAllIndexTemplates(client),
+    getAllLegacyIndexTemplates(client),
+  ]);
+  for (const entry of composable) {
+    if (readTemplateIlmPolicy(entry.index_template) === policyName) {
+      matching.push(entry.name);
+    }
+  }
+  for (const entry of legacy) {
+    if (readLegacyTemplateIlmPolicy(entry.template) === policyName) {
       matching.push(entry.name);
     }
   }
@@ -146,33 +233,40 @@ export async function findTemplatesUsingPolicy(
 }
 
 /**
- * Set `template.settings.index.lifecycle.name` on the named composable
- * template, leaving other fields untouched. Returns `not_found` if the
- * template doesn't exist (the caller decides whether that's a warning
- * or an error).
+ * Set `index.lifecycle.name` on the named index template, leaving
+ * other fields untouched. Auto-detects whether the template is
+ * composable or legacy and uses the appropriate API.
+ *
+ * Returns `not_found` if the template doesn't exist in either API.
  */
 export async function updateIndexTemplateIlmPolicy(
   client: IndexTemplateEsClient,
   templateName: string,
   ilmPolicyName: string
 ): Promise<UpdateIndexTemplateResult> {
-  let templates: GetTemplateResponse;
-  try {
-    templates = (await client.indices.getIndexTemplate({
-      name: templateName,
-    })) as GetTemplateResponse;
-  } catch (err) {
-    if (isNotFound(err)) {
-      return {
-        action: 'not_found',
-        template_type: null,
-        old_policy: 'none',
-        new_policy: ilmPolicyName,
-      };
-    }
-    throw err;
+  const kind = await resolveTemplateKind(client, templateName);
+  if (kind === null) {
+    return {
+      action: 'not_found',
+      template_type: null,
+      old_policy: 'none',
+      new_policy: ilmPolicyName,
+    };
   }
+  if (kind === 'composable') {
+    return updateComposableTemplateIlmPolicy(client, templateName, ilmPolicyName);
+  }
+  return updateLegacyTemplateIlmPolicy(client, templateName, ilmPolicyName);
+}
 
+async function updateComposableTemplateIlmPolicy(
+  client: IndexTemplateEsClient,
+  templateName: string,
+  ilmPolicyName: string
+): Promise<UpdateIndexTemplateResult> {
+  const templates = (await client.indices.getIndexTemplate({
+    name: templateName,
+  })) as GetTemplateResponse;
   const entry = templates.index_templates?.[0];
   if (!entry) {
     return {
@@ -182,10 +276,9 @@ export async function updateIndexTemplateIlmPolicy(
       new_policy: ilmPolicyName,
     };
   }
-
   const templateData = entry.index_template as Record<string, unknown>;
 
-  // Build the nested settings path, creating intermediate objects as needed.
+  // Composable templates nest settings under `template.settings.index.lifecycle.name`.
   const template = (templateData.template ??= {}) as Record<string, unknown>;
   const settings = (template.settings ??= {}) as Record<string, unknown>;
   const index = (settings.index ??= {}) as Record<string, unknown>;
@@ -205,6 +298,61 @@ export async function updateIndexTemplateIlmPolicy(
   return {
     action: 'updated',
     template_type: 'composable',
+    old_policy: oldPolicy,
+    new_policy: ilmPolicyName,
+  };
+}
+
+/**
+ * Fields the legacy `PUT _template/{name}` API accepts. Filter to
+ * these to avoid sending system-managed fields back to ES.
+ */
+const LEGACY_TEMPLATE_FIELDS = [
+  'index_patterns',
+  'order',
+  'version',
+  'settings',
+  'mappings',
+  'aliases',
+] as const;
+
+async function updateLegacyTemplateIlmPolicy(
+  client: IndexTemplateEsClient,
+  templateName: string,
+  ilmPolicyName: string
+): Promise<UpdateIndexTemplateResult> {
+  const result = (await client.indices.getTemplate({
+    name: templateName,
+  })) as Record<string, Record<string, unknown>>;
+  const templateData = result[templateName];
+  if (!templateData) {
+    return {
+      action: 'not_found',
+      template_type: null,
+      old_policy: 'none',
+      new_policy: ilmPolicyName,
+    };
+  }
+
+  // Legacy shape: settings at the root, not nested under `template`.
+  const settings = (templateData.settings ??= {}) as Record<string, unknown>;
+  const index = (settings.index ??= {}) as Record<string, unknown>;
+  const lifecycle = (index.lifecycle ??= {}) as Record<string, unknown>;
+  const oldPolicy = (lifecycle.name as string | undefined) ?? 'none';
+  lifecycle.name = ilmPolicyName;
+
+  const putBody: Record<string, unknown> = {};
+  for (const field of LEGACY_TEMPLATE_FIELDS) {
+    if (field in templateData) {
+      putBody[field] = templateData[field];
+    }
+  }
+
+  await client.indices.putTemplate({ name: templateName, body: putBody });
+
+  return {
+    action: 'updated',
+    template_type: 'legacy',
     old_policy: oldPolicy,
     new_policy: ilmPolicyName,
   };

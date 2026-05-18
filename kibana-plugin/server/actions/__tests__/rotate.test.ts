@@ -41,6 +41,8 @@ interface FakeOpts {
    * templates currently bind to a given policy.
    */
   existingIndexTemplates?: Record<string, Record<string, unknown>>;
+  /** Legacy (pre-7.8) templates by name. */
+  existingLegacyTemplates?: Record<string, Record<string, unknown>>;
   /** Make `snapshot.createRepository` fail. */
   failCreate?: boolean;
   /** Make `snapshot.deleteRepository` fail for these names. */
@@ -55,6 +57,7 @@ interface Trace {
   index_calls: Array<{ index: string; id: string; document: Record<string, unknown> }>;
   ilm_puts: Array<{ name: string; policy: Record<string, unknown> }>;
   template_puts: Array<{ name: string; body: Record<string, unknown> }>;
+  legacy_template_puts: Array<{ name: string; body: Record<string, unknown> }>;
 }
 
 function makeClient(
@@ -66,6 +69,7 @@ function makeClient(
     index_calls: [],
     ilm_puts: [],
     template_puts: [],
+    legacy_template_puts: [],
   };
 
   // Live store of policies that subsequent getLifecycle calls will see.
@@ -76,6 +80,9 @@ function makeClient(
   };
   const indexTemplates: Record<string, Record<string, unknown>> = {
     ...(opts.existingIndexTemplates ?? {}),
+  };
+  const legacyTemplates: Record<string, Record<string, unknown>> = {
+    ...(opts.existingLegacyTemplates ?? {}),
   };
 
   const liveRepos = opts.liveRepos ?? {};
@@ -106,6 +113,23 @@ function makeClient(
       }) => {
         trace.template_puts.push({ name, body });
         indexTemplates[name] = body;
+        return {};
+      },
+      getTemplate: async ({ name }: { name?: string } = {}) => {
+        if (name === undefined) return legacyTemplates;
+        const tmpl = legacyTemplates[name];
+        if (!tmpl) throw notFound();
+        return { [name]: tmpl };
+      },
+      putTemplate: async ({
+        name,
+        body,
+      }: {
+        name: string;
+        body: Record<string, unknown>;
+      }) => {
+        trace.legacy_template_puts.push({ name, body });
+        legacyTemplates[name] = body;
         return {};
       },
     } as RotateActionEsClient['indices'],
