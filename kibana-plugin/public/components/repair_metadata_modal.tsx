@@ -19,9 +19,11 @@ import type { CoreStart } from '@kbn/core/public';
 
 import { API } from '../../common/api/paths';
 import type {
+  DateRangeOutcome,
   DiscrepancyRecord,
   RepairResult,
 } from '../../server/actions/repair_metadata';
+import { trimDate } from '../utils/format';
 
 interface RepairMetadataModalProps {
   http: CoreStart['http'];
@@ -49,6 +51,74 @@ function stateColor(s: string | null): 'danger' | 'warning' | 'primary' | 'hollo
   if (s === 'thawing') return 'warning';
   if (s === 'frozen') return 'primary';
   return 'hollow';
+}
+
+/**
+ * Renders the date-range repair outcomes. Different framing pre- vs
+ * post-confirm:
+ *   - Dry-run: "would query @timestamp for these repos"
+ *   - Real-run: shows actual queried start/end (or skipped reasons)
+ */
+function DateRangesSection({
+  items,
+  completed,
+}: {
+  items: DateRangeOutcome[];
+  completed: boolean;
+}) {
+  const changed = items.filter((d) => d.changed);
+  const skipped = items.filter((d) => !d.changed);
+
+  const columns: Array<EuiBasicTableColumn<DateRangeOutcome>> = [
+    { field: 'repo', name: 'Repository' },
+    {
+      field: 'start',
+      name: 'Start',
+      render: (_: unknown, item: DateRangeOutcome) =>
+        item.changed ? trimDate(item.start) || '--' : (
+          <EuiText size="xs" color="subdued">
+            {item.skipped_reason ?? '--'}
+          </EuiText>
+        ),
+    },
+    {
+      field: 'end',
+      name: 'End',
+      render: (_: unknown, item: DateRangeOutcome) =>
+        item.changed ? trimDate(item.end) || '--' : (
+          <EuiText size="xs" color="subdued">
+            --
+          </EuiText>
+        ),
+    },
+  ];
+
+  return (
+    <>
+      <EuiCallOut
+        color={completed && changed.length > 0 ? 'success' : 'primary'}
+        iconType="calendar"
+        title={
+          completed
+            ? `Set date range on ${changed.length} repositor${
+                changed.length === 1 ? 'y' : 'ies'
+              }${skipped.length > 0 ? ` (${skipped.length} skipped)` : ''}`
+            : `${items.length} mounted repositor${
+                items.length === 1 ? 'y is' : 'ies are'
+              } missing date ranges`
+        }
+        size="s"
+      >
+        <p>
+          Without a date range, deepfreeze can't find a repository for thawing
+          by date. The repair queries each mounted repo's <EuiCode>@timestamp</EuiCode>
+          range and populates <EuiCode>start</EuiCode> / <EuiCode>end</EuiCode>.
+        </p>
+      </EuiCallOut>
+      <EuiSpacer size="s" />
+      <EuiBasicTable items={items} columns={columns} />
+    </>
+  );
 }
 
 export function RepairMetadataModal({
@@ -89,15 +159,17 @@ export function RepairMetadataModal({
       setCompleted(result);
       const repairedCount = result.repaired.length;
       const failedCount = result.failed.length;
-      if (repairedCount > 0) {
+      const dateChangedCount = result.date_ranges.filter((d) => d.changed).length;
+
+      const parts: string[] = [];
+      if (repairedCount > 0) parts.push(`${repairedCount} state fix(es)`);
+      if (dateChangedCount > 0) parts.push(`${dateChangedCount} date range(s)`);
+      if (failedCount > 0) parts.push(`${failedCount} failure(s)`);
+
+      if (repairedCount > 0 || dateChangedCount > 0) {
         notifications.toasts.addSuccess({
-          title: `Repaired ${repairedCount} repositor${
-            repairedCount === 1 ? 'y' : 'ies'
-          }`,
-          text:
-            failedCount > 0
-              ? `${failedCount} failed; see modal for details.`
-              : undefined,
+          title: 'Repair complete',
+          text: parts.join(', '),
         });
       } else if (failedCount > 0) {
         notifications.toasts.addDanger({
@@ -108,8 +180,8 @@ export function RepairMetadataModal({
         });
       } else {
         notifications.toasts.addInfo({
-          title: 'No discrepancies found',
-          text: 'All repositories already reflect their actual storage state.',
+          title: 'Nothing to repair',
+          text: 'All repositories already reflect actual storage state and have date ranges set.',
         });
       }
       onComplete();
@@ -194,31 +266,48 @@ export function RepairMetadataModal({
         {view && !error && (
           <>
             <EuiSpacer size="m" />
-            {view.discrepancies.length === 0 ? (
+            {view.discrepancies.length === 0 && view.date_ranges.length === 0 ? (
               <EuiCallOut
                 color="success"
                 iconType="check"
-                title="No discrepancies"
+                title="Nothing to repair"
                 size="s"
               >
-                <p>Every repository's recorded state matches actual S3 storage.</p>
+                <p>
+                  Every repository's recorded state matches actual S3 storage and all
+                  mounted repos have date ranges set.
+                </p>
               </EuiCallOut>
             ) : (
               <>
-                <EuiCallOut
-                  color={completed ? 'success' : 'warning'}
-                  iconType={completed ? 'check' : 'alert'}
-                  title={
-                    completed
-                      ? `Repaired ${completed.repaired.length} of ${view.discrepancies.length} discrepancies`
-                      : `${view.discrepancies.length} discrepanc${
-                          view.discrepancies.length === 1 ? 'y' : 'ies'
-                        } found`
-                  }
-                  size="s"
-                />
-                <EuiSpacer size="s" />
-                <EuiBasicTable items={view.discrepancies} columns={columns} />
+                {view.discrepancies.length > 0 && (
+                  <>
+                    <EuiCallOut
+                      color={completed ? 'success' : 'warning'}
+                      iconType={completed ? 'check' : 'alert'}
+                      title={
+                        completed
+                          ? `Repaired ${completed.repaired.length} of ${view.discrepancies.length} state discrepanc${
+                              view.discrepancies.length === 1 ? 'y' : 'ies'
+                            }`
+                          : `${view.discrepancies.length} state discrepanc${
+                              view.discrepancies.length === 1 ? 'y' : 'ies'
+                            } found`
+                      }
+                      size="s"
+                    />
+                    <EuiSpacer size="s" />
+                    <EuiBasicTable items={view.discrepancies} columns={columns} />
+                  </>
+                )}
+
+                {view.date_ranges.length > 0 && (
+                  <>
+                    <EuiSpacer size="m" />
+                    <DateRangesSection items={view.date_ranges} completed={!!completed} />
+                  </>
+                )}
+
                 {view.failed.length > 0 && (
                   <>
                     <EuiSpacer size="s" />
@@ -255,7 +344,11 @@ export function RepairMetadataModal({
           onClick={doRun}
           iconType="wrench"
           isLoading={running}
-          isDisabled={!preview || preview.discrepancies.length === 0 || !!completed}
+          isDisabled={
+            !preview ||
+            (preview.discrepancies.length === 0 && preview.date_ranges.length === 0) ||
+            !!completed
+          }
         >
           Apply repairs
         </EuiButton>

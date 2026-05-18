@@ -33,8 +33,44 @@ import {
 } from '../repositories/repository_repo';
 import type { StorageClient, StorageObject } from '../storage/types';
 
+/**
+ * ES methods needed by the date-range repair phase: list snapshots in
+ * a repo, check whether an index exists (to resolve mount-name
+ * variants), and run a min/max aggregation over `@timestamp`.
+ *
+ * The aggregation result shape is kept narrow because that's all the
+ * action consumes.
+ */
+export interface DateRangeEsClient {
+  snapshot: {
+    get: (params: {
+      repository: string;
+      snapshot: string;
+    }) => Promise<{
+      snapshots?: Array<{ snapshot?: string; indices?: string[] }>;
+    }>;
+  };
+  indices: {
+    exists: (params: { index: string }) => Promise<boolean> | boolean;
+  };
+  search: (params: {
+    index: string;
+    size?: number;
+    query?: Record<string, unknown>;
+    aggs?: Record<string, unknown>;
+    allow_partial_search_results?: boolean;
+  }) => Promise<{
+    hits?: { hits: Array<{ _id: string; _source: Record<string, unknown> }> };
+    aggregations?: {
+      earliest?: { value_as_string?: string };
+      latest?: { value_as_string?: string };
+    };
+  }>;
+}
+
 export type RepairMetadataActionEsClient = SettingsRepoEsClient &
-  RepositoryRepoWriteEsClient;
+  RepositoryRepoWriteEsClient &
+  DateRangeEsClient;
 
 /** HEAD objects in batches of this size to bound concurrent SDK calls. */
 const HEAD_BATCH = 10;
@@ -95,9 +131,38 @@ export interface RepairResult {
   repaired: RepairOutcome[];
   /** Per-repo persistence failures during the actual repair. */
   failed: RepairOutcome[];
+  /**
+   * Outcome of the date-range repair phase. One entry per repo whose
+   * `start`/`end` was missing AND that's mounted (the only repos we
+   * can query `@timestamp` on).
+   */
+  date_ranges: DateRangeOutcome[];
   errors: ServiceError[];
   started_at: string;
   completed_at: string;
+}
+
+/**
+ * Outcome of running `updateRepositoryDateRange` on a single repo.
+ *
+ * Repos without an entry here either already had both `start` and
+ * `end` set or weren't mounted (we can't query @timestamp on an
+ * unmounted searchable snapshot).
+ */
+export interface DateRangeOutcome {
+  repo: string;
+  /** True if start/end was persisted to the status index. */
+  changed: boolean;
+  /** Final (post-merge) date range — same as previous when unchanged. */
+  start: string | null;
+  end: string | null;
+  /** Pre-update values, for UI diffs. */
+  previous_start: string | null;
+  previous_end: string | null;
+  /** Set when we deliberately didn't run (e.g. dry-run, no @timestamp). */
+  skipped_reason?: string;
+  /** Set when an ES call threw. */
+  error?: string;
 }
 
 export interface RunRepairMetadataOptions {
@@ -301,6 +366,197 @@ async function applyRepair(
   await saveRepositoryDoc(client, next);
 }
 
+/**
+ * Every index name that appears in any snapshot of this repo. Returns
+ * a deduped list. A missing or empty repo returns `[]`.
+ */
+async function getAllIndicesInRepo(
+  client: DateRangeEsClient,
+  repository: string
+): Promise<string[]> {
+  try {
+    const resp = await client.snapshot.get({ repository, snapshot: '_all' });
+    const seen = new Set<string>();
+    for (const snap of resp.snapshots ?? []) {
+      for (const idx of snap.indices ?? []) seen.add(idx);
+    }
+    return Array.from(seen);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Resolve which on-disk indices correspond to the snapshot's index
+ * names. ILM force-merge creates snapshots with `fm-clone-<rand>-`
+ * prefixed names, but the actual mounted index uses the original.
+ * Mounted searchable snapshots may also be reachable under
+ * `partial-<name>` or `restored-<name>`.
+ *
+ * Mirrors the lookup ladder in Python's
+ *   update_repository_date_range -> mounted_indices loop.
+ */
+async function resolveMountedIndexNames(
+  client: DateRangeEsClient,
+  snapshotIndices: string[]
+): Promise<string[]> {
+  const found: string[] = [];
+  for (const original of snapshotIndices) {
+    // Strip fm-clone-<random>- prefix when present.
+    let idx = original;
+    if (idx.startsWith('fm-clone-')) {
+      const parts = idx.split('-');
+      // ['fm', 'clone', '<rand>', ...rest]
+      if (parts.length >= 4) {
+        idx = parts.slice(3).join('-');
+      }
+    }
+    const candidates = [idx, `partial-${idx}`, `restored-${idx}`];
+    for (const candidate of candidates) {
+      if (await client.indices.exists({ index: candidate })) {
+        found.push(candidate);
+        break;
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Aggregate min/max `@timestamp` over the given indices. Returns ISO
+ * strings, or null/null if the aggregation produces no values
+ * (no @timestamp field, no documents).
+ */
+async function getTimestampRange(
+  client: DateRangeEsClient,
+  indices: string[]
+): Promise<{ earliest: string | null; latest: string | null }> {
+  if (indices.length === 0) return { earliest: null, latest: null };
+  try {
+    const resp = await client.search({
+      index: indices.join(','),
+      size: 0,
+      aggs: {
+        earliest: { min: { field: '@timestamp' } },
+        latest: { max: { field: '@timestamp' } },
+      },
+      allow_partial_search_results: true,
+    });
+    const earliest = resp.aggregations?.earliest?.value_as_string ?? null;
+    const latest = resp.aggregations?.latest?.value_as_string ?? null;
+    return { earliest, latest };
+  } catch {
+    return { earliest: null, latest: null };
+  }
+}
+
+/**
+ * Populate a repo's missing `start`/`end` by querying its mounted
+ * indices' `@timestamp` range, then persist the updated RepositoryDoc.
+ *
+ * Mirrors `update_repository_date_range` in
+ *   packages/deepfreeze-core/deepfreeze_core/utilities.py
+ * with one deliberate behavior alignment: the merge rule is
+ * "only extend, never shrink" — if existing dates are present, the
+ * final range is `min(existing.start, queried.earliest) ..
+ * max(existing.end, queried.latest)`.
+ *
+ * Returns an outcome record describing whether/what changed.
+ */
+async function updateRepositoryDateRange(
+  client: RepairMetadataActionEsClient,
+  repo: RepositoryDoc
+): Promise<DateRangeOutcome> {
+  const outcome: DateRangeOutcome = {
+    repo: repo.name,
+    changed: false,
+    start: repo.start,
+    end: repo.end,
+    previous_start: repo.start,
+    previous_end: repo.end,
+  };
+
+  // Only mounted repos can be queried for @timestamp — for unmounted
+  // searchable snapshots there are no live indices to aggregate over.
+  if (!repo.is_mounted) {
+    outcome.skipped_reason = 'repo not mounted; @timestamp unavailable';
+    return outcome;
+  }
+
+  try {
+    const snapshotIndices = await getAllIndicesInRepo(client, repo.name);
+    if (snapshotIndices.length === 0) {
+      outcome.skipped_reason = 'no snapshots in repo';
+      return outcome;
+    }
+
+    const mounted = await resolveMountedIndexNames(client, snapshotIndices);
+    if (mounted.length === 0) {
+      outcome.skipped_reason = 'no mounted indices found for snapshot contents';
+      return outcome;
+    }
+
+    const { earliest, latest } = await getTimestampRange(client, mounted);
+    if (!earliest || !latest) {
+      outcome.skipped_reason = 'aggregation returned no @timestamp values';
+      return outcome;
+    }
+
+    // Only-extend merge: if existing dates are present, take the union.
+    let final_start = earliest;
+    let final_end = latest;
+    if (repo.start && repo.end) {
+      final_start = repo.start < earliest ? repo.start : earliest;
+      final_end = repo.end > latest ? repo.end : latest;
+      if (final_start === repo.start && final_end === repo.end) {
+        outcome.skipped_reason = 'no change after only-extend merge';
+        return outcome;
+      }
+    }
+
+    const next: RepositoryDoc = {
+      ...repo,
+      start: final_start,
+      end: final_end,
+    };
+    await saveRepositoryDoc(client, next);
+    outcome.changed = true;
+    outcome.start = final_start;
+    outcome.end = final_end;
+    return outcome;
+  } catch (err) {
+    outcome.error = err instanceof Error ? err.message : String(err);
+    return outcome;
+  }
+}
+
+/**
+ * Inspect (but don't persist) which repos would benefit from a
+ * date-range update. Returns the same outcome shape as the real run,
+ * with `skipped_reason: 'dry-run'` on candidates so the UI can list
+ * them. This mirrors Python's `_update_date_ranges` dry-run path: it
+ * does NOT query the cluster for the actual new range.
+ */
+function previewDateRangeCandidates(repos: RepositoryDoc[]): DateRangeOutcome[] {
+  const out: DateRangeOutcome[] = [];
+  for (const repo of repos) {
+    // Skip repos that already have a range — RepairMetadata only fills
+    // in missing ranges (extensions happen as a real-run side effect).
+    if (repo.start && repo.end) continue;
+    if (!repo.is_mounted) continue;
+    out.push({
+      repo: repo.name,
+      changed: false,
+      start: repo.start,
+      end: repo.end,
+      previous_start: repo.start,
+      previous_end: repo.end,
+      skipped_reason: 'dry-run: would query @timestamp',
+    });
+  }
+  return out;
+}
+
 export async function runRepairMetadataDryRun(
   client: RepairMetadataActionEsClient,
   storage: StorageClient,
@@ -309,7 +565,8 @@ export async function runRepairMetadataDryRun(
   const log = options.log ?? NOOP_LOG;
   const started_at = new Date().toISOString();
   await loadInitializedSettings(client);
-  const { discrepancies } = await scanRepositories(client, storage, log);
+  const { repos, discrepancies } = await scanRepositories(client, storage, log);
+  const date_ranges = previewDateRangeCandidates(repos);
 
   return {
     success: true,
@@ -317,6 +574,7 @@ export async function runRepairMetadataDryRun(
     discrepancies,
     repaired: [],
     failed: [],
+    date_ranges,
     errors: [],
     started_at,
     completed_at: new Date().toISOString(),
@@ -388,12 +646,38 @@ export async function runRepairMetadata(
     }
   }
 
+  // Date-range repair phase. Run AFTER thaw_state fixes so the repos
+  // we operate on reflect the just-applied changes (e.g. a freshly
+  // un-frozen repo can now be queried for @timestamp).
+  const date_ranges: DateRangeOutcome[] = [];
+  // Reload repos so post-repair state (e.g. flipped is_mounted) is current.
+  const reloadedRepos = await getAllRepos(client);
+  for (const repo of reloadedRepos) {
+    // Only fill in missing ranges; existing ranges stay untouched (in
+    // RepairMetadata — `updateRepositoryDateRange` itself supports
+    // extension and we can wire that to a separate caller later).
+    if (repo.start && repo.end) continue;
+    if (!repo.is_mounted) continue;
+    log.debug(`Date-range check for ${repo.name}`);
+    const outcome = await updateRepositoryDateRange(client, repo);
+    date_ranges.push(outcome);
+    if (outcome.error) {
+      errors.push({
+        code: 'ACTION_FAILED',
+        message: `Date-range update failed for ${repo.name}: ${outcome.error}`,
+        severity: 'warning',
+        target: repo.name,
+      });
+    }
+  }
+
   return {
     success: true,
     dry_run: false,
     discrepancies,
     repaired,
     failed,
+    date_ranges,
     errors,
     started_at,
     completed_at: new Date().toISOString(),

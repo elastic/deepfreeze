@@ -109,10 +109,20 @@ export function registerRepairMetadataRoute({
                 detail: f.error ?? '',
               });
             }
+            for (const d of out.date_ranges) {
+              if (!d.changed) continue;
+              tracker.addResult({
+                type: 'repository',
+                action: 'date_range_set',
+                target: d.repo,
+                detail: `${d.start ?? '?'} → ${d.end ?? '?'}`,
+              });
+            }
             tracker.setSummary({
               discrepancies: out.discrepancies.length,
               repaired_count: out.repaired.length,
               failed_count: out.failed.length,
+              date_ranges_changed: out.date_ranges.filter((d) => d.changed).length,
             });
             for (const e of out.errors) {
               tracker.addError({ code: e.code, message: e.message });
