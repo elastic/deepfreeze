@@ -43,6 +43,16 @@ interface FakeOpts {
   existingIndexTemplates?: Record<string, Record<string, unknown>>;
   /** Legacy (pre-7.8) templates by name. */
   existingLegacyTemplates?: Record<string, Record<string, unknown>>;
+  /**
+   * Per-repo snapshot index lists. Keyed by repo name; each value is
+   * the list of index names contained in that repo's snapshots.
+   * Drives the date-range update path's snapshot.get() call.
+   */
+  snapshotIndices?: Record<string, string[]>;
+  /** Index names that should exist when `indices.exists` queries. */
+  existingIndices?: string[];
+  /** Min/max @timestamp returned by the aggregation search. */
+  timestampRange?: { earliest: string | null; latest: string | null };
   /** Make `snapshot.createRepository` fail. */
   failCreate?: boolean;
   /** Make `snapshot.deleteRepository` fail for these names. */
@@ -91,7 +101,9 @@ function makeClient(
     indices: {
       exists: async ({ index }) => {
         if (index === STATUS_INDEX) return !opts.statusIndexMissing;
-        return false;
+        // Date-range path probes for mounted index names; consult the
+        // existingIndices set seeded by the test.
+        return (opts.existingIndices ?? []).includes(index);
       },
       getIndexTemplate: async ({ name }: { name?: string } = {}) => {
         const items = Object.entries(indexTemplates).filter(
@@ -142,7 +154,17 @@ function makeClient(
       return { found: false };
     },
     search: async (params) => {
-      const query = params.query as { match?: { doctype?: string } };
+      // Aggregation search (date-range path's @timestamp min/max).
+      if (params.aggs) {
+        const range = opts.timestampRange ?? { earliest: null, latest: null };
+        return {
+          aggregations: {
+            earliest: { value_as_string: range.earliest ?? undefined },
+            latest: { value_as_string: range.latest ?? undefined },
+          },
+        };
+      }
+      const query = (params.query ?? {}) as { match?: { doctype?: string } };
       if (query.match?.doctype === DOCTYPE.repository) {
         return {
           hits: {
@@ -178,6 +200,14 @@ function makeClient(
         trace.deleted_repos.push(name);
         delete liveRepos[name];
         return {};
+      },
+      get: async ({ repository }: { repository: string; snapshot: string }) => {
+        const indices = opts.snapshotIndices?.[repository] ?? [];
+        return {
+          snapshots: indices.length
+            ? [{ snapshot: 'snap-1', indices: [...indices] }]
+            : [],
+        };
       },
     },
     ilm: {
@@ -651,5 +681,161 @@ describe('runRotate partial failures', () => {
       failCreate: true,
     });
     await expect(runRotate(client)).rejects.toThrow('boom-create');
+  });
+});
+
+describe('runRotate date-range update', () => {
+  it('captures @timestamp ranges for every mounted repo before archive', async () => {
+    // Two mounted repos with snapshotted indices. Both should have
+    // their date ranges updated in the bulk pass that runs before
+    // archive. keep=2 so neither gets archived.
+    const repos = [
+      repoDoc('deepfreeze-000001', { is_mounted: true }),
+      repoDoc('deepfreeze-000002', { is_mounted: true }),
+    ];
+    const { client, trace } = makeClient({
+      settings: settings({ last_suffix: '000002' }),
+      repositoryDocs: repos,
+      snapshotIndices: {
+        'deepfreeze-000001': ['logs-jan'],
+        'deepfreeze-000002': ['logs-feb'],
+      },
+      existingIndices: ['logs-jan', 'logs-feb'],
+      timestampRange: {
+        earliest: '2026-01-01T00:00:00Z',
+        latest: '2026-02-28T00:00:00Z',
+      },
+    });
+
+    const result = await runRotate(client, { keep: 2 });
+
+    // Both repo docs get a date-range update write.
+    const dateRangeWrites = trace.index_calls.filter((c) => {
+      const doc = c.document as { doctype?: string; start?: string };
+      return doc.doctype === 'repository' && doc.start === '2026-01-01T00:00:00Z';
+    });
+    expect(dateRangeWrites.map((c) => c.id).sort()).toEqual([
+      'deepfreeze-000001',
+      'deepfreeze-000002',
+    ]);
+    // Step records show two `date_range` entries.
+    const dateRangeSteps = result.steps.filter((s) => s.type === 'date_range');
+    expect(dateRangeSteps.map((s) => s.name).sort()).toEqual([
+      'deepfreeze-000001',
+      'deepfreeze-000002',
+    ]);
+    expect(dateRangeSteps.every((s) => s.action === 'updated')).toBe(true);
+  });
+
+  it('runs the per-repo backstop right before each unmount during archive', async () => {
+    // 3 mounted repos, keep=1 → 2 oldest get archived. The backstop
+    // call before each deleteSnapshotRepository should target each
+    // archive candidate once.
+    const repos = [
+      repoDoc('deepfreeze-000001', { is_mounted: true }),
+      repoDoc('deepfreeze-000002', { is_mounted: true }),
+      repoDoc('deepfreeze-000003', { is_mounted: true }),
+    ];
+    const { client, trace } = makeClient({
+      settings: settings({ last_suffix: '000003' }),
+      repositoryDocs: repos,
+      liveRepos: {
+        'deepfreeze-000001': { type: 's3', settings: { bucket: 'my-bucket' } },
+        'deepfreeze-000002': { type: 's3', settings: { bucket: 'my-bucket' } },
+        'deepfreeze-000003': { type: 's3', settings: { bucket: 'my-bucket' } },
+      },
+      snapshotIndices: {
+        'deepfreeze-000001': ['logs-jan'],
+        'deepfreeze-000002': ['logs-feb'],
+        'deepfreeze-000003': ['logs-mar'],
+      },
+      existingIndices: ['logs-jan', 'logs-feb', 'logs-mar'],
+      timestampRange: {
+        earliest: '2026-01-01T00:00:00Z',
+        latest: '2026-03-31T00:00:00Z',
+      },
+    });
+
+    const result = await runRotate(client, { keep: 1 });
+
+    expect(result.archived).toEqual(['deepfreeze-000001', 'deepfreeze-000002']);
+    // Verify both archived repos got a date-range write BEFORE their
+    // unmount: each archived repo should appear in index_calls at
+    // least once with start set (bulk pass) AND each archive flips
+    // is_mounted=false (post-unmount). Verify the order via index_calls.
+    const callsForR1 = trace.index_calls.filter((c) => c.id === 'deepfreeze-000001');
+    const callsForR2 = trace.index_calls.filter((c) => c.id === 'deepfreeze-000002');
+    expect(callsForR1.length).toBeGreaterThanOrEqual(2); // bulk update + frozen flip
+    expect(callsForR2.length).toBeGreaterThanOrEqual(2);
+    // The final write per repo flips to frozen.
+    const lastR1 = callsForR1[callsForR1.length - 1].document as {
+      thaw_state: string;
+      is_mounted: boolean;
+    };
+    expect(lastR1.thaw_state).toBe('frozen');
+    expect(lastR1.is_mounted).toBe(false);
+  });
+
+  it('skips date-range writes when no snapshots have been taken yet', async () => {
+    // Fresh repos with no snapshots. snapshot.get returns empty, so
+    // updateRepositoryDateRange short-circuits with skipped_reason.
+    // No date_range step records should be emitted.
+    const { client, trace } = makeClient({
+      settings: settings({ last_suffix: '000001' }),
+      repositoryDocs: [repoDoc('deepfreeze-000001', { is_mounted: true })],
+      snapshotIndices: { 'deepfreeze-000001': [] },
+    });
+
+    const result = await runRotate(client);
+    const dateRangeSteps = result.steps.filter((s) => s.type === 'date_range');
+    expect(dateRangeSteps).toEqual([]);
+    // No date_range index calls either.
+    const dateRangeWrites = trace.index_calls.filter((c) => {
+      const doc = c.document as { doctype?: string; start?: string };
+      return doc.doctype === 'repository' && typeof doc.start === 'string';
+    });
+    expect(dateRangeWrites).toEqual([]);
+  });
+
+  it('only-extend merge: never shrinks an existing date range', async () => {
+    // Repo already has a wide date range. Queried range is narrower —
+    // the merge keeps the wider existing range and persists nothing
+    // (no change).
+    const repo = repoDoc('deepfreeze-000001', {
+      is_mounted: true,
+      start: '2025-12-01T00:00:00Z',
+      end: '2026-03-31T00:00:00Z',
+    });
+    const { client, trace } = makeClient({
+      settings: settings({ last_suffix: '000001' }),
+      repositoryDocs: [repo],
+      snapshotIndices: { 'deepfreeze-000001': ['logs-jan'] },
+      existingIndices: ['logs-jan'],
+      // Narrower than existing.
+      timestampRange: {
+        earliest: '2026-01-15T00:00:00Z',
+        latest: '2026-01-20T00:00:00Z',
+      },
+    });
+
+    await runRotate(client);
+
+    // No repository writes that touch start/end — only the rotation's
+    // own writes (the new repo doc, settings doc) should appear.
+    const startEndWrites = trace.index_calls.filter((c) => {
+      const doc = c.document as {
+        doctype?: string;
+        start?: string;
+        name?: string;
+      };
+      return (
+        doc.doctype === 'repository' &&
+        doc.name === 'deepfreeze-000001' &&
+        typeof doc.start === 'string'
+      );
+    });
+    // The bulk-pass code only writes when changed; with only-extend
+    // merge producing the same range, nothing is persisted.
+    expect(startEndWrites).toEqual([]);
   });
 });

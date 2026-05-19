@@ -1,8 +1,9 @@
 /**
  * Rotate action — create the next-suffix snapshot repository, create a
  * versioned ILM policy pointing at it, retarget index templates onto
- * that new versioned policy, and unmount older repositories that fall
- * outside the `keep` window.
+ * that new versioned policy, capture each mounted repo's data date
+ * range, and unmount older repositories that fall outside the `keep`
+ * window.
  *
  * Mirrors `Rotate.do_action` in
  *   packages/deepfreeze-core/deepfreeze_core/actions/rotate.py
@@ -60,13 +61,18 @@ import {
   updateIndexTemplateIlmPolicy,
   type IndexTemplateEsClient,
 } from '../repositories/index_template_repo';
+import {
+  updateRepositoryDateRange,
+  type DateRangeEsClient,
+} from '../repositories/repository_date_range';
 
 /** Full ES surface required by `runRotate`. */
 export type RotateActionEsClient = SettingsRepoWriteEsClient &
   RepositoryRepoWriteEsClient &
   SnapshotRepoEsClient &
   IlmRepoWriteEsClient &
-  IndexTemplateEsClient;
+  IndexTemplateEsClient &
+  DateRangeEsClient;
 
 /**
  * Default value for `keep` when the route caller doesn't supply one.
@@ -97,7 +103,8 @@ export interface RotateStepRecord {
     | 'settings'
     | 'repository_doc'
     | 'ilm_policy'
-    | 'index_template';
+    | 'index_template'
+    | 'date_range';
   action:
     | 'would_create'
     | 'would_update'
@@ -519,12 +526,72 @@ export async function runRotate(
     });
   }
 
+  // Capture date ranges for every currently-mounted repo BEFORE the
+  // archive step removes their searchable-snapshot indices. Mirrors
+  // `Rotate._update_date_ranges` in
+  //   packages/deepfreeze-core/deepfreeze_core/actions/rotate.py
+  // which runs at the same point in the rotation flow.
+  //
+  // The update is unconditional per Python's logic (no missing-date
+  // skip) — `updateRepositoryDateRange` is idempotent via its
+  // only-extend merge, so repeated calls are safe and only persist
+  // when something actually changes.
+  {
+    const allRepos = await getAllRepos(client);
+    const mounted = allRepos.filter(
+      (r) =>
+        r.name.startsWith(`${settings.repo_name_prefix}-`) && r.is_mounted
+    );
+    for (const repo of mounted) {
+      try {
+        const outcome = await updateRepositoryDateRange(client, repo);
+        if (outcome.changed) {
+          steps.push({
+            type: 'date_range',
+            action: 'updated',
+            name: repo.name,
+            detail: `${outcome.start} → ${outcome.end}`,
+          });
+        } else if (outcome.error) {
+          log.warn(`Date-range update failed for ${repo.name}: ${outcome.error}`);
+          errors.push({
+            code: 'ACTION_FAILED',
+            message: `Date-range update failed for ${repo.name}: ${outcome.error}`,
+            severity: 'warning',
+            target: repo.name,
+          });
+        }
+        // skipped_reason cases are quiet — they're normal (no snapshots
+        // yet, no @timestamp data, etc.) and don't merit a step record.
+      } catch (err) {
+        // updateRepositoryDateRange traps its own errors into outcome.error,
+        // but defensive in case the contract changes.
+        const msg = err instanceof Error ? err.message : String(err);
+        log.warn(`Date-range update threw for ${repo.name}: ${msg}`);
+      }
+    }
+  }
+
   const keep = config.keep ?? DEFAULT_KEEP;
   const { archived: candidates } = await pickReposToArchive(client, settings, keep);
   const archived: string[] = [];
   const skipped: string[] = [];
 
   for (const name of candidates) {
+    // Per-repo backstop: one final date-range capture right before
+    // unmount, in case anything changed between the bulk pass above and
+    // now. Mirrors Python's `unmount_repo` (utilities.py) which makes
+    // the same defensive call before delete_repository.
+    const repoToArchive = (await getAllRepos(client)).find((r) => r.name === name);
+    if (repoToArchive) {
+      try {
+        await updateRepositoryDateRange(client, repoToArchive);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.warn(`Pre-unmount date-range capture failed for ${name}: ${msg}`);
+      }
+    }
+
     try {
       await deleteSnapshotRepository(client, name);
     } catch (err) {
