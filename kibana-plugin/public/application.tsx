@@ -14,6 +14,11 @@ export function renderApp(
   plugins: DeepfreezePluginStartDeps,
   params: ManagementAppMountParams
 ) {
+  // Set the browser tab title to "Deepfreeze - Elastic" for the
+  // duration of the app mount. Reset via `docTitle.reset()` on
+  // unmount so the title is restored when the user navigates away.
+  coreStart.chrome.docTitle.change('Deepfreeze');
+
   ReactDOM.render(
     <KibanaContextProvider services={{ ...coreStart, ...plugins }}>
       <I18nProvider>
@@ -31,5 +36,6 @@ export function renderApp(
 
   return () => {
     ReactDOM.unmountComponentAtNode(params.element);
+    coreStart.chrome.docTitle.reset();
   };
 }
