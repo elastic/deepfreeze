@@ -70,13 +70,25 @@ interface TmCalls {
     params: Record<string, unknown>;
   }>;
   removeIfExists: string[];
+  fetch: Array<Record<string, unknown>>;
 }
 
-function makeTaskManager(): {
+/**
+ * Optional existing-task seed for the orphan-sweep. Each entry is
+ * what TaskManager.fetch() returns when the bootstrap enumerates
+ * deepfreeze tasks at start. Only `id` and `taskType` matter for the
+ * sweep logic; tests pass through additional fields when needed.
+ */
+interface SeedTask {
+  id: string;
+  taskType: string;
+}
+
+function makeTaskManager(seedTasks: SeedTask[] = []): {
   taskManager: TaskManagerStartContract;
   calls: TmCalls;
 } {
-  const calls: TmCalls = { ensureScheduled: [], removeIfExists: [] };
+  const calls: TmCalls = { ensureScheduled: [], removeIfExists: [], fetch: [] };
   const taskManager = {
     ensureScheduled: async (params: {
       id: string;
@@ -95,6 +107,13 @@ function makeTaskManager(): {
     removeIfExists: async (id: string) => {
       calls.removeIfExists.push(id);
       return {} as never;
+    },
+    fetch: async (opts: Record<string, unknown>) => {
+      calls.fetch.push(opts);
+      return {
+        docs: seedTasks.map((t) => ({ id: t.id, taskType: t.taskType })),
+        versionMap: new Map(),
+      };
     },
   } as unknown as TaskManagerStartContract;
   return { taskManager, calls };
@@ -272,8 +291,113 @@ describe('bootstrapDeepfreezeSchedules', () => {
       taskManager,
       logger: makeLogger(),
     });
-    expect(result).toEqual({ scheduled: [], paused: [], skipped: [], errors: [] });
+    expect(result).toEqual({
+      scheduled: [],
+      paused: [],
+      skipped: [],
+      errors: [],
+      removed_orphans: [],
+    });
     expect(calls.ensureScheduled).toEqual([]);
     expect(calls.removeIfExists).toEqual([]);
+    // The orphan sweep always runs, even with zero SOs — it's the only
+    // way to reap deepfreeze tasks left behind by a since-deleted job.
+    expect(calls.fetch).toHaveLength(1);
+  });
+});
+
+describe('bootstrapDeepfreezeSchedules — orphan sweep', () => {
+  it('removes a deepfreeze task whose SO no longer exists', async () => {
+    const { taskManager, calls } = makeTaskManager([
+      { id: 'scheduled_job:ghost-rotate', taskType: TASK_TYPES.rotate },
+    ]);
+    const result = await bootstrapDeepfreezeSchedules({
+      client: makeRepoClient([]),
+      taskManager,
+      logger: makeLogger(),
+    });
+    expect(result.removed_orphans).toEqual(['scheduled_job:ghost-rotate']);
+    expect(calls.removeIfExists).toEqual(['scheduled_job:ghost-rotate']);
+  });
+
+  it('leaves tasks that match an existing SO alone', async () => {
+    const { taskManager, calls } = makeTaskManager([
+      { id: 'scheduled_job:keepme', taskType: TASK_TYPES.rotate },
+    ]);
+    const result = await bootstrapDeepfreezeSchedules({
+      client: makeRepoClient([job({ name: 'keepme' })]),
+      taskManager,
+      logger: makeLogger(),
+    });
+    expect(result.removed_orphans).toEqual([]);
+    // ensureScheduled fired for the live job; removeIfExists was NOT
+    // called as part of the sweep (only paused/invalid jobs trigger
+    // it via applyScheduledJob, and "keepme" is neither).
+    expect(calls.removeIfExists).toEqual([]);
+    expect(calls.ensureScheduled).toHaveLength(1);
+  });
+
+  it('only enumerates the three deepfreeze task types', async () => {
+    const { taskManager, calls } = makeTaskManager();
+    await bootstrapDeepfreezeSchedules({
+      client: makeRepoClient([]),
+      taskManager,
+      logger: makeLogger(),
+    });
+    const opts = calls.fetch[0] as { query?: { terms?: Record<string, unknown> } };
+    expect(opts.query?.terms).toEqual({
+      'task.taskType': [
+        TASK_TYPES.rotate,
+        TASK_TYPES.cleanup,
+        TASK_TYPES.repairMetadata,
+      ],
+    });
+  });
+
+  it('keeps going when a single orphan removal fails', async () => {
+    const calls: TmCalls = { ensureScheduled: [], removeIfExists: [], fetch: [] };
+    const taskManager = {
+      ensureScheduled: async () => ({} as never),
+      removeIfExists: async (id: string) => {
+        calls.removeIfExists.push(id);
+        if (id === 'scheduled_job:angry') throw new Error('boom');
+        return {} as never;
+      },
+      fetch: async () => ({
+        docs: [
+          { id: 'scheduled_job:angry', taskType: TASK_TYPES.rotate },
+          { id: 'scheduled_job:meek', taskType: TASK_TYPES.cleanup },
+        ],
+        versionMap: new Map(),
+      }),
+    } as unknown as TaskManagerStartContract;
+
+    const result = await bootstrapDeepfreezeSchedules({
+      client: makeRepoClient([]),
+      taskManager,
+      logger: makeLogger(),
+    });
+    expect(result.removed_orphans).toEqual(['scheduled_job:meek']);
+    expect(result.errors).toEqual([
+      { name: 'scheduled_job:angry', error: 'boom' },
+    ]);
+  });
+
+  it('logs and skips the sweep if fetch itself throws (bootstrap still succeeds)', async () => {
+    const taskManager = {
+      ensureScheduled: async () => ({} as never),
+      removeIfExists: async () => ({} as never),
+      fetch: async () => {
+        throw new Error('task store unavailable');
+      },
+    } as unknown as TaskManagerStartContract;
+    const result = await bootstrapDeepfreezeSchedules({
+      client: makeRepoClient([job({ name: 'live' })]),
+      taskManager,
+      logger: makeLogger(),
+    });
+    expect(result.scheduled).toEqual(['live']);
+    expect(result.removed_orphans).toEqual([]);
+    expect(result.errors).toEqual([]);
   });
 });

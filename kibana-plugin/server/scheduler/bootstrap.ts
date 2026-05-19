@@ -8,6 +8,12 @@
  *      TaskManager creates / refreshes the task instance.
  *   3. For each paused job → `taskManager.removeIfExists` so it's
  *      absent from TaskManager while still persisted as a SO.
+ *   4. Sweep TaskManager for any deepfreeze task whose SO no longer
+ *      exists (an "orphan") and remove it. This is the only way an
+ *      operator can clean up a stale task: ES restricts writes to
+ *      `.kibana_task_manager` to the `kibana_system` privilege, so
+ *      even a superuser can't `DELETE` the doc directly — the cleanup
+ *      has to happen through TaskManager's own API, which we own.
  *
  * Errors per-job are caught and logged so a single malformed SO can't
  * prevent the plugin from starting. The bootstrap is idempotent and
@@ -95,6 +101,13 @@ export interface BootstrapDeepfreezeSchedulesResult {
   paused: string[];
   skipped: Array<{ name: string; reason: string }>;
   errors: Array<{ name: string; error: string }>;
+  /**
+   * TaskManager task ids that existed at start but had no
+   * corresponding SO (e.g. left over from a deleted job under an
+   * older code path, or from a since-removed legacy doc). The sweep
+   * removed them.
+   */
+  removed_orphans: string[];
 }
 
 /**
@@ -117,6 +130,7 @@ export async function bootstrapDeepfreezeSchedules(
     paused: [],
     skipped: [],
     errors: [],
+    removed_orphans: [],
   };
 
   const jobs = await getAllScheduledJobs(client);
@@ -132,7 +146,52 @@ export async function bootstrapDeepfreezeSchedules(
     }
   }
 
+  await sweepOrphanTasks(jobs, taskManager, logger, result);
+
   return result;
+}
+
+/**
+ * Find any TaskManager task whose taskType is one of ours but whose
+ * id doesn't map to a known SO, and remove it. Failures here are
+ * non-fatal — we log and let plugin start continue.
+ */
+async function sweepOrphanTasks(
+  jobs: ScheduledJobDoc[],
+  taskManager: TaskManagerStartContract,
+  logger: Logger,
+  result: BootstrapDeepfreezeSchedulesResult
+): Promise<void> {
+  const knownIds = new Set(jobs.map((j) => bootstrapTaskId(j.name)));
+  const deepfreezeTaskTypes = Object.values(TASK_TYPES);
+
+  let docs: Array<{ id: string; taskType: string }>;
+  try {
+    const fetched = await taskManager.fetch({
+      query: { terms: { 'task.taskType': deepfreezeTaskTypes } },
+      size: 1000,
+    });
+    docs = fetched.docs.map((d) => ({ id: d.id, taskType: d.taskType }));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`deepfreeze: orphan task sweep failed to enumerate tasks: ${msg}`);
+    return;
+  }
+
+  for (const doc of docs) {
+    if (knownIds.has(doc.id)) continue;
+    try {
+      await taskManager.removeIfExists(doc.id);
+      logger.info(
+        `deepfreeze: removed orphan task ${doc.id} (${doc.taskType}) — no matching scheduled-job SO`
+      );
+      result.removed_orphans.push(doc.id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`deepfreeze: failed to remove orphan task ${doc.id}: ${msg}`);
+      result.errors.push({ name: doc.id, error: msg });
+    }
+  }
 }
 
 async function applyScheduledJob(
