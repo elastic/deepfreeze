@@ -7,6 +7,7 @@ import type { ManagementAppMountParams } from '@kbn/management-plugin/public';
 
 import { OverviewPage } from './pages/overview';
 import { RepositoriesPage } from './pages/repositories';
+import { SchedulesPage } from './pages/schedules';
 import { ThawRequestsPage } from './pages/thaw_requests';
 import { ActivityPage } from './pages/activity';
 
@@ -26,6 +27,7 @@ const TABS: TabDef[] = [
   { id: 'overview', path: '/overview', label: 'Overview' },
   { id: 'repositories', path: '/repositories', label: 'Repositories' },
   { id: 'thaw_requests', path: '/thaw-requests', label: 'Thaw requests' },
+  { id: 'schedules', path: '/schedules', label: 'Schedules' },
   { id: 'activity', path: '/activity', label: 'Activity' },
 ];
 
@@ -78,6 +80,9 @@ export function App({ http, notifications, setBreadcrumbs }: AppProps) {
           </Route>
           <Route path="/thaw-requests">
             <ThawRequestsPage http={http} notifications={notifications} />
+          </Route>
+          <Route path="/schedules">
+            <SchedulesPage http={http} notifications={notifications} />
           </Route>
           <Route path="/activity">
             <ActivityPage http={http} />
