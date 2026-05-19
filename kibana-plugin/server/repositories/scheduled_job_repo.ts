@@ -79,6 +79,11 @@ export async function getAllScheduledJobs(
 /**
  * Fetch a single job by `name` (NOT by doc id). Returns `null` if
  * absent. Other errors propagate.
+ *
+ * The `name` field is mapped as `text` with a `.keyword` subfield in
+ * the status-index mapping; we query the keyword subfield because the
+ * analyzed text field tokenizes values like `"test-rotate"` and a
+ * raw `term` query would never match.
  */
 export async function getScheduledJob(
   client: ScheduledJobRepoEsClient,
@@ -91,7 +96,7 @@ export async function getScheduledJob(
         bool: {
           must: [
             { term: { doctype: DOCTYPE.scheduled_job } },
-            { term: { name } },
+            { term: { 'name.keyword': name } },
           ],
         },
       },

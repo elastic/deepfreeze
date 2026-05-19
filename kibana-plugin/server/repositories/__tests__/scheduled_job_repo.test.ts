@@ -66,14 +66,17 @@ function makeClient(opts: FakeOpts = {}): {
       const query = (params.query ?? {}) as Record<string, unknown>;
       const jobs = opts.jobs ?? [];
       // `getScheduledJob` uses a bool/must with two term clauses
-      // including the name; filter on that.
+      // including the name (queried via the `.keyword` subfield —
+      // the analyzed text field tokenizes hyphens). Filter on that.
       const bool = query.bool as { must?: Array<Record<string, unknown>> } | undefined;
       if (bool?.must) {
         const nameClause = bool.must.find(
-          (c) => 'term' in c && (c.term as Record<string, unknown>).name
+          (c) => 'term' in c && (c.term as Record<string, unknown>)['name.keyword']
         );
         if (nameClause) {
-          const name = (nameClause.term as { name: string }).name;
+          const name = (nameClause.term as { 'name.keyword': string })[
+            'name.keyword'
+          ];
           const j = jobs.find((j) => j.name === name);
           return {
             hits: {
