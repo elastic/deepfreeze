@@ -36,8 +36,8 @@ import {
   getAllScheduledJobs,
   getScheduledJob,
   saveScheduledJob,
-  type ScheduledJobRepoWriteEsClient,
-} from '../repositories/scheduled_job_repo';
+  type ScheduledJobSoClient,
+} from '../repositories/scheduled_job_so_repo';
 import { bootstrapTaskId } from './bootstrap';
 import { runActionForSchedule, syncTaskManager } from './sync';
 import type { RotateActionEsClient } from '../actions/rotate';
@@ -90,8 +90,7 @@ const updateBodySchema = schema.object({
   paused: schema.maybe(schema.boolean()),
 });
 
-export type SchedulesEsClient = ScheduledJobRepoWriteEsClient &
-  AuditEsClient &
+export type SchedulesEsClient = AuditEsClient &
   RotateActionEsClient &
   CleanupActionEsClient &
   RepairMetadataActionEsClient;
@@ -143,9 +142,9 @@ export function registerSchedulesRoute(
       validate: false,
     },
     async (ctx, _req, res) => {
-      const { client } = (await ctx.core).elasticsearch;
-      const esClient = client.asCurrentUser as unknown as SchedulesEsClient;
-      const jobs = await getAllScheduledJobs(esClient);
+      const core = await ctx.core;
+      const soClient = core.savedObjects.client as unknown as ScheduledJobSoClient;
+      const jobs = await getAllScheduledJobs(soClient);
       return res.ok({ body: { schedules: jobs } });
     }
   );
@@ -163,10 +162,10 @@ export function registerSchedulesRoute(
       validate: { params: nameParamSchema },
     },
     async (ctx, req, res) => {
-      const { client } = (await ctx.core).elasticsearch;
-      const esClient = client.asCurrentUser as unknown as SchedulesEsClient;
+      const core = await ctx.core;
+      const soClient = core.savedObjects.client as unknown as ScheduledJobSoClient;
       const { name } = req.params as { name: string };
-      const job = await getScheduledJob(esClient, name);
+      const job = await getScheduledJob(soClient, name);
       if (!job) {
         return res.customError({
           statusCode: 404,
@@ -190,8 +189,9 @@ export function registerSchedulesRoute(
       validate: { body: createBodySchema },
     },
     async (ctx, req, res) => {
-      const { client } = (await ctx.core).elasticsearch;
-      const esClient = client.asCurrentUser as unknown as SchedulesEsClient;
+      const core = await ctx.core;
+      const soClient = core.savedObjects.client as unknown as ScheduledJobSoClient;
+      const esClient = core.elasticsearch.client.asCurrentUser as unknown as SchedulesEsClient;
       const body = req.body as {
         name: string;
         action: (typeof SCHEDULE_ACTIONS)[number];
@@ -210,7 +210,7 @@ export function registerSchedulesRoute(
         });
       }
 
-      const existing = await getScheduledJob(esClient, body.name);
+      const existing = await getScheduledJob(soClient, body.name);
       if (existing) {
         return res.customError({
           statusCode: 409,
@@ -247,7 +247,7 @@ export function registerSchedulesRoute(
             user,
           },
           async (tracker) => {
-            await saveScheduledJob(esClient, doc);
+            await saveScheduledJob(soClient, doc);
             const sync = await syncTaskManager(opts.getTaskManager(), doc);
             tracker.addResult({
               type: 'scheduled_job',
@@ -277,8 +277,9 @@ export function registerSchedulesRoute(
       validate: { params: nameParamSchema, body: updateBodySchema },
     },
     async (ctx, req, res) => {
-      const { client } = (await ctx.core).elasticsearch;
-      const esClient = client.asCurrentUser as unknown as SchedulesEsClient;
+      const core = await ctx.core;
+      const soClient = core.savedObjects.client as unknown as ScheduledJobSoClient;
+      const esClient = core.elasticsearch.client.asCurrentUser as unknown as SchedulesEsClient;
       const { name } = req.params as { name: string };
       const patch = req.body as {
         action?: (typeof SCHEDULE_ACTIONS)[number];
@@ -287,7 +288,7 @@ export function registerSchedulesRoute(
         paused?: boolean;
       };
 
-      const existing = await getScheduledJob(esClient, name);
+      const existing = await getScheduledJob(soClient, name);
       if (!existing) {
         return res.customError({
           statusCode: 404,
@@ -314,7 +315,7 @@ export function registerSchedulesRoute(
             user,
           },
           async (tracker) => {
-            await saveScheduledJob(esClient, updated);
+            await saveScheduledJob(soClient, updated);
             const sync = await syncTaskManager(opts.getTaskManager(), updated);
             tracker.addResult({
               type: 'scheduled_job',
@@ -344,8 +345,9 @@ export function registerSchedulesRoute(
       validate: { params: nameParamSchema },
     },
     async (ctx, req, res) => {
-      const { client } = (await ctx.core).elasticsearch;
-      const esClient = client.asCurrentUser as unknown as SchedulesEsClient;
+      const core = await ctx.core;
+      const soClient = core.savedObjects.client as unknown as ScheduledJobSoClient;
+      const esClient = core.elasticsearch.client.asCurrentUser as unknown as SchedulesEsClient;
       const { name } = req.params as { name: string };
       try {
         const user = await getCurrentUser(req);
@@ -358,7 +360,7 @@ export function registerSchedulesRoute(
             user,
           },
           async (tracker) => {
-            await deleteScheduledJob(esClient, name);
+            await deleteScheduledJob(soClient, name);
             // Remove from TaskManager whether or not the doc existed —
             // a stranded task instance is the worse failure mode.
             await opts.getTaskManager().removeIfExists(bootstrapTaskId(name));
@@ -389,7 +391,7 @@ export function registerSchedulesRoute(
       validate: { params: nameParamSchema },
     },
     async (ctx, req, res) =>
-      togglePaused(ctx, req, res, true, esClientFromCtx, opts, getCurrentUser, makeAudit)
+      togglePaused(ctx, req, res, true, opts, getCurrentUser, makeAudit)
   );
 
   // --- POST /api/deepfreeze/schedules/{name}/resume ------------------
@@ -405,7 +407,7 @@ export function registerSchedulesRoute(
       validate: { params: nameParamSchema },
     },
     async (ctx, req, res) =>
-      togglePaused(ctx, req, res, false, esClientFromCtx, opts, getCurrentUser, makeAudit)
+      togglePaused(ctx, req, res, false, opts, getCurrentUser, makeAudit)
   );
 
   // --- POST /api/deepfreeze/schedules/{name}/run-now -----------------
@@ -421,11 +423,12 @@ export function registerSchedulesRoute(
       validate: { params: nameParamSchema },
     },
     async (ctx, req, res) => {
-      const { client } = (await ctx.core).elasticsearch;
-      const esClient = client.asCurrentUser as unknown as SchedulesEsClient;
+      const core = await ctx.core;
+      const soClient = core.savedObjects.client as unknown as ScheduledJobSoClient;
+      const esClient = core.elasticsearch.client.asCurrentUser as unknown as SchedulesEsClient;
       const { name } = req.params as { name: string };
 
-      const job = await getScheduledJob(esClient, name);
+      const job = await getScheduledJob(soClient, name);
       if (!job) {
         return res.customError({
           statusCode: 404,
@@ -475,14 +478,15 @@ async function togglePaused(
   req: Parameters<Parameters<IRouter['post']>[1]>[1],
   res: Parameters<Parameters<IRouter['post']>[1]>[2],
   paused: boolean,
-  esClientFromCtxFn: typeof esClientFromCtx,
   opts: RegisterSchedulesRouteOptions,
   getCurrentUser: GetCurrentUser,
   makeAudit: (client: AuditEsClient) => AuditLogger
 ) {
-  const esClient = await esClientFromCtxFn(ctx);
+  const core = await ctx.core;
+  const soClient = core.savedObjects.client as unknown as ScheduledJobSoClient;
+  const esClient = core.elasticsearch.client.asCurrentUser as unknown as SchedulesEsClient;
   const { name } = req.params as { name: string };
-  const existing = await getScheduledJob(esClient, name);
+  const existing = await getScheduledJob(soClient, name);
   if (!existing) {
     return res.customError({
       statusCode: 404,
@@ -505,7 +509,7 @@ async function togglePaused(
         user,
       },
       async (tracker) => {
-        await saveScheduledJob(esClient, updated);
+        await saveScheduledJob(soClient, updated);
         const sync = await syncTaskManager(opts.getTaskManager(), updated);
         tracker.addResult({
           type: 'scheduled_job',
@@ -519,13 +523,6 @@ async function togglePaused(
   } catch (err) {
     return mapError(err, res);
   }
-}
-
-async function esClientFromCtx(
-  ctx: Parameters<Parameters<IRouter['post']>[1]>[0]
-): Promise<SchedulesEsClient> {
-  const { client } = (await ctx.core).elasticsearch;
-  return client.asCurrentUser as unknown as SchedulesEsClient;
 }
 
 function mapError(

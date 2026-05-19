@@ -1,17 +1,17 @@
 /**
  * Plugin-start bootstrap that materializes deepfreeze scheduled-job
- * docs into live Kibana TaskManager tasks.
+ * SavedObjects into live Kibana TaskManager tasks.
  *
- * On every plugin start, we:
- *   1. Read every `scheduled_job:*` doc from the status index.
+ * On every plugin start (after the legacy-doc migration), we:
+ *   1. Read every `deepfreeze-scheduled-job` SavedObject.
  *   2. For each non-paused job → `taskManager.ensureScheduled` so
  *      TaskManager creates / refreshes the task instance.
  *   3. For each paused job → `taskManager.removeIfExists` so it's
- *      absent from TaskManager while still persisted in our index.
+ *      absent from TaskManager while still persisted as a SO.
  *
- * Errors per-job are caught and logged so a single malformed doc can't
+ * Errors per-job are caught and logged so a single malformed SO can't
  * prevent the plugin from starting. The bootstrap is idempotent and
- * safe to call again after edits land via Step 3's CRUD routes.
+ * safe to call again after CRUD-route edits.
  *
  * Mirrors `DeepfreezeScheduler._load_persisted_jobs` in
  *   packages/deepfreeze-server/deepfreeze_server/orchestration/scheduler.py
@@ -28,12 +28,12 @@
 import type { Logger } from '@kbn/core/server';
 import type { TaskManagerStartContract } from '@kbn/task-manager-plugin/server';
 
+import { SCHEDULED_JOB_ID_PREFIX } from '../../common/constants';
 import type { ScheduledJobDoc } from '../../common/schemas/scheduled_job';
 import {
   getAllScheduledJobs,
-  scheduledJobDocId,
-  type ScheduledJobRepoEsClient,
-} from '../repositories/scheduled_job_repo';
+  type ScheduledJobSoClient,
+} from '../repositories/scheduled_job_so_repo';
 import { TASK_TYPES, type DeepfreezeTaskType } from './task_types';
 
 /**
@@ -68,13 +68,15 @@ export function resolveTaskTypeForAction(action: string): DeepfreezeTaskType | n
  *     touch unrelated tasks even if names collide
  */
 export function bootstrapTaskId(jobName: string): string {
-  // Use the same doc-id prefix so the TaskManager id and our ES doc id
-  // are easy to correlate during debugging.
-  return scheduledJobDocId(jobName);
+  // Use the legacy `scheduled_job:` prefix so the TaskManager ids
+  // produced by this bootstrap stay byte-stable across the ES →
+  // SavedObjects migration. Clusters that had tasks running under
+  // these ids before the migration continue to find them after.
+  return `${SCHEDULED_JOB_ID_PREFIX}${jobName}`;
 }
 
 export interface BootstrapDeepfreezeSchedulesOptions {
-  client: ScheduledJobRepoEsClient;
+  client: ScheduledJobSoClient;
   taskManager: TaskManagerStartContract;
   logger: Logger;
 }

@@ -8,7 +8,8 @@ import {
 } from '../bootstrap';
 import { TASK_TYPES } from '../task_types';
 import type { ScheduledJobDoc } from '../../../common/schemas/scheduled_job';
-import type { ScheduledJobRepoEsClient } from '../../repositories/scheduled_job_repo';
+import type { ScheduledJobSoClient } from '../../repositories/scheduled_job_so_repo';
+import { SCHEDULED_JOB_SO_TYPE } from '../../saved_objects/scheduled_job_type';
 
 function makeLogger(): Logger {
   const noop = () => {};
@@ -25,16 +26,39 @@ function makeLogger(): Logger {
   } as unknown as Logger;
 }
 
-function makeRepoClient(jobs: ScheduledJobDoc[]): ScheduledJobRepoEsClient {
+/**
+ * Stand-in for a SavedObjects client / repository. We only implement
+ * `find` because bootstrap is read-only against the SO layer.
+ */
+function makeRepoClient(jobs: ScheduledJobDoc[]): ScheduledJobSoClient {
   return {
-    search: async () => ({
-      hits: {
-        hits: jobs.map((j) => ({
-          _id: `scheduled_job:${j.name}`,
-          _source: j as unknown as Record<string, unknown>,
-        })),
-      },
+    find: async () => ({
+      saved_objects: jobs.map((j) => ({
+        id: j.name,
+        type: SCHEDULED_JOB_SO_TYPE,
+        attributes: {
+          action: j.action,
+          params: j.params,
+          cron: j.cron,
+          interval_seconds: j.interval_seconds,
+          paused: j.paused,
+          created_at: j.created_at,
+        },
+      })),
+      total: jobs.length,
     }),
+    get: async () => {
+      throw new Error('not implemented');
+    },
+    create: async () => {
+      throw new Error('not implemented');
+    },
+    update: async () => {
+      throw new Error('not implemented');
+    },
+    delete: async () => {
+      throw new Error('not implemented');
+    },
   };
 }
 

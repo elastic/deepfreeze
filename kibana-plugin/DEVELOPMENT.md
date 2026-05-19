@@ -131,33 +131,37 @@ yarn start --no-base-path
 
 Once Kibana boots, the plugin's app appears under Stack Management.
 
-## Required Elasticsearch service-account permissions (scheduler)
+## Elasticsearch service-account permissions
 
-The plugin stores its state in custom indices (`deepfreeze-status`,
-`deepfreeze-audit`) rather than `.kibana_*` SavedObjects. HTTP routes
-work fine because they authenticate as the requesting user via
-`client.asCurrentUser` — your interactive user (e.g. a superuser)
-already has access.
+The plugin's state lives in three places:
 
-**Background tasks** (the Phase 5 scheduler — Rotate / Cleanup /
-RepairMetadata on a timer) have no request context, so they fall back
-to `client.asInternalUser`, which authenticates as Kibana's
-configured service account — `kibana_system` by default. `kibana_system`
-is a reserved user with permissions scoped to `.kibana_*` and **cannot
-read `deepfreeze-*` indices**. Without the grant below, the bootstrap
-on plugin start fails with `security_exception: action
-[indices:data/read/search] is unauthorized for user [kibana_system]`,
-and no scheduled tasks fire.
+- **Scheduled jobs** — Kibana SavedObjects (type
+  `deepfreeze-scheduled-job`, stored in `.kibana_*` indices). The
+  scheduler bootstrap and CRUD routes both use SOs; no extra
+  permission grants are needed for scheduling to work.
+- **Repositories, thaw requests, audit entries, settings** — custom
+  indices `deepfreeze-status` and `deepfreeze-audit`. These are
+  touched by route handlers running as the requesting user
+  (`client.asCurrentUser`), which inherits the user's own privileges.
 
-`kibana_system` is reserved and can't be granted additional roles
-directly. The fix is to create a custom service user that holds both
-the `kibana_system` role (so the rest of Kibana keeps working) plus a
-deepfreeze-specific role, and point Kibana at that user.
+The interactive user (e.g. your `bret` superuser) already has full
+access to `deepfreeze-*`, so out-of-the-box installs work without any
+role configuration.
 
-In Dev Tools (or via the `_security` API as `elastic`):
+### Legacy permission requirement (no longer needed)
+
+Earlier versions of the scheduler stored scheduled jobs in
+`deepfreeze-status` rather than SavedObjects, which required granting
+the Kibana service account read/write access to `deepfreeze-*` because
+the bootstrap and task runners use `client.asInternalUser`. Clusters
+created before this migration may still have legacy `scheduled_job`
+docs in `deepfreeze-status`; the plugin migrates them to SavedObjects
+on the first start after the upgrade (idempotent — safe to re-run).
+
+If you still want a dedicated service account for the plugin (e.g. to
+isolate audit attribution), the legacy recipe was:
 
 ```
-# 1. Role granting access to deepfreeze indices.
 PUT _security/role/deepfreeze_access
 {
   "indices": [
@@ -166,40 +170,26 @@ PUT _security/role/deepfreeze_access
       "privileges": ["read", "write", "create_index", "manage", "view_index_metadata"]
     }
   ],
-  "cluster": ["monitor"]
+  "cluster": ["monitor", "manage", "manage_ilm", "manage_index_templates"]
 }
 
-# 2. Custom service user that combines kibana_system + the new role.
 POST _security/user/deepfreeze_kibana
 {
   "password": "<choose-a-password>",
-  "roles": ["kibana_system", "deepfreeze_access"],
-  "full_name": "Kibana service user with deepfreeze access"
+  "roles": ["kibana_system", "deepfreeze_access"]
 }
 ```
 
-Then in `~/git/kibana/config/kibana.dev.yml`, swap Kibana's credentials:
+Then point Kibana at the custom user via `kibana.dev.yml`:
 
 ```yaml
 elasticsearch.username: "deepfreeze_kibana"
 elasticsearch.password: "<the password>"
 ```
 
-Restart Kibana. Verify the bootstrap worked:
-
-```
-GET kbn:/api/deepfreeze/scheduler/diagnostics
-```
-
-`visible_to_internal_user.count` should match
-`visible_to_current_user.count`, and `last_result.scheduled` should
-list any non-paused `scheduled_job` docs in the status index.
-
-> **Production note**: this hack works for self-managed clusters where
-> you control the service account. On Elastic Cloud (kibana_system
-> credentials are managed by the platform) the right answer is to
-> migrate `scheduled_job` to a Kibana SavedObject type — tracked as
-> follow-up work in the project's TODO list.
+Useful if you also want scheduled-task runs (which use the internal
+user) to read `deepfreeze-status` directly — e.g. for the in-progress
+thaw guard that uses `listThawRequests` internally. Optional.
 
 ## Type-check before commit
 

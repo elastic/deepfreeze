@@ -24,8 +24,10 @@ import {
   registerSchedulerDiagnosticsRoute,
   type SchedulerDiagnosticsState,
 } from './scheduler/diagnostics_route';
+import { migrateScheduledJobs } from './scheduler/migration';
 import { registerSchedulesRoute } from './scheduler/schedules_route';
 import { registerDeepfreezeTaskTypes } from './scheduler/task_types';
+import { registerScheduledJobSavedObject } from './saved_objects/scheduled_job_type';
 import type { TaskManagerStartContract } from '@kbn/task-manager-plugin/server';
 import { registerDeepfreezeUsageCollector } from './telemetry';
 import type {
@@ -86,6 +88,11 @@ export class DeepfreezePlugin
       this.logger.info('deepfreeze plugin disabled by config');
       return {};
     }
+
+    // Register the SavedObject type for scheduled jobs. Must happen
+    // during setup so the type is known by the time plugin.start tries
+    // to create / read SOs from it.
+    registerScheduledJobSavedObject(core);
 
     plugins.features.registerElasticsearchFeature({
       id: PLUGIN_ID,
@@ -197,19 +204,48 @@ export class DeepfreezePlugin
     this.taskManagerStart = plugins.taskManager;
 
     if (this.config.enabled) {
-      // Materialize scheduled_job docs into TaskManager. Runs fire-
-      // and-forget so a slow status-index read doesn't block plugin
-      // start; errors are logged inside the bootstrap helper.
-      const esClient =
+      // Fire-and-forget: migrate any legacy scheduled_job docs out of
+      // deepfreeze-status into SavedObjects, then materialize SOs into
+      // TaskManager. Slow ES reads can't block plugin start; errors
+      // are logged and surfaced via the diagnostics endpoint.
+      const esInternalClient =
         core.elasticsearch.client.asInternalUser as unknown as Parameters<
-          typeof bootstrapDeepfreezeSchedules
-        >[0]['client'];
-      bootstrapDeepfreezeSchedules({
-        client: esClient,
-        taskManager: plugins.taskManager,
-        logger: this.logger,
-      })
-        .then((result) => {
+          typeof migrateScheduledJobs
+        >[0]['esClient'];
+      // The internal SavedObjects repository bypasses user privileges
+      // and reads .kibana_* directly — exactly what we need for both
+      // the migration and the bootstrap.
+      const soRepo = core.savedObjects.createInternalRepository();
+
+      (async () => {
+        try {
+          const migration = await migrateScheduledJobs({
+            esClient: esInternalClient,
+            soClient: soRepo as unknown as Parameters<
+              typeof migrateScheduledJobs
+            >[0]['soClient'],
+            logger: this.logger,
+          });
+          if (migration.migrated.length > 0 || migration.failed.length > 0) {
+            this.logger.info(
+              `deepfreeze: scheduled_job migration — ` +
+                `${migration.migrated.length} migrated, ` +
+                `${migration.failed.length} failed`
+            );
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`deepfreeze: scheduled_job migration failed: ${msg}`);
+        }
+
+        try {
+          const result = await bootstrapDeepfreezeSchedules({
+            client: soRepo as unknown as Parameters<
+              typeof bootstrapDeepfreezeSchedules
+            >[0]['client'],
+            taskManager: plugins.taskManager,
+            logger: this.logger,
+          });
           this.schedulerDiagnostics.last_bootstrap_at = new Date().toISOString();
           this.schedulerDiagnostics.last_result = result;
           this.schedulerDiagnostics.last_error = null;
@@ -220,14 +256,14 @@ export class DeepfreezePlugin
               `${result.skipped.length} skipped, ` +
               `${result.errors.length} error(s)`
           );
-        })
-        .catch((err) => {
+        } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           this.schedulerDiagnostics.last_bootstrap_at = new Date().toISOString();
           this.schedulerDiagnostics.last_result = null;
           this.schedulerDiagnostics.last_error = msg;
           this.logger.error(`deepfreeze: bootstrap failed: ${msg}`);
-        });
+        }
+      })();
     }
 
     return {};
