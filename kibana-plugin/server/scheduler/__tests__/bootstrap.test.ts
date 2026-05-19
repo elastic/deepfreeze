@@ -176,7 +176,7 @@ describe('bootstrapDeepfreezeSchedules', () => {
     expect(result.paused).toEqual(['sleepy']);
   });
 
-  it('skips cron-only jobs with a clear reason (Phase 5b)', async () => {
+  it('skips cron-only jobs (interval-only is the canonical scheduler)', async () => {
     const { taskManager, calls } = makeTaskManager();
     const result = await bootstrapDeepfreezeSchedules({
       client: makeRepoClient([
@@ -191,7 +191,7 @@ describe('bootstrapDeepfreezeSchedules', () => {
     expect(result.skipped).toEqual([
       {
         name: 'cronny',
-        reason: 'cron expressions not yet supported (Phase 5b)',
+        reason: 'cron expressions not supported; use interval_seconds instead',
       },
     ]);
   });

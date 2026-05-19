@@ -16,11 +16,16 @@
  * Mirrors `DeepfreezeScheduler._load_persisted_jobs` in
  *   packages/deepfreeze-server/deepfreeze_server/orchestration/scheduler.py
  *
- * Step 2 limitations (carried over from Phase 5 plan):
- *   - cron-only docs are skipped with a warning. TaskManager's
- *     `schedule.interval` covers the common case; cron support requires
- *     a parser + recompute-next-runAt-on-completion, deferred to a
- *     Phase 5b follow-up.
+ * Two intentional design choices:
+ *   - **Cron expressions are not supported.** TaskManager natively
+ *     handles `schedule.interval` ('3600s'-style), which covers
+ *     "every N minutes/hours/days." Cron-style "every day at 02:00"
+ *     scheduling would require a parser + recompute-next-runAt-on-
+ *     completion plumbing and offers no operational benefit for the
+ *     three deepfreeze action types (rotate / cleanup / repair-metadata),
+ *     where frequency matters more than wall-clock time. cron-only
+ *     docs are skipped with a clear warning so the operator can
+ *     convert them to interval-based without surprise.
  *   - Unknown `action` values are skipped with a warning rather than
  *     bringing down the plugin.
  */
@@ -159,15 +164,17 @@ async function applyScheduledJob(
     return;
   }
 
-  // Cron-only jobs are out of scope for Step 2 — needs a parser plus
-  // recompute-next-runAt-on-completion logic. Defer to Phase 5b.
+  // Cron expressions are not supported — see the module-level doc
+  // comment. The schema retains the `cron` field for Python parity
+  // (Python's APScheduler-backed scheduler does support cron) but
+  // the Kibana plugin scheduler is interval-only.
   if (job.cron && !job.interval_seconds) {
     logger.warn(
-      `Scheduled job ${job.name} uses cron='${job.cron}' which is not yet supported; skipping`
+      `Scheduled job ${job.name} uses cron='${job.cron}' which is not supported; skipping`
     );
     result.skipped.push({
       name: job.name,
-      reason: 'cron expressions not yet supported (Phase 5b)',
+      reason: 'cron expressions not supported; use interval_seconds instead',
     });
     // Defensive: in case it was scheduled previously with a cron->interval
     // mapping that's now invalid, remove it so it doesn't keep firing.
