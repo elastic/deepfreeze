@@ -65,7 +65,10 @@ describe('syncTaskManager', () => {
       schedule: { interval: '3600s' },
       params: { keep: 6 },
     });
-    expect(calls.removeIfExists).toEqual([]);
+    // We always removeIfExists FIRST so interval updates actually
+    // take effect — ensureScheduled alone has create-if-missing
+    // semantics and won't change an existing task's schedule.
+    expect(calls.removeIfExists).toEqual(['scheduled_job:r1']);
   });
 
   it('removes a paused job (kept in ES, absent from TaskManager)', async () => {

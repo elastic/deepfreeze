@@ -32,6 +32,16 @@ import { bootstrapTaskId, resolveTaskTypeForAction } from './bootstrap';
  * by every mutating CRUD route after the ES write succeeds.
  *
  * Returns the actual sync action taken so the caller can log it.
+ *
+ * Implementation note: TaskManager's `ensureScheduled` is "create if
+ * missing" semantics — it does NOT update an existing task's
+ * interval. If we relied on it for both create and update, editing a
+ * job's interval would silently leave TaskManager firing at the
+ * original cadence. To keep the schedule in sync with the doc, we
+ * remove any existing task first and then schedule fresh. The brief
+ * gap (sub-millisecond) is acceptable because in-flight runs are
+ * allowed to complete by TaskManager; a missed fire window is no
+ * different from any other normal scheduling jitter.
  */
 export async function syncTaskManager(
   taskManager: TaskManagerStartContract,
@@ -51,6 +61,8 @@ export async function syncTaskManager(
     await taskManager.removeIfExists(id);
     return 'invalid_action_removed';
   }
+  // Force a fresh schedule so interval/param updates actually take effect.
+  await taskManager.removeIfExists(id);
   await taskManager.ensureScheduled({
     id,
     taskType,
