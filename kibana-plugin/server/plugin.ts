@@ -18,6 +18,7 @@ import {
   registerStatusRoute,
   registerThawRoute,
 } from './routes';
+import { bootstrapDeepfreezeSchedules } from './scheduler/bootstrap';
 import { registerDeepfreezeTaskTypes } from './scheduler/task_types';
 import { registerDeepfreezeUsageCollector } from './telemetry';
 import type {
@@ -139,8 +140,40 @@ export class DeepfreezePlugin
     return {};
   }
 
-  public start(_core: CoreStart, _plugins: DeepfreezePluginStartDeps): DeepfreezePluginStart {
+  public start(core: CoreStart, plugins: DeepfreezePluginStartDeps): DeepfreezePluginStart {
     this.logger.debug('deepfreeze: start');
+
+    if (this.config.enabled) {
+      // Materialize scheduled_job docs into TaskManager. Runs fire-
+      // and-forget so a slow status-index read doesn't block plugin
+      // start; errors are logged inside the bootstrap helper.
+      const esClient =
+        core.elasticsearch.client.asInternalUser as unknown as Parameters<
+          typeof bootstrapDeepfreezeSchedules
+        >[0]['client'];
+      bootstrapDeepfreezeSchedules({
+        client: esClient,
+        taskManager: plugins.taskManager,
+        logger: this.logger,
+      })
+        .then((result) => {
+          this.logger.info(
+            `deepfreeze: bootstrap complete — ` +
+              `${result.scheduled.length} scheduled, ` +
+              `${result.paused.length} paused, ` +
+              `${result.skipped.length} skipped, ` +
+              `${result.errors.length} error(s)`
+          );
+        })
+        .catch((err) => {
+          this.logger.error(
+            `deepfreeze: bootstrap failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          );
+        });
+    }
+
     return {};
   }
 
