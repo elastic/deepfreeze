@@ -259,6 +259,23 @@ export async function runRotateDryRun(
       detail: `templates bound to ${sourceName} → ${newVersioned}`,
     });
   }
+  // Enumerate mounted repos so the preview shows what date-range
+  // updates the real run would attempt. We don't actually query
+  // @timestamp here (that's the real run's job).
+  const mountedForPreview = (await getAllRepos(client)).filter(
+    (r) => r.name.startsWith(`${settings.repo_name_prefix}-`) && r.is_mounted
+  );
+  for (const r of mountedForPreview) {
+    steps.push({
+      type: 'date_range',
+      action: 'would_update',
+      name: r.name,
+      detail:
+        r.start && r.end
+          ? `extend if @timestamp range outside ${r.start} → ${r.end}`
+          : 'capture @timestamp range from snapshot indices',
+    });
+  }
   for (const r of archived) {
     steps.push({ type: 'snapshot_repository', action: 'would_archive', name: r });
   }
@@ -560,9 +577,21 @@ export async function runRotate(
             severity: 'warning',
             target: repo.name,
           });
+        } else if (
+          outcome.skipped_reason &&
+          outcome.skipped_reason !== 'no change after only-extend merge'
+        ) {
+          // Surface informative skip reasons (no snapshots, no mounted
+          // indices, no @timestamp values) so operators can tell why
+          // dates haven't populated. The only-extend no-op is silent
+          // because it's the steady state once dates are populated.
+          steps.push({
+            type: 'date_range',
+            action: 'skipped',
+            name: repo.name,
+            detail: outcome.skipped_reason,
+          });
         }
-        // skipped_reason cases are quiet — they're normal (no snapshots
-        // yet, no @timestamp data, etc.) and don't merit a step record.
       } catch (err) {
         // updateRepositoryDateRange traps its own errors into outcome.error,
         // but defensive in case the contract changes.

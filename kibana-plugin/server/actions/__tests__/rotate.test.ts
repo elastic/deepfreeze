@@ -776,10 +776,11 @@ describe('runRotate date-range update', () => {
     expect(lastR1.is_mounted).toBe(false);
   });
 
-  it('skips date-range writes when no snapshots have been taken yet', async () => {
+  it('emits informative skipped step when no snapshots exist yet (no writes)', async () => {
     // Fresh repos with no snapshots. snapshot.get returns empty, so
     // updateRepositoryDateRange short-circuits with skipped_reason.
-    // No date_range step records should be emitted.
+    // The step is emitted so operators can tell WHY dates haven't
+    // populated, but no writes happen.
     const { client, trace } = makeClient({
       settings: settings({ last_suffix: '000001' }),
       repositoryDocs: [repoDoc('deepfreeze-000001', { is_mounted: true })],
@@ -788,7 +789,14 @@ describe('runRotate date-range update', () => {
 
     const result = await runRotate(client);
     const dateRangeSteps = result.steps.filter((s) => s.type === 'date_range');
-    expect(dateRangeSteps).toEqual([]);
+    expect(dateRangeSteps).toEqual([
+      {
+        type: 'date_range',
+        action: 'skipped',
+        name: 'deepfreeze-000001',
+        detail: 'no snapshots in repo',
+      },
+    ]);
     // No date_range index calls either.
     const dateRangeWrites = trace.index_calls.filter((c) => {
       const doc = c.document as { doctype?: string; start?: string };
