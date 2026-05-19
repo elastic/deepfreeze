@@ -24,7 +24,9 @@ import {
   registerSchedulerDiagnosticsRoute,
   type SchedulerDiagnosticsState,
 } from './scheduler/diagnostics_route';
+import { registerSchedulesRoute } from './scheduler/schedules_route';
 import { registerDeepfreezeTaskTypes } from './scheduler/task_types';
+import type { TaskManagerStartContract } from '@kbn/task-manager-plugin/server';
 import { registerDeepfreezeUsageCollector } from './telemetry';
 import type {
   DeepfreezePluginSetup,
@@ -62,6 +64,11 @@ export class DeepfreezePlugin
    */
   private readonly schedulerDiagnostics: SchedulerDiagnosticsState =
     createSchedulerDiagnosticsState();
+  /**
+   * Captured at plugin.start so the schedules CRUD routes (registered
+   * at setup time) can resolve it lazily via the getter below.
+   */
+  private taskManagerStart: TaskManagerStartContract | null = null;
 
   constructor(initializerContext: PluginInitializerContext<DeepfreezeConfig>) {
     this.logger = initializerContext.logger.get();
@@ -160,11 +167,34 @@ export class DeepfreezePlugin
       state: this.schedulerDiagnostics,
     });
 
+    // CRUD for scheduled jobs. The route is registered during setup
+    // but needs the TaskManager start contract; we resolve it lazily
+    // via the getter (populated in plugin.start below).
+    registerSchedulesRoute({
+      router,
+      logger: this.logger,
+      version: this.version,
+      getCurrentUser,
+      getTaskManager: () => {
+        if (!this.taskManagerStart) {
+          throw new Error(
+            'TaskManager start contract not available yet — plugin is still starting'
+          );
+        }
+        return this.taskManagerStart;
+      },
+    });
+
     return {};
   }
 
   public start(core: CoreStart, plugins: DeepfreezePluginStartDeps): DeepfreezePluginStart {
     this.logger.debug('deepfreeze: start');
+
+    // Stash the TaskManager start contract so the CRUD routes can use
+    // it. Must happen before bootstrap runs so route handlers that
+    // fire during bootstrap won't see a null reference.
+    this.taskManagerStart = plugins.taskManager;
 
     if (this.config.enabled) {
       // Materialize scheduled_job docs into TaskManager. Runs fire-

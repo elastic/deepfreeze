@@ -26,4 +26,15 @@ export const API = {
   thawCheck: (id: string) => `${BASE_PATH}/thaw-requests/${id}/check`,
   thawProgressPattern: `${BASE_PATH}/thaw-requests/{id}/progress`,
   thawCheckPattern: `${BASE_PATH}/thaw-requests/{id}/check`,
+
+  // Schedule CRUD.
+  schedules: `${BASE_PATH}/schedules`,
+  schedule: (name: string) => `${BASE_PATH}/schedules/${name}`,
+  schedulePause: (name: string) => `${BASE_PATH}/schedules/${name}/pause`,
+  scheduleResume: (name: string) => `${BASE_PATH}/schedules/${name}/resume`,
+  scheduleRunNow: (name: string) => `${BASE_PATH}/schedules/${name}/run-now`,
+  schedulePattern: `${BASE_PATH}/schedules/{name}`,
+  schedulePausePattern: `${BASE_PATH}/schedules/{name}/pause`,
+  scheduleResumePattern: `${BASE_PATH}/schedules/{name}/resume`,
+  scheduleRunNowPattern: `${BASE_PATH}/schedules/{name}/run-now`,
 } as const;
