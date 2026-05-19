@@ -18,6 +18,7 @@ import {
   registerStatusRoute,
   registerThawRoute,
 } from './routes';
+import { registerDeepfreezeTaskTypes } from './scheduler/task_types';
 import { registerDeepfreezeUsageCollector } from './telemetry';
 import type {
   DeepfreezePluginSetup,
@@ -124,6 +125,16 @@ export class DeepfreezePlugin
       this.logger.debug('deepfreeze: registering usage collector');
       registerDeepfreezeUsageCollector({ usageCollection: plugins.usageCollection });
     }
+
+    // Register the three schedulable task types. No tasks are scheduled
+    // yet — Phase 5 Step 2 will read scheduled_job docs and call
+    // taskManager.ensureScheduled at plugin start.
+    registerDeepfreezeTaskTypes({
+      taskManager: plugins.taskManager,
+      logger: this.logger,
+      version: this.version,
+      getStartServices: () => core.getStartServices(),
+    });
 
     return {};
   }
