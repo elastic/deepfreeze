@@ -16,13 +16,14 @@ export interface IlmRepoEsClient {
   };
 }
 
-/** Write methods needed for putting ILM policies (Setup and Rotate). */
+/** Write methods needed for putting + deleting ILM policies. */
 export interface IlmRepoWriteEsClient extends IlmRepoEsClient {
   ilm: IlmRepoEsClient['ilm'] & {
     putLifecycle: (params: {
       name: string;
       policy: Record<string, unknown>;
     }) => Promise<unknown>;
+    deleteLifecycle: (params: { name: string }) => Promise<unknown>;
   };
 }
 
@@ -38,7 +39,7 @@ export interface DeepfreezeIlmPolicyInfo extends IlmPolicyInfo {
   templates_count: number;
 }
 
-interface IlmPolicyEntry {
+export interface IlmPolicyEntry {
   policy?: {
     phases?: Record<
       string,
@@ -210,6 +211,48 @@ export async function createVersionedIlmPolicy(
   }
   await client.ilm.putLifecycle({ name: newPolicyName, policy: cloned });
   return newPolicyName;
+}
+
+/**
+ * Inspect an ILM policy's `in_use_by` and decide whether it is safe to
+ * delete. Safe means zero references from `indices`, `data_streams`,
+ * AND `composable_templates`. Mirrors `is_policy_safe_to_delete` in
+ *   packages/deepfreeze-core/deepfreeze_core/utilities.py
+ *
+ * Returns `false` when the policy is missing (defensive — don't claim
+ * an absent policy is "safe to delete", report it to the caller as
+ * unsafe so logs surface the disappearance).
+ */
+export async function isPolicySafeToDelete(
+  client: IlmRepoEsClient,
+  policyName: string
+): Promise<boolean> {
+  const entry = await getIlmPolicy(client, policyName);
+  if (!entry) return false;
+  const inUse = entry.in_use_by ?? {};
+  const indicesCount = inUse.indices?.length ?? 0;
+  const dataStreamsCount = inUse.data_streams?.length ?? 0;
+  const templatesCount = inUse.composable_templates?.length ?? 0;
+  return indicesCount + dataStreamsCount + templatesCount === 0;
+}
+
+/**
+ * Delete an ILM policy. Treats 404 as a no-op (idempotent) — the
+ * other repos in this package use the same convention.
+ *
+ * Note: ES rejects DELETE if the policy is still referenced. Always
+ * call `isPolicySafeToDelete` first.
+ */
+export async function deleteIlmPolicy(
+  client: IlmRepoWriteEsClient,
+  policyName: string
+): Promise<void> {
+  try {
+    await client.ilm.deleteLifecycle({ name: policyName });
+  } catch (err) {
+    if (isNotFound(err)) return;
+    throw err;
+  }
 }
 
 function isNotFound(err: unknown): boolean {

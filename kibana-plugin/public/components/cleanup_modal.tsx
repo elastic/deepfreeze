@@ -81,7 +81,8 @@ export function CleanupModal({ http, notifications, onClose, onComplete }: Clean
         title: 'Cleanup completed',
         text:
           `Deleted ${result.deleted_thaw_requests.length} thaw request(s), ` +
-          `archived ${result.expired_repositories.length} expired repo(s).` +
+          `archived ${result.expired_repositories.length} expired repo(s), ` +
+          `reaped ${result.deleted_policies.length} orphaned ILM policy(ies).` +
           (result.errors.length ? ` ${result.errors.length} warning(s).` : ''),
       });
       onComplete();

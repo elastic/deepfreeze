@@ -1,7 +1,9 @@
 import {
   createVersionedIlmPolicy,
+  deleteIlmPolicy,
   getDeepfreezeIlmPolicies,
   getIlmPolicy,
+  isPolicySafeToDelete,
   type IlmRepoEsClient,
   type IlmRepoWriteEsClient,
 } from '../ilm_repo';
@@ -275,5 +277,124 @@ describe('createVersionedIlmPolicy', () => {
     };
     expect(policy.phases.cold.actions.searchable_snapshot.snapshot_repository).toBe('new-repo');
     expect(policy.phases.frozen.actions.searchable_snapshot.snapshot_repository).toBe('new-repo');
+  });
+});
+
+describe('isPolicySafeToDelete', () => {
+  function readClient(opts: {
+    policies?: Record<
+      string,
+      {
+        policy?: { phases?: Record<string, unknown> };
+        in_use_by?: {
+          indices?: unknown[];
+          data_streams?: unknown[];
+          composable_templates?: unknown[];
+        };
+      }
+    >;
+  }): IlmRepoEsClient {
+    return {
+      ilm: {
+        getLifecycle: async ({ name }: { name?: string } = {}) => {
+          if (!name) return opts.policies ?? {};
+          const p = opts.policies?.[name];
+          if (!p) throw notFound();
+          return { [name]: p };
+        },
+      },
+    };
+  }
+
+  it('returns true when in_use_by counts are all zero', async () => {
+    const client = readClient({
+      policies: {
+        p: { in_use_by: { indices: [], data_streams: [], composable_templates: [] } },
+      },
+    });
+    expect(await isPolicySafeToDelete(client, 'p')).toBe(true);
+  });
+
+  it('returns false when any index references the policy', async () => {
+    const client = readClient({
+      policies: {
+        p: { in_use_by: { indices: ['idx-1'], data_streams: [], composable_templates: [] } },
+      },
+    });
+    expect(await isPolicySafeToDelete(client, 'p')).toBe(false);
+  });
+
+  it('returns false when any data stream references the policy', async () => {
+    const client = readClient({
+      policies: {
+        p: { in_use_by: { indices: [], data_streams: ['logs'], composable_templates: [] } },
+      },
+    });
+    expect(await isPolicySafeToDelete(client, 'p')).toBe(false);
+  });
+
+  it('returns false when any composable template references the policy', async () => {
+    const client = readClient({
+      policies: {
+        p: { in_use_by: { indices: [], data_streams: [], composable_templates: ['t'] } },
+      },
+    });
+    expect(await isPolicySafeToDelete(client, 'p')).toBe(false);
+  });
+
+  it('returns false for a missing policy (defensive)', async () => {
+    const client = readClient({});
+    expect(await isPolicySafeToDelete(client, 'missing')).toBe(false);
+  });
+
+  it('treats absent in_use_by as zero references (older ES responses)', async () => {
+    const client = readClient({ policies: { p: {} } });
+    expect(await isPolicySafeToDelete(client, 'p')).toBe(true);
+  });
+});
+
+describe('deleteIlmPolicy', () => {
+  function writeClient(opts: { throwStatus?: number } = {}): {
+    client: IlmRepoWriteEsClient;
+    deletes: string[];
+  } {
+    const deletes: string[] = [];
+    const client: IlmRepoWriteEsClient = {
+      ilm: {
+        getLifecycle: async () => ({}),
+        putLifecycle: async () => ({}),
+        deleteLifecycle: async ({ name }: { name: string }) => {
+          if (opts.throwStatus !== undefined) {
+            const err = new Error('boom') as Error & {
+              statusCode?: number;
+              meta?: { statusCode?: number };
+            };
+            err.statusCode = opts.throwStatus;
+            err.meta = { statusCode: opts.throwStatus };
+            throw err;
+          }
+          deletes.push(name);
+          return {};
+        },
+      },
+    };
+    return { client, deletes };
+  }
+
+  it('issues a delete call for the named policy', async () => {
+    const { client, deletes } = writeClient();
+    await deleteIlmPolicy(client, 'my-policy');
+    expect(deletes).toEqual(['my-policy']);
+  });
+
+  it('swallows 404 (idempotent)', async () => {
+    const { client, deletes } = writeClient({ throwStatus: 404 });
+    await expect(deleteIlmPolicy(client, 'gone')).resolves.toBeUndefined();
+    expect(deletes).toEqual([]);
+  });
+
+  it('propagates non-404 errors', async () => {
+    const { client } = writeClient({ throwStatus: 500 });
+    await expect(deleteIlmPolicy(client, 'p')).rejects.toThrow();
   });
 });

@@ -14,12 +14,29 @@ interface FakeOpts {
   repos?: RepositoryDoc[];
   thawRequests?: ThawRequestDoc[];
   failDeleteIds?: string[];
+  /** ILM policies present in the cluster, keyed by name. */
+  ilmPolicies?: Record<
+    string,
+    {
+      policy?: { phases?: Record<string, unknown> };
+      in_use_by?: {
+        indices?: unknown[];
+        data_streams?: unknown[];
+        composable_templates?: unknown[];
+      };
+    }
+  >;
+  /** Snapshot repositories that exist in the cluster, keyed by name. */
+  liveRepos?: Record<string, unknown>;
+  /** Policy names whose deleteLifecycle should throw. */
+  failDeletePolicies?: string[];
 }
 
 interface Trace {
   deleted: string[];
   index_calls: Array<{ index: string; id: string; document: Record<string, unknown> }>;
   snapshot_deletes: string[];
+  deleted_policies: string[];
 }
 
 function notFound(): Error {
@@ -30,7 +47,12 @@ function notFound(): Error {
 }
 
 function makeClient(opts: FakeOpts = {}): { client: CleanupActionEsClient; trace: Trace } {
-  const trace: Trace = { deleted: [], index_calls: [], snapshot_deletes: [] };
+  const trace: Trace = {
+    deleted: [],
+    index_calls: [],
+    snapshot_deletes: [],
+    deleted_policies: [],
+  };
 
   const client: CleanupActionEsClient = {
     indices: { exists: async () => true } as CleanupActionEsClient['indices'],
@@ -76,7 +98,7 @@ function makeClient(opts: FakeOpts = {}): { client: CleanupActionEsClient; trace
       return {};
     },
     snapshot: {
-      getRepository: async () => ({}),
+      getRepository: async () => (opts.liveRepos ?? {}) as Record<string, unknown>,
       createRepository: async () => ({}),
       deleteRepository: async ({ name }) => {
         trace.snapshot_deletes.push(name);
@@ -84,8 +106,20 @@ function makeClient(opts: FakeOpts = {}): { client: CleanupActionEsClient; trace
       },
     },
     ilm: {
-      getLifecycle: async () => ({}),
+      getLifecycle: async ({ name }: { name?: string } = {}) => {
+        if (name === undefined) return opts.ilmPolicies ?? {};
+        const p = opts.ilmPolicies?.[name];
+        if (!p) throw notFound();
+        return { [name]: p };
+      },
       putLifecycle: async () => ({}),
+      deleteLifecycle: async ({ name }: { name: string }) => {
+        if (opts.failDeletePolicies?.includes(name)) {
+          throw new Error(`boom-policy-${name}`);
+        }
+        trace.deleted_policies.push(name);
+        return {};
+      },
     },
   };
 
@@ -262,5 +296,222 @@ describe('runCleanupDryRun', () => {
     expect(trace.deleted).toEqual([]);
     expect(trace.index_calls).toEqual([]);
     expect(trace.snapshot_deletes).toEqual([]);
+  });
+});
+
+describe('runCleanup orphaned-policy reaper', () => {
+  it('deletes a versioned policy referencing a deleted deepfreeze repo', async () => {
+    const { client, trace } = makeClient({
+      settings: settings({
+        ilm_policy_name: 'logs-policy',
+        repo_name_prefix: 'deepfreeze',
+      }),
+      ilmPolicies: {
+        // Versioned orphan: references deepfreeze-000001 which doesn't exist.
+        'logs-policy-000001': {
+          policy: {
+            phases: {
+              frozen: {
+                actions: { searchable_snapshot: { snapshot_repository: 'deepfreeze-000001' } },
+              },
+            },
+          },
+          in_use_by: { indices: [], data_streams: [], composable_templates: [] },
+        },
+      },
+      liveRepos: {
+        // deepfreeze-000002 still exists, deepfreeze-000001 doesn't.
+        'deepfreeze-000002': {},
+      },
+    });
+
+    const result = await runCleanup(client, {}, { now: nowFn });
+    expect(result.deleted_policies).toEqual(['logs-policy-000001']);
+    expect(trace.deleted_policies).toEqual(['logs-policy-000001']);
+    expect(
+      result.steps.find(
+        (s) => s.type === 'ilm_policy' && s.action === 'deleted'
+      )
+    ).toBeDefined();
+  });
+
+  it('NEVER deletes the base policy itself, even if its repo is gone', async () => {
+    const { client, trace } = makeClient({
+      settings: settings({
+        ilm_policy_name: 'logs-policy',
+        repo_name_prefix: 'deepfreeze',
+      }),
+      ilmPolicies: {
+        // The base policy refs deepfreeze-000001 (gone). MUST stay.
+        'logs-policy': {
+          policy: {
+            phases: {
+              frozen: {
+                actions: { searchable_snapshot: { snapshot_repository: 'deepfreeze-000001' } },
+              },
+            },
+          },
+          in_use_by: { indices: [], data_streams: [], composable_templates: [] },
+        },
+      },
+      liveRepos: {},
+    });
+
+    const result = await runCleanup(client, {}, { now: nowFn });
+    expect(result.deleted_policies).toEqual([]);
+    expect(trace.deleted_policies).toEqual([]);
+  });
+
+  it('skips an orphan that is still in use by an index', async () => {
+    const { client, trace } = makeClient({
+      settings: settings({
+        ilm_policy_name: 'logs-policy',
+        repo_name_prefix: 'deepfreeze',
+      }),
+      ilmPolicies: {
+        'logs-policy-000001': {
+          policy: {
+            phases: {
+              frozen: {
+                actions: { searchable_snapshot: { snapshot_repository: 'deepfreeze-000001' } },
+              },
+            },
+          },
+          in_use_by: {
+            // One index still references it → not safe to delete yet.
+            indices: ['some-old-index'],
+            data_streams: [],
+            composable_templates: [],
+          },
+        },
+      },
+      liveRepos: {},
+    });
+
+    const result = await runCleanup(client, {}, { now: nowFn });
+    expect(result.deleted_policies).toEqual([]);
+    expect(trace.deleted_policies).toEqual([]);
+    // Should record a skipped step with the "still in use" reason.
+    const skipped = result.steps.find(
+      (s) => s.type === 'ilm_policy' && s.action === 'skipped'
+    );
+    expect(skipped?.detail).toMatch(/still in use/);
+  });
+
+  it('does not touch policies whose repo still exists', async () => {
+    const { client, trace } = makeClient({
+      settings: settings({
+        ilm_policy_name: 'logs-policy',
+        repo_name_prefix: 'deepfreeze',
+      }),
+      ilmPolicies: {
+        'logs-policy-000002': {
+          policy: {
+            phases: {
+              frozen: {
+                actions: { searchable_snapshot: { snapshot_repository: 'deepfreeze-000002' } },
+              },
+            },
+          },
+          in_use_by: { indices: [], data_streams: [], composable_templates: [] },
+        },
+      },
+      liveRepos: { 'deepfreeze-000002': {} },
+    });
+
+    const result = await runCleanup(client, {}, { now: nowFn });
+    expect(result.deleted_policies).toEqual([]);
+    expect(trace.deleted_policies).toEqual([]);
+  });
+
+  it('ignores policies referencing non-deepfreeze repos', async () => {
+    const { client, trace } = makeClient({
+      settings: settings({
+        ilm_policy_name: 'logs-policy',
+        repo_name_prefix: 'deepfreeze',
+      }),
+      ilmPolicies: {
+        // Policy refs a non-deepfreeze repo that doesn't exist —
+        // not our responsibility to clean.
+        'unrelated-policy': {
+          policy: {
+            phases: {
+              frozen: {
+                actions: { searchable_snapshot: { snapshot_repository: 'someone-elses-repo' } },
+              },
+            },
+          },
+          in_use_by: { indices: [], data_streams: [], composable_templates: [] },
+        },
+      },
+      liveRepos: {},
+    });
+
+    const result = await runCleanup(client, {}, { now: nowFn });
+    expect(result.deleted_policies).toEqual([]);
+    expect(trace.deleted_policies).toEqual([]);
+  });
+
+  it('records a delete failure as a warning and continues', async () => {
+    const { client, trace } = makeClient({
+      settings: settings({
+        ilm_policy_name: 'logs-policy',
+        repo_name_prefix: 'deepfreeze',
+      }),
+      ilmPolicies: {
+        'logs-policy-000001': {
+          policy: {
+            phases: {
+              frozen: {
+                actions: { searchable_snapshot: { snapshot_repository: 'deepfreeze-000001' } },
+              },
+            },
+          },
+          in_use_by: { indices: [], data_streams: [], composable_templates: [] },
+        },
+      },
+      liveRepos: {},
+      failDeletePolicies: ['logs-policy-000001'],
+    });
+
+    const result = await runCleanup(client, {}, { now: nowFn });
+    expect(result.deleted_policies).toEqual([]);
+    expect(trace.deleted_policies).toEqual([]);
+    expect(
+      result.errors.some(
+        (e) => e.target === 'logs-policy-000001' && /boom-policy/.test(e.message)
+      )
+    ).toBe(true);
+  });
+
+  it('dry-run lists orphan candidates without deleting', async () => {
+    const { client, trace } = makeClient({
+      settings: settings({
+        ilm_policy_name: 'logs-policy',
+        repo_name_prefix: 'deepfreeze',
+      }),
+      ilmPolicies: {
+        'logs-policy-000001': {
+          policy: {
+            phases: {
+              frozen: {
+                actions: { searchable_snapshot: { snapshot_repository: 'deepfreeze-000001' } },
+              },
+            },
+          },
+          in_use_by: { indices: [], data_streams: [], composable_templates: [] },
+        },
+      },
+      liveRepos: {},
+    });
+
+    const result = await runCleanupDryRun(client, {}, { now: nowFn });
+    expect(result.deleted_policies).toEqual(['logs-policy-000001']);
+    expect(trace.deleted_policies).toEqual([]);
+    expect(
+      result.steps.find(
+        (s) => s.type === 'ilm_policy' && s.action === 'would_delete'
+      )
+    ).toBeDefined();
   });
 });
