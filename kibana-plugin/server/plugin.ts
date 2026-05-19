@@ -27,7 +27,10 @@ import {
 import { migrateScheduledJobs } from './scheduler/migration';
 import { registerSchedulesRoute } from './scheduler/schedules_route';
 import { registerDeepfreezeTaskTypes } from './scheduler/task_types';
-import { registerScheduledJobSavedObject } from './saved_objects/scheduled_job_type';
+import {
+  registerScheduledJobSavedObject,
+  SCHEDULED_JOB_SO_TYPE,
+} from './saved_objects/scheduled_job_type';
 import type { TaskManagerStartContract } from '@kbn/task-manager-plugin/server';
 import { registerDeepfreezeUsageCollector } from './telemetry';
 import type {
@@ -214,8 +217,12 @@ export class DeepfreezePlugin
         >[0]['esClient'];
       // The internal SavedObjects repository bypasses user privileges
       // and reads .kibana_* directly — exactly what we need for both
-      // the migration and the bootstrap.
-      const soRepo = core.savedObjects.createInternalRepository();
+      // the migration and the bootstrap. The scheduled-job type is
+      // `hidden: true` so we have to opt in explicitly, otherwise the
+      // repository's find/get/create calls reject it as "not registered".
+      const soRepo = core.savedObjects.createInternalRepository([
+        SCHEDULED_JOB_SO_TYPE,
+      ]);
 
       (async () => {
         try {

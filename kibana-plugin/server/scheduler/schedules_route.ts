@@ -38,6 +38,7 @@ import {
   saveScheduledJob,
   type ScheduledJobSoClient,
 } from '../repositories/scheduled_job_so_repo';
+import { SCHEDULED_JOB_SO_TYPE } from '../saved_objects/scheduled_job_type';
 import { bootstrapTaskId } from './bootstrap';
 import { runActionForSchedule, syncTaskManager } from './sync';
 import type { RotateActionEsClient } from '../actions/rotate';
@@ -143,7 +144,11 @@ export function registerSchedulesRoute(
     },
     async (ctx, _req, res) => {
       const core = await ctx.core;
-      const soClient = core.savedObjects.client as unknown as ScheduledJobSoClient;
+      // The SO type is `hidden: true` so the default scoped client
+      // can't see it — we have to opt in by name.
+      const soClient = core.savedObjects.getClient({
+        includedHiddenTypes: [SCHEDULED_JOB_SO_TYPE],
+      }) as unknown as ScheduledJobSoClient;
       const jobs = await getAllScheduledJobs(soClient);
       return res.ok({ body: { schedules: jobs } });
     }
@@ -163,7 +168,11 @@ export function registerSchedulesRoute(
     },
     async (ctx, req, res) => {
       const core = await ctx.core;
-      const soClient = core.savedObjects.client as unknown as ScheduledJobSoClient;
+      // The SO type is `hidden: true` so the default scoped client
+      // can't see it — we have to opt in by name.
+      const soClient = core.savedObjects.getClient({
+        includedHiddenTypes: [SCHEDULED_JOB_SO_TYPE],
+      }) as unknown as ScheduledJobSoClient;
       const { name } = req.params as { name: string };
       const job = await getScheduledJob(soClient, name);
       if (!job) {
@@ -190,7 +199,11 @@ export function registerSchedulesRoute(
     },
     async (ctx, req, res) => {
       const core = await ctx.core;
-      const soClient = core.savedObjects.client as unknown as ScheduledJobSoClient;
+      // The SO type is `hidden: true` so the default scoped client
+      // can't see it — we have to opt in by name.
+      const soClient = core.savedObjects.getClient({
+        includedHiddenTypes: [SCHEDULED_JOB_SO_TYPE],
+      }) as unknown as ScheduledJobSoClient;
       const esClient = core.elasticsearch.client.asCurrentUser as unknown as SchedulesEsClient;
       const body = req.body as {
         name: string;
@@ -278,7 +291,11 @@ export function registerSchedulesRoute(
     },
     async (ctx, req, res) => {
       const core = await ctx.core;
-      const soClient = core.savedObjects.client as unknown as ScheduledJobSoClient;
+      // The SO type is `hidden: true` so the default scoped client
+      // can't see it — we have to opt in by name.
+      const soClient = core.savedObjects.getClient({
+        includedHiddenTypes: [SCHEDULED_JOB_SO_TYPE],
+      }) as unknown as ScheduledJobSoClient;
       const esClient = core.elasticsearch.client.asCurrentUser as unknown as SchedulesEsClient;
       const { name } = req.params as { name: string };
       const patch = req.body as {
@@ -346,7 +363,11 @@ export function registerSchedulesRoute(
     },
     async (ctx, req, res) => {
       const core = await ctx.core;
-      const soClient = core.savedObjects.client as unknown as ScheduledJobSoClient;
+      // The SO type is `hidden: true` so the default scoped client
+      // can't see it — we have to opt in by name.
+      const soClient = core.savedObjects.getClient({
+        includedHiddenTypes: [SCHEDULED_JOB_SO_TYPE],
+      }) as unknown as ScheduledJobSoClient;
       const esClient = core.elasticsearch.client.asCurrentUser as unknown as SchedulesEsClient;
       const { name } = req.params as { name: string };
       try {
@@ -424,7 +445,11 @@ export function registerSchedulesRoute(
     },
     async (ctx, req, res) => {
       const core = await ctx.core;
-      const soClient = core.savedObjects.client as unknown as ScheduledJobSoClient;
+      // The SO type is `hidden: true` so the default scoped client
+      // can't see it — we have to opt in by name.
+      const soClient = core.savedObjects.getClient({
+        includedHiddenTypes: [SCHEDULED_JOB_SO_TYPE],
+      }) as unknown as ScheduledJobSoClient;
       const esClient = core.elasticsearch.client.asCurrentUser as unknown as SchedulesEsClient;
       const { name } = req.params as { name: string };
 
