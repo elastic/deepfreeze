@@ -19,6 +19,11 @@ import {
   registerThawRoute,
 } from './routes';
 import { bootstrapDeepfreezeSchedules } from './scheduler/bootstrap';
+import {
+  createSchedulerDiagnosticsState,
+  registerSchedulerDiagnosticsRoute,
+  type SchedulerDiagnosticsState,
+} from './scheduler/diagnostics_route';
 import { registerDeepfreezeTaskTypes } from './scheduler/task_types';
 import { registerDeepfreezeUsageCollector } from './telemetry';
 import type {
@@ -49,6 +54,14 @@ export class DeepfreezePlugin
   private readonly logger: Logger;
   private readonly config: DeepfreezeConfig;
   private readonly version: string;
+  /**
+   * Mutable holder for the scheduler-bootstrap result. Captured by
+   * plugin.start() and read by the diagnostics route registered in
+   * plugin.setup(). Shared by reference so the route doesn't need a
+   * separate getter wiring.
+   */
+  private readonly schedulerDiagnostics: SchedulerDiagnosticsState =
+    createSchedulerDiagnosticsState();
 
   constructor(initializerContext: PluginInitializerContext<DeepfreezeConfig>) {
     this.logger = initializerContext.logger.get();
@@ -137,6 +150,16 @@ export class DeepfreezePlugin
       getStartServices: () => core.getStartServices(),
     });
 
+    // Operator-visible diagnostics: shows what the bootstrap did,
+    // plus side-by-side counts of `scheduled_job` docs visible to
+    // the current-user vs the internal-user (so permissions issues
+    // surface clearly).
+    registerSchedulerDiagnosticsRoute({
+      router,
+      logger: this.logger,
+      state: this.schedulerDiagnostics,
+    });
+
     return {};
   }
 
@@ -157,6 +180,9 @@ export class DeepfreezePlugin
         logger: this.logger,
       })
         .then((result) => {
+          this.schedulerDiagnostics.last_bootstrap_at = new Date().toISOString();
+          this.schedulerDiagnostics.last_result = result;
+          this.schedulerDiagnostics.last_error = null;
           this.logger.info(
             `deepfreeze: bootstrap complete — ` +
               `${result.scheduled.length} scheduled, ` +
@@ -166,11 +192,11 @@ export class DeepfreezePlugin
           );
         })
         .catch((err) => {
-          this.logger.error(
-            `deepfreeze: bootstrap failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`
-          );
+          const msg = err instanceof Error ? err.message : String(err);
+          this.schedulerDiagnostics.last_bootstrap_at = new Date().toISOString();
+          this.schedulerDiagnostics.last_result = null;
+          this.schedulerDiagnostics.last_error = msg;
+          this.logger.error(`deepfreeze: bootstrap failed: ${msg}`);
         });
     }
 
