@@ -57,35 +57,22 @@ Bootstrap takes 3–10 minutes on a fast machine, longer on first run.
 
 ## External Kibana dependencies
 
-The plugin needs one third-party package added to Kibana's root
-`package.json` that upstream Kibana doesn't currently ship:
+**None.** The plugin previously required `@aws-sdk/client-s3` to be
+patched into Kibana's root `package.json`; that's no longer the case.
+The AWS storage adapter now uses `aws4` (SigV4 signing) + `axios`
+(HTTP transport) + `fast-xml-parser` for S3 REST calls. All three are
+already committed in upstream Kibana 9.4 for other features (the
+Bedrock connector uses `aws4` + `axios` the same way — see
+`x-pack/platform/plugins/shared/stack_connectors/server/connector_types/bedrock/bedrock.ts:11`).
 
-| Package                 | Version  | Why                                    |
-|-------------------------|----------|----------------------------------------|
-| `@aws-sdk/client-s3`    | `3.994.0`| Phase 4 Thaw: `s3:RestoreObject` calls |
+If your local Kibana checkout still has the old `@aws-sdk/client-s3`
+patch in `package.json`, you can safely remove it now and re-run
+`yarn kbn bootstrap`.
 
-Add it under the `dependencies` block (alongside the existing
-`@aws-sdk/client-bedrock-*` entries) **and** under `resolutions`
-(same version), then re-bootstrap:
-
-```sh
-cd ~/git/kibana
-# Edit package.json — see above
-yarn kbn bootstrap --force-install
-```
-
-**This change does not survive a Kibana rebase.** Every time you pull
-fresh from `elastic/kibana`, re-apply the two `package.json` entries
-and re-run bootstrap. When the plugin is contributed upstream
-(Phase 7), the dep addition will land in the same PR; until then it's
-a manual step.
-
-Why this dep is mandatory and not optional: Elasticsearch's REST API
-has no Glacier-restore primitive — `s3:RestoreObject` calls must come
-from Node-side. Three alternatives (drop Glacier support, external
-restore handoff, hand-rolled SigV4) were considered and rejected;
-keeping the SDK matches what the Python implementation does with
-`boto3`, just at the Kibana layer.
+Elasticsearch still exposes no Glacier-restore primitive, so the
+plugin's `s3:RestoreObject` calls have to come from Node-side. The
+change is just *how* those calls are constructed: hand-rolled SigV4
+via `aws4` instead of the full S3 SDK.
 
 ## Iteration loop
 
@@ -211,8 +198,28 @@ In `kibana.yml`:
 ```yaml
 xpack.deepfreeze.enabled: true
 xpack.deepfreeze.telemetry.enabled: false   # opt-in
+
+# AWS endpoint / region / addressing settings (non-secret).
+xpack.deepfreeze.aws.region: us-east-1
+# xpack.deepfreeze.aws.endpoint: http://localhost:4566   # LocalStack/MinIO
+# xpack.deepfreeze.aws.forcePathStyle: true              # LocalStack/MinIO
 ```
 
-Sensitive values (AWS keys, Azure connection strings, GCS service
-accounts) belong in the Kibana keystore — never in `kibana.yml`. The
-keys land in later phases when the storage-client port begins.
+AWS credentials belong in the Kibana keystore — never in `kibana.yml`:
+
+```sh
+cd ~/git/kibana
+bin/kibana-keystore add xpack.deepfreeze.aws.accessKeyId
+bin/kibana-keystore add xpack.deepfreeze.aws.secretAccessKey
+# Optional, only for temporary credentials:
+bin/kibana-keystore add xpack.deepfreeze.aws.sessionToken
+```
+
+The plugin reads these at startup and passes them through to the
+AWS storage adapter for SigV4 signing. Without them, the status
+endpoint still works but skips per-repository tier sampling, and
+thaw/repair-metadata actions return a structured "credentials not
+configured" error.
+
+Azure connection strings and GCS service accounts will use the same
+keystore convention once those adapters land.

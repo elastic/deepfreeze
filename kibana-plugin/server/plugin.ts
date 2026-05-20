@@ -31,6 +31,7 @@ import {
   registerScheduledJobSavedObject,
   SCHEDULED_JOB_SO_TYPE,
 } from './saved_objects/scheduled_job_type';
+import type { AwsStorageClientOptions } from './storage/factory';
 import type { TaskManagerStartContract } from '@kbn/task-manager-plugin/server';
 import { registerDeepfreezeUsageCollector } from './telemetry';
 import type {
@@ -112,7 +113,8 @@ export class DeepfreezePlugin
     });
 
     const router = core.http.createRouter();
-    registerStatusRoute(router, this.logger);
+    const storageOptions = { aws: this.resolveAwsStorageOptions() };
+    registerStatusRoute({ router, logger: this.logger, storageOptions });
     registerAuditRoute(router, this.logger, this.version);
     const getCurrentUser = this.makeGetCurrentUser(core);
     registerSetupRoute({
@@ -144,12 +146,14 @@ export class DeepfreezePlugin
       logger: this.logger,
       version: this.version,
       getCurrentUser,
+      storageOptions,
     });
     registerRepairMetadataRoute({
       router,
       logger: this.logger,
       version: this.version,
       getCurrentUser,
+      storageOptions,
     });
 
     if (this.config.telemetry.enabled && plugins.usageCollection) {
@@ -165,6 +169,7 @@ export class DeepfreezePlugin
       logger: this.logger,
       version: this.version,
       getStartServices: () => core.getStartServices(),
+      storageOptions,
     });
 
     // Operator-visible diagnostics: shows what the bootstrap did,
@@ -278,6 +283,25 @@ export class DeepfreezePlugin
 
   public stop() {
     this.logger.debug('deepfreeze: stop');
+  }
+
+  /**
+   * Translate the plugin's `xpack.deepfreeze.aws.*` config block into
+   * the shape the storage factory expects. Returns an empty object
+   * when no AWS config is set — callers downstream handle missing
+   * credentials gracefully (status skips tier sampling, thaw returns
+   * a structured error).
+   */
+  private resolveAwsStorageOptions(): AwsStorageClientOptions {
+    const aws = this.config.aws ?? {};
+    return {
+      accessKeyId: aws.accessKeyId,
+      secretAccessKey: aws.secretAccessKey,
+      sessionToken: aws.sessionToken,
+      region: aws.region,
+      endpoint: aws.endpoint,
+      forcePathStyle: aws.forcePathStyle,
+    };
   }
 
   /**
