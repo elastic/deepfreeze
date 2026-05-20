@@ -42,9 +42,18 @@ interface XmlParser {
   parse(input: string): unknown;
 }
 
+interface ResolvedCredentials {
+  accessKeyId?: string;
+  secretAccessKey?: string;
+  sessionToken?: string;
+}
+
+type CredentialProvider = () => Promise<ResolvedCredentials>;
+
 let cachedAws4: { sign: Aws4Sign } | undefined;
 let cachedAxios: AxiosLike | undefined;
 let cachedXmlParser: XmlParser | undefined;
+let cachedDefaultProvider: CredentialProvider | undefined;
 
 async function loadAws4(): Promise<{ sign: Aws4Sign }> {
   if (cachedAws4) return cachedAws4;
@@ -76,6 +85,23 @@ async function loadXmlParser(): Promise<XmlParser> {
     isArray: (name: string) => name === 'Contents',
   });
   return cachedXmlParser;
+}
+
+/**
+ * Resolve ambient AWS credentials via the SDK's standard chain
+ * (env vars → ~/.aws/credentials → EC2/ECS IMDS → SSO → web identity).
+ * `@aws-sdk/credential-provider-node` is already in upstream Kibana
+ * as a transitive dep of the Bedrock connector family, so this is
+ * zero new Kibana root deps.
+ */
+async function loadDefaultProvider(): Promise<CredentialProvider> {
+  if (cachedDefaultProvider) return cachedDefaultProvider;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mod = (await import('@aws-sdk/credential-provider-node')) as unknown as {
+    defaultProvider: (init?: unknown) => () => Promise<ResolvedCredentials>;
+  };
+  cachedDefaultProvider = mod.defaultProvider();
+  return cachedDefaultProvider;
 }
 
 export interface AwsStorageClientOptions {
@@ -196,9 +222,11 @@ async function signedRequest(
   const rawPath = `${basePath}${keyPath}` || '/';
   const path = `${rawPath}${queryString ? `?${queryString}` : ''}`;
 
-  const region = opts.region ?? DEFAULT_REGION;
+  const region =
+    opts.region ?? process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? DEFAULT_REGION;
   const aws4 = await loadAws4();
   const axiosClient = await loadAxios();
+  const credentials = await resolveCredentials(opts);
 
   const signed = aws4.sign(
     {
@@ -210,11 +238,7 @@ async function signedRequest(
       headers: args.headers ?? {},
       body: args.body,
     },
-    {
-      accessKeyId: opts.accessKeyId,
-      secretAccessKey: opts.secretAccessKey,
-      sessionToken: opts.sessionToken,
-    }
+    credentials
   );
 
   return axiosClient.request({
@@ -366,6 +390,35 @@ function escapeXml(s: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+/**
+ * Resolve the credentials used to sign a request.
+ *
+ * Precedence:
+ *   1. Explicit values from plugin config (Kibana keystore via
+ *      `xpack.deepfreeze.aws.{accessKeyId,secretAccessKey,sessionToken}`).
+ *      Wins outright when *both* key & secret are present.
+ *   2. AWS SDK default provider chain (env vars → shared config →
+ *      EC2/ECS IMDS → SSO → web identity).
+ *
+ * Matches the behavior of the prior `@aws-sdk/client-s3` adapter so
+ * ops/devs running Kibana with `AWS_ACCESS_KEY_ID` exported, an
+ * `~/.aws/credentials` profile, or an EC2 instance role keep working
+ * without configuring anything in the Kibana keystore.
+ */
+async function resolveCredentials(
+  opts: AwsStorageClientOptions
+): Promise<ResolvedCredentials> {
+  if (opts.accessKeyId && opts.secretAccessKey) {
+    return {
+      accessKeyId: opts.accessKeyId,
+      secretAccessKey: opts.secretAccessKey,
+      sessionToken: opts.sessionToken,
+    };
+  }
+  const provider = await loadDefaultProvider();
+  return provider();
 }
 
 /**

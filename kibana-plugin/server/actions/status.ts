@@ -137,12 +137,10 @@ async function sampleRepoStorageTier(
   const path = base_path.replace(/^\/+|\/+$/g, '');
   const prefix = path ? `${path}/` : '';
 
-  let objects;
-  try {
-    objects = await storage.listObjects(bucket, prefix);
-  } catch {
-    return 'N/A';
-  }
+  // Let storage errors propagate; the caller (`annotateStorageTiers`)
+  // logs them per-repo before falling back to 'N/A'. Swallowing here
+  // would hide signing / region / credential failures entirely.
+  const objects = await storage.listObjects(bucket, prefix);
 
   if (objects.length === 0) return 'Empty';
 
