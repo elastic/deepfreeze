@@ -128,6 +128,18 @@ const repoColumns: Array<EuiBasicTableColumn<Repo>> = [
     ),
   },
   {
+    field: 'storage_tier',
+    name: 'Tier',
+    render: (tier: string | undefined) => {
+      if (!tier) return '--';
+      let color: 'success' | 'warning' | 'primary' | 'hollow' = 'hollow';
+      if (tier === 'Hot') color = 'success';
+      else if (tier === 'Cool') color = 'warning';
+      else if (tier === 'Archive') color = 'primary';
+      return <EuiBadge color={color}>{tier}</EuiBadge>;
+    },
+  },
+  {
     field: 'thaw_state',
     name: 'State',
     sortable: true,

@@ -52,6 +52,27 @@ function stateHealthColor(
   }
 }
 
+/**
+ * Color a sampled storage tier so the table communicates state at a
+ * glance. Archive = primary (long-term cold storage, the deepfreeze
+ * happy path), Hot/Cool = success/warning (data still in fast tiers),
+ * Mixed/Empty/Unknown/N/A = hollow (informational).
+ */
+function renderTierBadge(tier: string | undefined): JSX.Element {
+  if (!tier) {
+    return (
+      <EuiText size="s" color="subdued">
+        --
+      </EuiText>
+    );
+  }
+  let color: 'success' | 'warning' | 'primary' | 'hollow' = 'hollow';
+  if (tier === 'Hot') color = 'success';
+  else if (tier === 'Cool') color = 'warning';
+  else if (tier === 'Archive') color = 'primary';
+  return <EuiBadge color={color}>{tier}</EuiBadge>;
+}
+
 export function RepositoriesPage({ http, notifications }: RepositoriesPageProps) {
   const { status, loading, error, refresh } = useStatus(http);
   const [search, setSearch] = useState('');
@@ -133,6 +154,12 @@ export function RepositoriesPage({ http, notifications }: RepositoriesPageProps)
       render: (mounted: boolean) => (
         <EuiBadge color={mounted ? 'success' : 'default'}>{mounted ? 'Yes' : 'No'}</EuiBadge>
       ),
+    },
+    {
+      field: 'storage_tier',
+      name: 'Tier',
+      sortable: true,
+      render: (tier: string | undefined) => renderTierBadge(tier),
     },
     {
       field: 'thaw_state',
