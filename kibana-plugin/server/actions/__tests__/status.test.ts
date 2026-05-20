@@ -1,6 +1,7 @@
 import { runStatus, type StatusActionEsClient } from '../status';
 import { SETTINGS_DEFAULTS } from '../../../common/schemas/settings';
 import { DOCTYPE, SETTINGS_ID, STATUS_INDEX } from '../../../common/constants';
+import type { StorageClient, StorageObject } from '../../storage/types';
 
 interface FakeOpts {
   indexExists?: boolean;
@@ -248,6 +249,193 @@ describe('runStatus', () => {
         message: expect.stringContaining('boom-cluster'),
       })
     );
+  });
+
+  describe('storage_tier sampling', () => {
+    /**
+     * Stub StorageClient. The `objects` map is keyed by
+     * `${bucket}/${prefix}` and provides per-repo object lists. Repos
+     * not in the map return an empty list (→ tier "Empty").
+     */
+    function makeStorage(
+      objects: Record<string, StorageObject[]>,
+      opts: { failPrefixes?: string[] } = {}
+    ): StorageClient {
+      return {
+        testConnection: async () => true,
+        listObjects: async (bucket, prefix) => {
+          const key = `${bucket}/${prefix}`;
+          if (opts.failPrefixes?.includes(key)) {
+            throw new Error(`list boom for ${key}`);
+          }
+          return objects[key] ?? [];
+        },
+        headObject: async () => ({
+          storage_class: 'GLACIER',
+          accessible: false,
+          restore: null,
+        }),
+        restoreObject: async () => {},
+      };
+    }
+
+    function obj(storage_class: string, key = 'k'): StorageObject {
+      return { key, size: 1, storage_class };
+    }
+
+    const settingsDoc = {
+      doctype: 'settings',
+      repo_name_prefix: 'deepfreeze',
+      provider: 'aws',
+    };
+
+    const repoHits = [
+      {
+        _id: 'hot',
+        _source: {
+          doctype: 'repository',
+          name: 'hot',
+          bucket: 'b',
+          base_path: 'snapshots/hot',
+          is_mounted: true,
+          thaw_state: 'active',
+        },
+      },
+      {
+        _id: 'archived',
+        _source: {
+          doctype: 'repository',
+          name: 'archived',
+          bucket: 'b',
+          base_path: 'snapshots/archived',
+          is_mounted: false,
+          thaw_state: 'frozen',
+        },
+      },
+    ];
+
+    it('classifies single-class samples as Hot / Archive', async () => {
+      const client = makeClient({ indexExists: true, settingsDoc, repoHits });
+      const storage = makeStorage({
+        'b/snapshots/hot/': [obj('STANDARD'), obj('STANDARD'), obj('STANDARD')],
+        'b/snapshots/archived/': [obj('GLACIER'), obj('GLACIER')],
+      });
+
+      const result = await runStatus(client, { storage });
+
+      const byName = Object.fromEntries(
+        result.repositories.map((r) => [r.name, r])
+      );
+      expect(byName.hot.storage_tier).toBe('Hot');
+      expect(byName.archived.storage_tier).toBe('Archive');
+    });
+
+    it('classifies a multi-class sample as Mixed', async () => {
+      const client = makeClient({ indexExists: true, settingsDoc, repoHits });
+      const storage = makeStorage({
+        'b/snapshots/hot/': [obj('STANDARD'), obj('GLACIER')],
+        'b/snapshots/archived/': [obj('GLACIER')],
+      });
+
+      const result = await runStatus(client, { storage });
+      const byName = Object.fromEntries(
+        result.repositories.map((r) => [r.name, r])
+      );
+      expect(byName.hot.storage_tier).toBe('Mixed');
+      expect(byName.archived.storage_tier).toBe('Archive');
+    });
+
+    it('returns Empty when listObjects yields nothing', async () => {
+      const client = makeClient({ indexExists: true, settingsDoc, repoHits });
+      const storage = makeStorage({});
+
+      const result = await runStatus(client, { storage });
+      expect(result.repositories.every((r) => r.storage_tier === 'Empty')).toBe(true);
+    });
+
+    it("returns N/A on listObjects errors and doesn't poison the rest", async () => {
+      const client = makeClient({ indexExists: true, settingsDoc, repoHits });
+      const storage = makeStorage(
+        {
+          'b/snapshots/hot/': [obj('STANDARD')],
+          'b/snapshots/archived/': [obj('GLACIER')],
+        },
+        { failPrefixes: ['b/snapshots/hot/'] }
+      );
+
+      const result = await runStatus(client, { storage });
+      const byName = Object.fromEntries(
+        result.repositories.map((r) => [r.name, r])
+      );
+      expect(byName.hot.storage_tier).toBe('N/A');
+      expect(byName.archived.storage_tier).toBe('Archive');
+      // runStatus.errors should not be polluted — sampling failures
+      // surface as the per-repo 'N/A' tier, not as response errors.
+      expect(result.errors).toEqual([]);
+    });
+
+    it('returns Unknown for storage classes not in the mapping table', async () => {
+      const client = makeClient({ indexExists: true, settingsDoc, repoHits });
+      const storage = makeStorage({
+        'b/snapshots/hot/': [obj('FUTURE_TIER_X')],
+        'b/snapshots/archived/': [obj('GLACIER')],
+      });
+      const result = await runStatus(client, { storage });
+      const byName = Object.fromEntries(
+        result.repositories.map((r) => [r.name, r])
+      );
+      expect(byName.hot.storage_tier).toBe('Unknown');
+    });
+
+    it('omits storage_tier when no storage client is supplied', async () => {
+      const client = makeClient({ indexExists: true, settingsDoc, repoHits });
+      const result = await runStatus(client);
+      expect(result.repositories.every((r) => r.storage_tier === undefined)).toBe(
+        true
+      );
+    });
+
+    it('normalises Azure and GCS storage classes correctly', async () => {
+      const azureHits = [
+        {
+          _id: 'azc',
+          _source: {
+            doctype: 'repository',
+            name: 'azc',
+            bucket: 'b',
+            base_path: 'cool',
+            is_mounted: true,
+            thaw_state: 'active',
+          },
+        },
+        {
+          _id: 'gcsa',
+          _source: {
+            doctype: 'repository',
+            name: 'gcsa',
+            bucket: 'b',
+            base_path: 'gcs-archive',
+            is_mounted: false,
+            thaw_state: 'frozen',
+          },
+        },
+      ];
+      const client = makeClient({
+        indexExists: true,
+        settingsDoc,
+        repoHits: azureHits,
+      });
+      const storage = makeStorage({
+        'b/cool/': [obj('Cool')], // Azure access tier
+        'b/gcs-archive/': [obj('COLDLINE')], // GCS storage class
+      });
+      const result = await runStatus(client, { storage });
+      const byName = Object.fromEntries(
+        result.repositories.map((r) => [r.name, r])
+      );
+      expect(byName.azc.storage_tier).toBe('Cool');
+      expect(byName.gcsa.storage_tier).toBe('Archive');
+    });
   });
 
   it('uses the configured repo_name_prefix for ILM policy filtering', async () => {
