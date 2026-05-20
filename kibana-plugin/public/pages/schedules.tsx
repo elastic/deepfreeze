@@ -18,7 +18,7 @@ import { useSchedules } from '../hooks/use_schedules';
 import { ScheduleModal } from '../components/schedule_modal';
 import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
-import { trimDate } from '../utils/format';
+import { formatTimestamp } from '../utils/format';
 import type { ScheduledJobDoc } from '../../common/schemas/scheduled_job';
 
 interface SchedulesPageProps {
@@ -181,7 +181,7 @@ export function SchedulesPage({ http, notifications }: SchedulesPageProps) {
       field: 'created_at',
       name: 'Created',
       sortable: true,
-      render: (ts: string) => (ts ? trimDate(ts) : '—'),
+      render: (ts: string) => (ts ? formatTimestamp(ts) : '—'),
     },
     {
       name: 'Actions',

@@ -17,6 +17,10 @@ module.exports = {
     '<rootDir>/server/telemetry',
     '<rootDir>/server/storage',
     '<rootDir>/server/scheduler',
+    // Kibana-independent UI utilities (pure functions, no React or
+    // Kibana imports). The rest of `public/` still runs only under the
+    // Kibana-aware test config.
+    '<rootDir>/public/utils',
   ],
   testMatch: ['**/__tests__/**/*.test.ts'],
   transform: {

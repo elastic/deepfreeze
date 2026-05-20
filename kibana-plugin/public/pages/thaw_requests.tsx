@@ -26,7 +26,7 @@ import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
 import { RefreezeModal } from '../components/refreeze_modal';
 import { ThawModal } from '../components/thaw_modal';
-import { trimDate } from '../utils/format';
+import { formatDate, formatTimestamp } from '../utils/format';
 import type { StatusResult } from '../../server/actions/status';
 import type { ThawProgressResult } from '../../server/actions/thaw';
 
@@ -177,7 +177,7 @@ function ThawProgressSection({
         <EuiFlexItem grow={false}>
           <EuiText size="xs" color="subdued">
             {progress?.checked_at
-              ? `Last checked ${trimDate(progress.checked_at)}`
+              ? `Last checked ${formatTimestamp(progress.checked_at)}`
               : 'Polling every 30s'}
           </EuiText>
         </EuiFlexItem>
@@ -239,8 +239,8 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
       field: 'start_date',
       name: 'Date range',
       render: (_: unknown, item: ThawReq) => {
-        const start = trimDate(item.start_date);
-        const end = trimDate(item.end_date);
+        const start = formatDate(item.start_date);
+        const end = formatDate(item.end_date);
         if (!start && !end) return '--';
         return (
           <EuiText size="s">
@@ -258,7 +258,7 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
       field: 'created_at',
       name: 'Created',
       sortable: true,
-      render: (ts: string) => (ts ? trimDate(ts) : '--'),
+      render: (ts: string) => (ts ? formatTimestamp(ts) : '--'),
     },
   ];
 
@@ -349,12 +349,12 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
                 { title: 'Status', description: String(flyoutItem.status || '--') },
                 {
                   title: 'Created at',
-                  description: trimDate(flyoutItem.created_at) || '--',
+                  description: formatTimestamp(flyoutItem.created_at) || '--',
                 },
                 {
                   title: 'Date range',
-                  description: `${trimDate(flyoutItem.start_date) || '?'} → ${
-                    trimDate(flyoutItem.end_date) || '?'
+                  description: `${formatDate(flyoutItem.start_date) || '?'} → ${
+                    formatDate(flyoutItem.end_date) || '?'
                   }`,
                 },
               ]}

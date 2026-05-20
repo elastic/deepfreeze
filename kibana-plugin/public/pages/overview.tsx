@@ -26,7 +26,7 @@ import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
 import { RotateModal } from '../components/rotate_modal';
 import { CleanupModal } from '../components/cleanup_modal';
-import { trimDate } from '../utils/format';
+import { formatDate, formatTimestamp } from '../utils/format';
 import { SetupWizard } from './setup_wizard';
 import type { StatusResult } from '../../server/actions/status';
 
@@ -105,8 +105,8 @@ const repoColumns: Array<EuiBasicTableColumn<Repo>> = [
     field: 'start',
     name: 'Date range',
     render: (_: unknown, item: Repo) => {
-      const start = trimDate(item.start);
-      const end = trimDate(item.end);
+      const start = formatDate(item.start);
+      const end = formatDate(item.end);
       if (!start && !end) return '--';
       return (
         <EuiText size="s">
@@ -150,8 +150,8 @@ const thawColumns: Array<EuiBasicTableColumn<ThawReq>> = [
     field: 'start_date',
     name: 'Date range',
     render: (_: unknown, item: ThawReq) => {
-      const start = trimDate(item.start_date);
-      const end = trimDate(item.end_date);
+      const start = formatDate(item.start_date);
+      const end = formatDate(item.end_date);
       if (!start && !end) return '--';
       return (
         <EuiText size="s">
@@ -168,7 +168,7 @@ const thawColumns: Array<EuiBasicTableColumn<ThawReq>> = [
   {
     field: 'created_at',
     name: 'Created',
-    render: (ts: string) => (ts ? trimDate(ts) : '--'),
+    render: (ts: string) => (ts ? formatTimestamp(ts) : '--'),
   },
 ];
 
@@ -475,10 +475,10 @@ function ThawDetailContent({ item }: { item: ThawReq }) {
   const listItems = [
     { title: 'Request ID', description: String(item.request_id || '--') },
     { title: 'Status', description: String(item.status || '--') },
-    { title: 'Created at', description: trimDate(item.created_at) || '--' },
+    { title: 'Created at', description: formatTimestamp(item.created_at) || '--' },
     {
       title: 'Date range',
-      description: `${trimDate(item.start_date) || '?'} → ${trimDate(item.end_date) || '?'}`,
+      description: `${formatDate(item.start_date) || '?'} → ${formatDate(item.end_date) || '?'}`,
     },
   ];
 

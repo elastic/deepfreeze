@@ -22,7 +22,7 @@ import type { CoreStart } from '@kbn/core/public';
 import { API } from '../../common/api/paths';
 import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
-import { trimDate, formatDuration } from '../utils/format';
+import { formatTimestamp, formatDuration } from '../utils/format';
 import type { AuditEntryDoc } from '../../common/schemas/audit_entry';
 
 interface ActivityPageProps {
@@ -79,7 +79,7 @@ export function ActivityPage({ http }: ActivityPageProps) {
       field: 'timestamp',
       name: 'Timestamp',
       sortable: true,
-      render: (ts: string) => (ts ? trimDate(ts) : '--'),
+      render: (ts: string) => (ts ? formatTimestamp(ts) : '--'),
     },
     {
       field: 'action',
@@ -190,7 +190,7 @@ export function ActivityPage({ http }: ActivityPageProps) {
             <EuiTitle size="m">
               <h2>
                 <EuiBadge color="hollow">{flyoutEntry.action}</EuiBadge>{' '}
-                {trimDate(flyoutEntry.timestamp)}
+                {formatTimestamp(flyoutEntry.timestamp)}
               </h2>
             </EuiTitle>
           </EuiFlyoutHeader>
@@ -200,7 +200,7 @@ export function ActivityPage({ http }: ActivityPageProps) {
               compressed
               listItems={[
                 { title: 'Action', description: flyoutEntry.action },
-                { title: 'Timestamp', description: trimDate(flyoutEntry.timestamp) || '--' },
+                { title: 'Timestamp', description: formatTimestamp(flyoutEntry.timestamp) || '--' },
                 { title: 'User', description: flyoutEntry.user || '--' },
                 { title: 'Hostname', description: flyoutEntry.hostname || '--' },
                 { title: 'Success', description: flyoutEntry.success ? 'Yes' : 'No' },

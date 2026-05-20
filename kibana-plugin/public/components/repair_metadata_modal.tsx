@@ -23,7 +23,7 @@ import type {
   DiscrepancyRecord,
   RepairResult,
 } from '../../server/actions/repair_metadata';
-import { trimDate } from '../utils/format';
+import { formatDate } from '../utils/format';
 
 interface RepairMetadataModalProps {
   http: CoreStart['http'];
@@ -75,7 +75,7 @@ function DateRangesSection({
       field: 'start',
       name: 'Start',
       render: (_: unknown, item: DateRangeOutcome) =>
-        item.changed ? trimDate(item.start) || '--' : (
+        item.changed ? formatDate(item.start) || '--' : (
           <EuiText size="xs" color="subdued">
             {item.skipped_reason ?? '--'}
           </EuiText>
@@ -85,7 +85,7 @@ function DateRangesSection({
       field: 'end',
       name: 'End',
       render: (_: unknown, item: DateRangeOutcome) =>
-        item.changed ? trimDate(item.end) || '--' : (
+        item.changed ? formatDate(item.end) || '--' : (
           <EuiText size="xs" color="subdued">
             --
           </EuiText>

@@ -23,7 +23,7 @@ import { useStatus } from '../hooks/use_status';
 import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
 import { RepairMetadataModal } from '../components/repair_metadata_modal';
-import { trimDate } from '../utils/format';
+import { formatDate } from '../utils/format';
 import type { StatusResult } from '../../server/actions/status';
 
 type Repo = StatusResult['repositories'][number];
@@ -109,8 +109,8 @@ export function RepositoriesPage({ http, notifications }: RepositoriesPageProps)
       field: 'start',
       name: 'Date range',
       render: (_: unknown, item: Repo) => {
-        const start = trimDate(item.start);
-        const end = trimDate(item.end);
+        const start = formatDate(item.start);
+        const end = formatDate(item.end);
         if (!start && !end) {
           return (
             <EuiText size="s" color="subdued">
