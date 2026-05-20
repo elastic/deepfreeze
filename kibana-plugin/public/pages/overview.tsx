@@ -26,7 +26,11 @@ import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
 import { RotateModal } from '../components/rotate_modal';
 import { CleanupModal } from '../components/cleanup_modal';
-import { formatDate, formatTimestamp } from '../utils/format';
+import {
+  formatDate,
+  formatStoredDatetime,
+  formatTimestamp,
+} from '../utils/format';
 import { SetupWizard } from './setup_wizard';
 import type { StatusResult } from '../../server/actions/status';
 
@@ -105,8 +109,8 @@ const repoColumns: Array<EuiBasicTableColumn<Repo>> = [
     field: 'start',
     name: 'Date range',
     render: (_: unknown, item: Repo) => {
-      const start = formatDate(item.start);
-      const end = formatDate(item.end);
+      const start = formatStoredDatetime(item.start);
+      const end = formatStoredDatetime(item.end);
       if (!start && !end) return '--';
       return (
         <EuiText size="s">

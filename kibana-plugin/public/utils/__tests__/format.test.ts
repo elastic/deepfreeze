@@ -1,4 +1,9 @@
-import { formatDate, formatDuration, formatTimestamp } from '../format';
+import {
+  formatDate,
+  formatDuration,
+  formatStoredDatetime,
+  formatTimestamp,
+} from '../format';
 
 describe('formatTimestamp', () => {
   it('returns empty for null / undefined / empty string', () => {
@@ -25,6 +30,39 @@ describe('formatTimestamp', () => {
 
   it('falls through unparseable strings instead of returning "Invalid Date"', () => {
     expect(formatTimestamp('not a date')).toBe('not a date');
+  });
+});
+
+describe('formatStoredDatetime', () => {
+  it('returns empty for null / undefined / empty string', () => {
+    expect(formatStoredDatetime(null)).toBe('');
+    expect(formatStoredDatetime(undefined)).toBe('');
+    expect(formatStoredDatetime('')).toBe('');
+  });
+
+  it('strips milliseconds but preserves Z', () => {
+    expect(formatStoredDatetime('2026-05-19T13:45:00.000Z')).toBe(
+      '2026-05-19T13:45:00Z'
+    );
+    expect(formatStoredDatetime('2026-05-19T13:45:00.123Z')).toBe(
+      '2026-05-19T13:45:00Z'
+    );
+  });
+
+  it('strips milliseconds in offset form, preserving the offset', () => {
+    expect(formatStoredDatetime('2026-05-19T13:45:00.500+02:00')).toBe(
+      '2026-05-19T13:45:00+02:00'
+    );
+  });
+
+  it('leaves seconds-precision ISO strings alone', () => {
+    expect(formatStoredDatetime('2026-05-19T13:45:00Z')).toBe(
+      '2026-05-19T13:45:00Z'
+    );
+  });
+
+  it('passes non-ISO strings through unchanged', () => {
+    expect(formatStoredDatetime('not a date')).toBe('not a date');
   });
 });
 

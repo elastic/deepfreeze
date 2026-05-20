@@ -1,23 +1,29 @@
 /**
  * Display formatters for dates and durations shown in the UI.
  *
- * Two date helpers, two intents:
+ * Three date helpers, three intents:
  *
  *   - `formatTimestamp(val)` — full wall-clock datetime in the
  *     browser's local timezone, e.g. "2026-05-19 13:45 EDT". Use for
- *     real event timestamps: created_at, expires_at, thawed_at,
+ *     real event timestamps the operator cares about as "when did
+ *     this happen on my clock": created_at, expires_at, thawed_at,
  *     last_run_at, audit `timestamp`, thaw `checked_at`.
+ *
+ *   - `formatStoredDatetime(val)` — the stored ISO datetime, minus
+ *     just the millisecond fraction. Keeps the Z so UTC is explicit.
+ *     Use for fields where the value IS the data — e.g. repository
+ *     `start`/`end` are the min/max `@timestamp` of the indexed
+ *     documents themselves; the operator wants to see "exactly what's
+ *     in the repo" without browser-TZ rewriting that property.
  *
  *   - `formatDate(val)` — date portion of the ISO string with NO
  *     timezone conversion, e.g. "2026-05-19". Use for date-range
- *     boundaries where the stored Y-M-D is the meaningful unit:
- *     repository `start`/`end` (from @timestamp aggregation, treated
- *     as date span) and thaw request `start_date`/`end_date` (user-
- *     picked dates, stored as UTC midnight / EOD — converting to the
- *     browser TZ would back-shift them by a day for users east/west
- *     of UTC, which is surprising).
+ *     boundaries where the stored Y-M-D is the meaningful unit (user
+ *     picked a date in a date-picker): thaw request `start_date` /
+ *     `end_date`. We don't TZ-convert because the user's Jan 15
+ *     should stay Jan 15 regardless of where their browser sits.
  *
- * Both are forgiving: null/undefined/empty → "", an unparseable
+ * All three are forgiving: null/undefined/empty → "", an unparseable
  * string falls through to the raw input so we never silently swallow
  * a malformed timestamp.
  */
@@ -47,6 +53,17 @@ export function formatTimestamp(val: unknown): string {
   const d = new Date(String(val));
   if (Number.isNaN(d.getTime())) return String(val);
   return TS_FORMAT.format(d);
+}
+
+/**
+ * Stored datetime, milliseconds stripped, Z preserved. The shape used
+ * for "this is the actual `@timestamp` range of the indexed data" so
+ * the operator sees exactly what's in the repo without browser-TZ
+ * rewriting it. `2026-05-19T13:45:00.000Z` → `2026-05-19T13:45:00Z`.
+ */
+export function formatStoredDatetime(val: unknown): string {
+  if (val === null || val === undefined || val === '') return '';
+  return String(val).replace(/\.\d+(?=Z$|[+-]\d{2}:\d{2}$)/, '');
 }
 
 /**
