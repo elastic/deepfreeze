@@ -47,6 +47,8 @@ function actionLabel(action: string): string {
     case 'repair':
     case 'repair_metadata':
       return 'Repair metadata';
+    case 'update_date_ranges':
+      return 'Update date ranges';
     default:
       return action;
   }

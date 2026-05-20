@@ -28,9 +28,14 @@ const ACTION_OPTIONS: Array<{ value: ScheduledAction; text: string }> = [
   { value: 'rotate', text: 'Rotate' },
   { value: 'cleanup', text: 'Cleanup' },
   { value: 'repair_metadata', text: 'Repair metadata' },
+  { value: 'update_date_ranges', text: 'Update date ranges' },
 ];
 
-type ScheduledAction = 'rotate' | 'cleanup' | 'repair_metadata';
+type ScheduledAction =
+  | 'rotate'
+  | 'cleanup'
+  | 'repair_metadata'
+  | 'update_date_ranges';
 
 /** Interval units exposed in the UI; stored on the doc as seconds. */
 const UNIT_OPTIONS: Array<{ value: IntervalUnit; text: string }> = [

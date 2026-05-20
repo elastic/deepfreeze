@@ -39,7 +39,7 @@ export function useSchedules(http: CoreStart['http']) {
   const createSchedule = useCallback(
     async (body: {
       name: string;
-      action: 'rotate' | 'cleanup' | 'repair_metadata';
+      action: 'rotate' | 'cleanup' | 'repair_metadata' | 'update_date_ranges';
       params?: Record<string, unknown>;
       interval_seconds: number;
       paused?: boolean;
@@ -57,7 +57,7 @@ export function useSchedules(http: CoreStart['http']) {
     async (
       name: string,
       patch: {
-        action?: 'rotate' | 'cleanup' | 'repair_metadata';
+        action?: 'rotate' | 'cleanup' | 'repair_metadata' | 'update_date_ranges';
         params?: Record<string, unknown>;
         interval_seconds?: number;
         paused?: boolean;
