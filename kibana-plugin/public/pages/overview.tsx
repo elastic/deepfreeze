@@ -133,7 +133,7 @@ const repoColumns: Array<EuiBasicTableColumn<Repo>> = [
     render: (tier: string | undefined) => {
       if (!tier) return '--';
       let color: 'success' | 'warning' | 'primary' | 'hollow' = 'hollow';
-      if (tier === 'Hot') color = 'success';
+      if (tier === 'Standard') color = 'success';
       else if (tier === 'Cool') color = 'warning';
       else if (tier === 'Archive') color = 'primary';
       return <EuiBadge color={color}>{tier}</EuiBadge>;

@@ -314,7 +314,7 @@ describe('runStatus', () => {
       },
     ];
 
-    it('classifies single-class samples as Hot / Archive', async () => {
+    it('classifies single-class samples as Standard / Archive', async () => {
       const client = makeClient({ indexExists: true, settingsDoc, repoHits });
       const storage = makeStorage({
         'b/snapshots/hot/': [obj('STANDARD'), obj('STANDARD'), obj('STANDARD')],
@@ -326,7 +326,7 @@ describe('runStatus', () => {
       const byName = Object.fromEntries(
         result.repositories.map((r) => [r.name, r])
       );
-      expect(byName.hot.storage_tier).toBe('Hot');
+      expect(byName.hot.storage_tier).toBe('Standard');
       expect(byName.archived.storage_tier).toBe('Archive');
     });
 
@@ -393,6 +393,33 @@ describe('runStatus', () => {
       expect(result.repositories.every((r) => r.storage_tier === undefined)).toBe(
         true
       );
+    });
+
+    it("normalises Azure's 'Hot' tier to 'Standard'", async () => {
+      const azureHits = [
+        {
+          _id: 'azh',
+          _source: {
+            doctype: 'repository',
+            name: 'azh',
+            bucket: 'b',
+            base_path: 'azure-hot',
+            is_mounted: true,
+            thaw_state: 'active',
+          },
+        },
+      ];
+      const client = makeClient({
+        indexExists: true,
+        settingsDoc,
+        repoHits: azureHits,
+      });
+      const storage = makeStorage({
+        // Azure literally returns "Hot" as a storage_class value.
+        'b/azure-hot/': [obj('Hot')],
+      });
+      const result = await runStatus(client, { storage });
+      expect(result.repositories[0].storage_tier).toBe('Standard');
     });
 
     it('normalises Azure and GCS storage classes correctly', async () => {

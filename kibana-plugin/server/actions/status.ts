@@ -9,7 +9,7 @@
  * Per-repo storage-tier sampling mirrors Python's
  * `Status._get_repo_storage_tier`: list the first ~10 objects under
  * the repo's bucket/base_path, collect their storage classes, and
- * classify as Hot / Cool / Archive / Mixed / Empty / Unknown / N/A.
+ * classify as Standard / Cool / Archive / Mixed / Empty / Unknown / N/A.
  *
  * Contract: returns a fully-shaped `SystemStatus`. Never throws for
  * "expected" missing-state errors (no status index, no settings) —
@@ -79,7 +79,7 @@ export interface RunStatusOptions {
  * Python's `Status._get_repo_storage_tier`.
  */
 export type StorageTier =
-  | 'Hot'
+  | 'Standard'
   | 'Cool'
   | 'Archive'
   | 'Mixed'
@@ -98,25 +98,29 @@ const TIER_SAMPLE_SIZE = 10;
  */
 const STORAGE_CLASS_TO_TIER: Record<string, StorageTier> = {
   // AWS
-  STANDARD: 'Hot',
-  REDUCED_REDUNDANCY: 'Hot',
-  INTELLIGENT_TIERING: 'Hot',
+  STANDARD: 'Standard',
+  REDUCED_REDUNDANCY: 'Standard',
+  INTELLIGENT_TIERING: 'Standard',
   STANDARD_IA: 'Cool',
   ONEZONE_IA: 'Cool',
   GLACIER: 'Archive',
   GLACIER_IR: 'Cool',
   DEEP_ARCHIVE: 'Archive',
-  // Azure (Blob)
-  Hot: 'Hot',
+  // Azure (Blob) — provider literally calls its instant-access tier
+  // "Hot". We normalise to "Standard" so the UI is consistent across
+  // providers; the key here stays "Hot" because that's what the SDK
+  // returns in `storage_class`.
+  Hot: 'Standard',
   Cool: 'Cool',
   Archive: 'Archive',
   // GCS
   NEARLINE: 'Cool',
   COLDLINE: 'Archive',
   ARCHIVE: 'Archive',
-  // Empty string from a provider that omits the field — treat as Hot
-  // since a missing class on S3 is typically STANDARD in practice.
-  '': 'Hot',
+  // Empty string from a provider that omits the field — treat as
+  // Standard since a missing class on S3 is typically STANDARD in
+  // practice.
+  '': 'Standard',
 };
 
 /**

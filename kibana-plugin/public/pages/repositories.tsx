@@ -67,7 +67,7 @@ function renderTierBadge(tier: string | undefined): JSX.Element {
     );
   }
   let color: 'success' | 'warning' | 'primary' | 'hollow' = 'hollow';
-  if (tier === 'Hot') color = 'success';
+  if (tier === 'Standard') color = 'success';
   else if (tier === 'Cool') color = 'warning';
   else if (tier === 'Archive') color = 'primary';
   return <EuiBadge color={color}>{tier}</EuiBadge>;
