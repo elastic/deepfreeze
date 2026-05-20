@@ -39,7 +39,7 @@ function makeLogger(): Logger {
 }
 
 describe('registerDeepfreezeTaskTypes', () => {
-  it('registers all three deepfreeze task types', () => {
+  it('registers every deepfreeze task type', () => {
     const { taskManager, calls } = makeTaskManagerMock();
     registerDeepfreezeTaskTypes({
       taskManager,
@@ -51,7 +51,12 @@ describe('registerDeepfreezeTaskTypes', () => {
     expect(calls).toHaveLength(1);
     const definitions = calls[0];
     expect(Object.keys(definitions).sort()).toEqual(
-      [TASK_TYPES.cleanup, TASK_TYPES.repairMetadata, TASK_TYPES.rotate].sort()
+      [
+        TASK_TYPES.cleanup,
+        TASK_TYPES.repairMetadata,
+        TASK_TYPES.rotate,
+        TASK_TYPES.updateDateRanges,
+      ].sort()
     );
   });
 

@@ -177,4 +177,19 @@ describe('runActionForSchedule', () => {
       })
     ).rejects.toThrow(/repair_metadata-was-called/);
   });
+
+  it('routes update_date_ranges action to runUpdateDateRanges', async () => {
+    // runUpdateDateRanges starts with getAllRepos, which uses search.
+    // Throw there so we prove the dispatch picked this branch.
+    const client = {
+      search: async () => {
+        throw new Error('update_date_ranges-was-called');
+      },
+    };
+    await expect(
+      runActionForSchedule(client as never, job({ action: 'update_date_ranges' }), {
+        log: noopLog,
+      })
+    ).rejects.toThrow(/update_date_ranges-was-called/);
+  });
 });

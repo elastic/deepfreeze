@@ -66,6 +66,8 @@ export function resolveTaskTypeForAction(action: string): DeepfreezeTaskType | n
     case 'repair':
     case 'repair_metadata':
       return TASK_TYPES.repairMetadata;
+    case 'update_date_ranges':
+      return TASK_TYPES.updateDateRanges;
     default:
       return null;
   }

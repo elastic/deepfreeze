@@ -19,6 +19,10 @@ import {
   runRepairMetadata,
   type RepairMetadataActionEsClient,
 } from '../actions/repair_metadata';
+import {
+  runUpdateDateRanges,
+  type UpdateDateRangesActionEsClient,
+} from '../actions/update_date_ranges';
 import { ActionError } from '../errors';
 import { getSettings } from '../repositories/settings_repo';
 import {
@@ -81,7 +85,10 @@ export async function syncTaskManager(
  * HTTP response.
  */
 export async function runActionForSchedule(
-  client: RotateActionEsClient & CleanupActionEsClient & RepairMetadataActionEsClient,
+  client: RotateActionEsClient &
+    CleanupActionEsClient &
+    RepairMetadataActionEsClient &
+    UpdateDateRangesActionEsClient,
   job: ScheduledJobDoc,
   opts: {
     log: { debug: (m: string) => void; warn: (m: string) => void };
@@ -104,6 +111,9 @@ export async function runActionForSchedule(
       opts.storageOptions?.aws ?? {}
     );
     return runRepairMetadata(client, storage, { log: opts.log });
+  }
+  if (job.action === 'update_date_ranges') {
+    return runUpdateDateRanges(client, job.params ?? {}, { log: opts.log });
   }
   throw new ActionError(`Unsupported schedule action '${job.action}'`);
 }

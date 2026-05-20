@@ -43,6 +43,11 @@ import {
   runRepairMetadata,
   type RepairMetadataActionEsClient,
 } from '../actions/repair_metadata';
+import {
+  runUpdateDateRanges,
+  type UpdateDateRangesActionEsClient,
+  type UpdateDateRangesConfig,
+} from '../actions/update_date_ranges';
 import { getSettings } from '../repositories/settings_repo';
 import {
   storageClientFactory,
@@ -54,6 +59,7 @@ export const TASK_TYPES = {
   rotate: 'deepfreeze:rotate',
   cleanup: 'deepfreeze:cleanup',
   repairMetadata: 'deepfreeze:repair-metadata',
+  updateDateRanges: 'deepfreeze:update-date-ranges',
 } as const;
 
 export type DeepfreezeTaskType = (typeof TASK_TYPES)[keyof typeof TASK_TYPES];
@@ -125,7 +131,11 @@ export function registerDeepfreezeTaskTypes(
   };
 
   async function getInternalEsClient(): Promise<
-    RotateActionEsClient & CleanupActionEsClient & RepairMetadataActionEsClient & AuditEsClient
+    RotateActionEsClient &
+      CleanupActionEsClient &
+      RepairMetadataActionEsClient &
+      UpdateDateRangesActionEsClient &
+      AuditEsClient
   > {
     const [coreStart] = await getStartServices();
     // The plugin's actions accept a structural subset of the real ES
@@ -134,6 +144,7 @@ export function registerDeepfreezeTaskTypes(
     return coreStart.elasticsearch.client.asInternalUser as unknown as RotateActionEsClient &
       CleanupActionEsClient &
       RepairMetadataActionEsClient &
+      UpdateDateRangesActionEsClient &
       AuditEsClient;
   }
 
@@ -300,6 +311,50 @@ export function registerDeepfreezeTaskTypes(
                   failed_count: out.failed.length,
                   date_ranges_changed: out.date_ranges.filter((d) => d.changed)
                     .length,
+                });
+                for (const e of out.errors) {
+                  tracker.addError({ code: e.code, message: e.message });
+                }
+                return out;
+              }
+            );
+          });
+        },
+      }),
+    },
+
+    [TASK_TYPES.updateDateRanges]: {
+      title: 'Deepfreeze: update repository date ranges',
+      description:
+        'Walk every mounted repository and extend its persisted start/end based on the current @timestamp range of its indices.',
+      maxAttempts: 1,
+      createTaskRunner: ({ taskInstance }: RunContext) => ({
+        async run() {
+          return runWrapper(TASK_TYPES.updateDateRanges, logger, async () => {
+            const client = await getInternalEsClient();
+            const params = (taskInstance.params ?? {}) as UpdateDateRangesConfig;
+            const audit = makeAudit(client);
+            await audit.track(
+              {
+                action: 'update_date_ranges',
+                dryRun: false,
+                parameters: { ...params, triggered_by: 'schedule' },
+                user: 'scheduler',
+              },
+              async (tracker) => {
+                const out = await runUpdateDateRanges(client, params, { log });
+                for (const step of out.steps) {
+                  tracker.addResult({
+                    type: step.type,
+                    action: step.action,
+                    target: step.name,
+                    ...(step.detail ? { detail: step.detail } : {}),
+                  });
+                }
+                tracker.setSummary({
+                  updated_count: out.updated.length,
+                  unchanged_count: out.unchanged.length,
+                  skipped_count: out.skipped.length,
                 });
                 for (const e of out.errors) {
                   tracker.addError({ code: e.code, message: e.message });

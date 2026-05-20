@@ -139,6 +139,7 @@ describe('resolveTaskTypeForAction', () => {
     ['cleanup', TASK_TYPES.cleanup],
     ['repair', TASK_TYPES.repairMetadata],
     ['repair_metadata', TASK_TYPES.repairMetadata],
+    ['update_date_ranges', TASK_TYPES.updateDateRanges],
   ])('maps %s → %s', (action, expected) => {
     expect(resolveTaskTypeForAction(action)).toBe(expected);
   });
@@ -337,7 +338,7 @@ describe('bootstrapDeepfreezeSchedules — orphan sweep', () => {
     expect(calls.ensureScheduled).toHaveLength(1);
   });
 
-  it('only enumerates the three deepfreeze task types', async () => {
+  it('only enumerates deepfreeze task types', async () => {
     const { taskManager, calls } = makeTaskManager();
     await bootstrapDeepfreezeSchedules({
       client: makeRepoClient([]),
@@ -350,6 +351,7 @@ describe('bootstrapDeepfreezeSchedules — orphan sweep', () => {
         TASK_TYPES.rotate,
         TASK_TYPES.cleanup,
         TASK_TYPES.repairMetadata,
+        TASK_TYPES.updateDateRanges,
       ],
     });
   });

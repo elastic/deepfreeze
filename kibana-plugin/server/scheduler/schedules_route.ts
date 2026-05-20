@@ -48,7 +48,12 @@ import type { AwsStorageClientOptions } from '../storage/factory';
 import type { GetCurrentUser } from '../routes/setup_route';
 
 /** Allowed `action` values; anything else gets rejected at the route. */
-const SCHEDULE_ACTIONS = ['rotate', 'cleanup', 'repair_metadata'] as const;
+const SCHEDULE_ACTIONS = [
+  'rotate',
+  'cleanup',
+  'repair_metadata',
+  'update_date_ranges',
+] as const;
 
 const nameParamSchema = schema.object({
   name: schema.string({
@@ -70,6 +75,7 @@ const createBodySchema = schema.object({
     schema.literal('rotate'),
     schema.literal('cleanup'),
     schema.literal('repair_metadata'),
+    schema.literal('update_date_ranges'),
   ]),
   params: schema.maybe(schema.recordOf(schema.string(), schema.any())),
   interval_seconds: schema.number({ min: 1, max: 365 * 24 * 60 * 60 }),
@@ -82,6 +88,7 @@ const updateBodySchema = schema.object({
       schema.literal('rotate'),
       schema.literal('cleanup'),
       schema.literal('repair_metadata'),
+      schema.literal('update_date_ranges'),
     ])
   ),
   params: schema.maybe(schema.recordOf(schema.string(), schema.any())),
