@@ -19,6 +19,8 @@ import type { AuditEsClient } from '../audit/types';
 import {
   checkAndMaybeMount,
   inspectThawProgress,
+  MAX_RESTORE_DAYS,
+  MIN_RESTORE_DAYS,
   runThaw,
   runThawDryRun,
   type ThawActionEsClient,
@@ -46,6 +48,19 @@ const thawBodySchema = schema.object({
   start_date: schema.string({ minLength: 1 }),
   end_date: schema.string({ minLength: 1 }),
   dry_run: schema.maybe(schema.boolean()),
+  // restore_days bounds match what S3's RestoreObject accepts for
+  // Glacier classes — clamp at the route so the SDK call can't 400
+  // with an unhelpful "invalid Days" message.
+  restore_days: schema.maybe(
+    schema.number({ min: MIN_RESTORE_DAYS, max: MAX_RESTORE_DAYS })
+  ),
+  retrieval_tier: schema.maybe(
+    schema.oneOf([
+      schema.literal('Standard'),
+      schema.literal('Expedited'),
+      schema.literal('Bulk'),
+    ])
+  ),
 });
 
 const requestIdParamsSchema = schema.object({

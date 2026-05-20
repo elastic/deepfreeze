@@ -40,12 +40,18 @@ import {
 import type { RetrievalTier, StorageClient } from '../storage/types';
 
 /**
- * Restore-window length, in days, and Glacier retrieval tier. Hard-coded
- * for Step 2; Phase 4 Step 4 will surface both as user-facing knobs in
- * the Thaw UI and thread them through `ThawConfig`.
+ * Defaults used when `ThawConfig` doesn't specify them. The Thaw UI
+ * defaults to these too so an operator who just hits "Initiate" gets
+ * the same conservative pick as before this knob existed.
+ *
+ * Range constraints (enforced at the route schema, not here):
+ *   - restore_days: integer, 1..30 (matches the S3 RestoreObject limit)
+ *   - retrieval_tier: 'Standard' | 'Expedited' | 'Bulk'
  */
 export const DEFAULT_RESTORE_DAYS = 7;
 export const DEFAULT_RETRIEVAL_TIER: RetrievalTier = 'Standard';
+export const MIN_RESTORE_DAYS = 1;
+export const MAX_RESTORE_DAYS = 30;
 
 /** Restore objects in batches of this size to bound concurrent SDK calls. */
 const RESTORE_BATCH = 10;
@@ -60,6 +66,21 @@ export interface ThawConfig {
   start_date: string;
   /** ISO 8601 inclusive end of the date range to thaw. */
   end_date: string;
+  /**
+   * S3 restore-window length in days. Drives both the `Days` field of
+   * the `s3:RestoreObject` request AND the persisted `expires_at` on
+   * each affected RepositoryDoc — they must agree or the operator gets
+   * a misleading deadline. Defaults to `DEFAULT_RESTORE_DAYS`.
+   */
+  restore_days?: number;
+  /**
+   * Glacier retrieval tier. Tradeoff is latency vs cost:
+   *   - 'Expedited': 1–5 min, $$$
+   *   - 'Standard':  3–5 hr, $
+   *   - 'Bulk':      5–12 hr, $ (cheapest)
+   * Defaults to `DEFAULT_RETRIEVAL_TIER`.
+   */
+  retrieval_tier?: RetrievalTier;
 }
 
 export interface RunThawOptions {
@@ -177,7 +198,9 @@ async function restoreOneRepo(
   storage: StorageClient,
   repo: RepositoryDoc,
   steps: ThawStepRecord[],
-  log: { debug: (m: string) => void; warn: (m: string) => void }
+  log: { debug: (m: string) => void; warn: (m: string) => void },
+  restoreDays: number,
+  retrievalTier: RetrievalTier
 ): Promise<RepoRestoreOutcome> {
   const outcome: RepoRestoreOutcome = {
     total: 0,
@@ -203,8 +226,8 @@ async function restoreOneRepo(
           return { key: obj.key, restored: false as const };
         }
         await storage.restoreObject(repo.bucket, obj.key, {
-          days: DEFAULT_RESTORE_DAYS,
-          tier: DEFAULT_RETRIEVAL_TIER,
+          days: restoreDays,
+          tier: retrievalTier,
         });
         return { key: obj.key, restored: true as const };
       })
@@ -287,8 +310,10 @@ export async function runThaw(
   }
 
   const request_id = (options.generateRequestId ?? defaultRequestId)();
+  const restoreDays = config.restore_days ?? DEFAULT_RESTORE_DAYS;
+  const retrievalTier = config.retrieval_tier ?? DEFAULT_RETRIEVAL_TIER;
   const expiresAt = new Date(
-    now().getTime() + DEFAULT_RESTORE_DAYS * 24 * 60 * 60 * 1000
+    now().getTime() + restoreDays * 24 * 60 * 60 * 1000
   ).toISOString();
 
   const requestDoc: ThawRequestDoc = {
@@ -311,7 +336,14 @@ export async function runThaw(
   for (const repo of repos) {
     log.debug(`Initiating thaw for ${repo.name}`);
     try {
-      const outcome = await restoreOneRepo(storage, repo, steps, log);
+      const outcome = await restoreOneRepo(
+        storage,
+        repo,
+        steps,
+        log,
+        restoreDays,
+        retrievalTier
+      );
       repoObjectStats.push({
         repo: repo.name,
         total: outcome.total,

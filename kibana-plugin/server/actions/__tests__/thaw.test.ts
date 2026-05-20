@@ -281,6 +281,71 @@ describe('runThaw — happy path', () => {
     });
   });
 
+  it('threads a custom restore_days into both restoreObject and expires_at', async () => {
+    const repo = makeRepo();
+    const { client, trace } = makeClient({ repos: [repo] });
+    const { storage, trace: storageTrace } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: `${repo.base_path}/g1`, size: 1, storage_class: 'GLACIER' },
+        ],
+      },
+    });
+
+    await runThaw(
+      client,
+      storage,
+      {
+        start_date: '2026-01-15T00:00:00Z',
+        end_date: '2026-01-20T00:00:00Z',
+        restore_days: 14,
+      },
+      {
+        generateRequestId: () => 'r-days',
+        now: () => new Date('2026-05-17T12:00:00Z'),
+      }
+    );
+
+    // S3 restore uses the custom window.
+    expect(storageTrace.restoreCalls[0].opts).toMatchObject({
+      days: 14,
+      tier: DEFAULT_RETRIEVAL_TIER,
+    });
+    // expires_at = now + 14 days
+    const repoWrite = trace.index_calls.find((c) => c.id === repo.name);
+    expect(repoWrite!.document).toMatchObject({
+      expires_at: '2026-05-31T12:00:00.000Z',
+    });
+  });
+
+  it('threads a custom retrieval_tier into restoreObject', async () => {
+    const repo = makeRepo();
+    const { client } = makeClient({ repos: [repo] });
+    const { storage, trace: storageTrace } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: `${repo.base_path}/g1`, size: 1, storage_class: 'GLACIER' },
+        ],
+      },
+    });
+
+    await runThaw(
+      client,
+      storage,
+      {
+        start_date: '2026-01-15T00:00:00Z',
+        end_date: '2026-01-20T00:00:00Z',
+        retrieval_tier: 'Expedited',
+      },
+      { generateRequestId: () => 'r-tier' }
+    );
+
+    expect(storageTrace.restoreCalls[0].opts).toMatchObject({
+      days: DEFAULT_RESTORE_DAYS,
+      tier: 'Expedited',
+    });
+  });
+
   it('saves the request doc BEFORE issuing restores (survives mid-flight crash)', async () => {
     const repo = makeRepo();
     const { client, trace } = makeClient({ repos: [repo] });

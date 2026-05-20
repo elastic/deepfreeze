@@ -4,6 +4,7 @@ import {
   EuiButton,
   EuiButtonEmpty,
   EuiCallOut,
+  EuiFieldNumber,
   EuiFieldText,
   EuiForm,
   EuiFormRow,
@@ -12,6 +13,7 @@ import {
   EuiModalFooter,
   EuiModalHeader,
   EuiModalHeaderTitle,
+  EuiSelect,
   EuiSpacer,
   EuiText,
 } from '@elastic/eui';
@@ -20,6 +22,23 @@ import type { CoreStart } from '@kbn/core/public';
 import { API } from '../../common/api/paths';
 import { StepList } from './step_list';
 import type { ThawResult } from '../../server/actions/thaw';
+
+/**
+ * Mirrors the server-side defaults / bounds in
+ * `server/actions/thaw.ts`. Kept local instead of imported so the
+ * browser bundle doesn't pull in the server module.
+ */
+const DEFAULT_RESTORE_DAYS = 7;
+const MIN_RESTORE_DAYS = 1;
+const MAX_RESTORE_DAYS = 30;
+type RetrievalTier = 'Standard' | 'Expedited' | 'Bulk';
+const DEFAULT_RETRIEVAL_TIER: RetrievalTier = 'Standard';
+
+const TIER_OPTIONS: Array<{ value: RetrievalTier; text: string }> = [
+  { value: 'Standard', text: 'Standard (3–5 hr, $)' },
+  { value: 'Expedited', text: 'Expedited (1–5 min, $$$)' },
+  { value: 'Bulk', text: 'Bulk (5–12 hr, $)' },
+];
 
 interface ThawModalProps {
   http: CoreStart['http'];
@@ -63,21 +82,31 @@ export function ThawModal({
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [restoreDays, setRestoreDays] = useState<number>(DEFAULT_RESTORE_DAYS);
+  const [retrievalTier, setRetrievalTier] = useState<RetrievalTier>(
+    DEFAULT_RETRIEVAL_TIER
+  );
   const [preview, setPreview] = useState<ThawResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
 
   const rangeValid =
     startDate !== '' && endDate !== '' && startDate <= endDate;
+  const restoreDaysValid =
+    Number.isInteger(restoreDays) &&
+    restoreDays >= MIN_RESTORE_DAYS &&
+    restoreDays <= MAX_RESTORE_DAYS;
 
   const buildBody = useCallback(
     (dry: boolean) =>
       JSON.stringify({
         start_date: toIso(startDate, 'start'),
         end_date: toIso(endDate, 'end'),
+        restore_days: restoreDays,
+        retrieval_tier: retrievalTier,
         dry_run: dry,
       }),
-    [startDate, endDate]
+    [startDate, endDate, restoreDays, retrievalTier]
   );
 
   const doPreview = useCallback(async () => {
@@ -132,9 +161,9 @@ export function ThawModal({
         <EuiText size="s" color="subdued">
           <p>
             Restores snapshot data from Glacier storage so that it can be re-mounted as
-            searchable snapshots. Pick a date range; deepfreeze will find every repository whose
-            data overlaps the range, restore each object (default lifetime: 7 days, Standard
-            retrieval tier), and create a thaw request you can monitor.
+            searchable snapshots. Pick a date range and a restore window; deepfreeze will find
+            every repository whose data overlaps the range, issue an S3 restore for each
+            object, and create a thaw request you can monitor.
           </p>
         </EuiText>
         <EuiSpacer size="m" />
@@ -166,6 +195,36 @@ export function ThawModal({
               min={startDate || undefined}
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
+              fullWidth
+            />
+          </EuiFormRow>
+          <EuiFormRow
+            label="Restore window (days)"
+            helpText={`How long S3 keeps the restored copy available. ${MIN_RESTORE_DAYS}–${MAX_RESTORE_DAYS}. Sets the repository's expires_at.`}
+            isInvalid={!restoreDaysValid}
+            error={
+              !restoreDaysValid
+                ? `Must be an integer between ${MIN_RESTORE_DAYS} and ${MAX_RESTORE_DAYS}.`
+                : undefined
+            }
+          >
+            <EuiFieldNumber
+              min={MIN_RESTORE_DAYS}
+              max={MAX_RESTORE_DAYS}
+              step={1}
+              value={Number.isFinite(restoreDays) ? restoreDays : ''}
+              onChange={(e) => setRestoreDays(Number(e.target.value))}
+              fullWidth
+            />
+          </EuiFormRow>
+          <EuiFormRow
+            label="Retrieval tier"
+            helpText="Latency vs cost tradeoff for the Glacier restore."
+          >
+            <EuiSelect
+              options={TIER_OPTIONS}
+              value={retrievalTier}
+              onChange={(e) => setRetrievalTier(e.target.value as RetrievalTier)}
               fullWidth
             />
           </EuiFormRow>
@@ -216,7 +275,7 @@ export function ThawModal({
           onClick={doPreview}
           iconType="inspect"
           isLoading={running}
-          isDisabled={!rangeValid}
+          isDisabled={!rangeValid || !restoreDaysValid}
         >
           Preview
         </EuiButton>
@@ -231,6 +290,7 @@ export function ThawModal({
           isDisabled={
             running ||
             !rangeValid ||
+            !restoreDaysValid ||
             (preview !== null && preview.repos.length === 0)
           }
         >
