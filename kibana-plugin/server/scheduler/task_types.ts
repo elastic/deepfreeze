@@ -53,6 +53,7 @@ import {
   storageClientFactory,
   type AwsStorageClientOptions,
 } from '../storage/factory';
+import type { StorageClient } from '../storage/types';
 
 /** Canonical task-type identifiers used both at register and schedule time. */
 export const TASK_TYPES = {
@@ -168,6 +169,25 @@ export function registerDeepfreezeTaskTypes(
           return runWrapper(TASK_TYPES.rotate, logger, async () => {
             const client = await getInternalEsClient();
             const params = (taskInstance.params ?? {}) as RotateConfig;
+            // Build the StorageClient best-effort. If construction fails
+            // (no creds, unsupported provider, etc.) rotate still runs;
+            // the refreeze step is silently skipped and bucket-level S3
+            // lifecycle policies are assumed to handle archival.
+            let storage: StorageClient | undefined;
+            try {
+              const settings = await getSettings(client);
+              if (settings) {
+                storage = await storageClientFactory(
+                  settings.provider,
+                  storageOptions?.aws ?? {}
+                );
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              logger.debug(
+                `[deepfreeze:rotate] storage client unavailable; skipping refreeze step (${msg})`
+              );
+            }
             const audit = makeAudit(client);
             await audit.track(
               {
@@ -177,7 +197,7 @@ export function registerDeepfreezeTaskTypes(
                 user: 'scheduler',
               },
               async (tracker) => {
-                const out = await runRotate(client, params, { log });
+                const out = await runRotate(client, params, { log, storage });
                 for (const step of out.steps) {
                   tracker.addResult({
                     type: step.type,

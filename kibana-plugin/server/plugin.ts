@@ -128,6 +128,7 @@ export class DeepfreezePlugin
       logger: this.logger,
       version: this.version,
       getCurrentUser,
+      storageOptions,
     });
     registerCleanupRoute({
       router,

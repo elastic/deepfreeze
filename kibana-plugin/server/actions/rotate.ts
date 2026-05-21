@@ -65,6 +65,7 @@ import {
   updateRepositoryDateRange,
   type DateRangeEsClient,
 } from '../repositories/repository_date_range';
+import type { StorageClient } from '../storage/types';
 
 /** Full ES surface required by `runRotate`. */
 export type RotateActionEsClient = SettingsRepoWriteEsClient &
@@ -82,6 +83,13 @@ export type RotateActionEsClient = SettingsRepoWriteEsClient &
  */
 export const DEFAULT_KEEP = 6;
 
+/**
+ * Default S3 storage class for objects in repos that fall out of the
+ * `keep` window. Matches `push_to_glacier`'s default in the Python port
+ * (`packages/deepfreeze-core/deepfreeze_core/utilities.py`).
+ */
+export const DEFAULT_ARCHIVE_STORAGE_CLASS = 'GLACIER';
+
 export interface RotateConfig {
   /** Number of newest active repositories to keep mounted. Defaults to 6. */
   keep?: number;
@@ -93,6 +101,23 @@ export interface RotateConfig {
 
 export interface RunRotateOptions {
   log?: { debug: (m: string) => void; warn: (m: string) => void };
+  /**
+   * Optional storage client used to transition each archived repo's
+   * objects to a cheap-archive tier before the repo is unmounted from
+   * ES. Mirrors `push_to_glacier` in the Python port.
+   *
+   * When omitted (or when sampling a repo fails), the unmount still
+   * happens — the doc still flips to `frozen` — but objects stay in
+   * their original storage class. Operators relying on bucket-level
+   * S3 lifecycle policies can leave this unset.
+   */
+  storage?: StorageClient;
+  /**
+   * Target storage class for the refreeze step. Defaults to `GLACIER`.
+   * Pass `DEEP_ARCHIVE` for sites that want maximum cold storage at the
+   * cost of slower restores.
+   */
+  archive_storage_class?: string;
 }
 
 const NOOP_LOG = { debug: () => {}, warn: () => {} };
@@ -104,15 +129,18 @@ export interface RotateStepRecord {
     | 'repository_doc'
     | 'ilm_policy'
     | 'index_template'
-    | 'date_range';
+    | 'date_range'
+    | 'archive_objects';
   action:
     | 'would_create'
     | 'would_update'
     | 'would_archive'
+    | 'would_archive_objects'
     | 'created'
     | 'updated'
     | 'unchanged'
     | 'archived'
+    | 'archived_objects'
     | 'skipped';
   name?: string;
   detail?: string;
@@ -278,6 +306,12 @@ export async function runRotateDryRun(
   }
   for (const r of archived) {
     steps.push({ type: 'snapshot_repository', action: 'would_archive', name: r });
+    steps.push({
+      type: 'archive_objects',
+      action: 'would_archive_objects',
+      name: r,
+      detail: `transition objects under bucket/base_path → ${DEFAULT_ARCHIVE_STORAGE_CLASS}`,
+    });
   }
 
   return {
@@ -483,6 +517,9 @@ export async function runRotate(
   options: RunRotateOptions = {}
 ): Promise<RotateResult> {
   const log = options.log ?? NOOP_LOG;
+  const storage = options.storage;
+  const archiveStorageClass =
+    options.archive_storage_class ?? DEFAULT_ARCHIVE_STORAGE_CLASS;
   const started_at = new Date().toISOString();
 
   const settings = await loadInitializedSettings(client);
@@ -619,6 +656,69 @@ export async function runRotate(
         const msg = err instanceof Error ? err.message : String(err);
         log.warn(`Pre-unmount date-range capture failed for ${name}: ${msg}`);
       }
+    }
+
+    // Push the repo's objects to the archive storage class BEFORE
+    // unmounting. Mirrors `Rotate.do_action`'s call order in
+    // `packages/deepfreeze-core/deepfreeze_core/actions/rotate.py` —
+    // refreeze first, then unmount. A failed refreeze does NOT abort
+    // the unmount: the repo still leaves the keep window, and partial
+    // archival is logged for follow-up. If the operator runs rotate
+    // without a storage client wired (no AWS creds resolved at route
+    // setup time), the refreeze step is silently skipped and bucket-
+    // level S3 lifecycle policies are assumed to handle the archival.
+    if (storage && repoToArchive && repoToArchive.bucket) {
+      // Match Python's normalization: strip leading/trailing slashes,
+      // re-append exactly one trailing slash so the prefix matches
+      // every object under the repo's base_path and only that.
+      const trimmed = repoToArchive.base_path.replace(/^\/+|\/+$/g, '');
+      const prefix = trimmed ? `${trimmed}/` : '';
+      try {
+        const summary = await storage.refreeze(
+          repoToArchive.bucket,
+          prefix,
+          archiveStorageClass
+        );
+        const detail =
+          `${summary.refrozen} refrozen, ${summary.skipped} already ${archiveStorageClass}` +
+          (summary.errors > 0 ? `, ${summary.errors} errors` : '');
+        steps.push({
+          type: 'archive_objects',
+          action: 'archived_objects',
+          name,
+          detail,
+        });
+        if (summary.errors > 0) {
+          log.warn(
+            `Refreeze for ${name} completed with ${summary.errors} per-object errors`
+          );
+          errors.push({
+            code: 'ACTION_FAILED',
+            message: `Refreeze for ${name} had ${summary.errors} per-object errors`,
+            severity: 'warning',
+            target: name,
+          });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.warn(`Refreeze for ${name} failed; proceeding with unmount: ${msg}`);
+        errors.push({
+          code: 'ACTION_FAILED',
+          message: `Refreeze for ${name} failed: ${msg}`,
+          severity: 'warning',
+          target: name,
+        });
+        steps.push({
+          type: 'archive_objects',
+          action: 'skipped',
+          name,
+          detail: msg,
+        });
+      }
+    } else if (!storage) {
+      log.debug(
+        `No storage client; skipping refreeze for ${name} — bucket-level S3 lifecycle policies must handle archival`
+      );
     }
 
     try {

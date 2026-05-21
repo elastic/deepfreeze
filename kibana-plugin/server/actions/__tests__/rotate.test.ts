@@ -635,6 +635,179 @@ describe('runRotate happy path', () => {
   });
 });
 
+describe('runRotate with storage (refreeze)', () => {
+  interface FakeStorage {
+    refreeze: jest.Mock;
+    listObjects: jest.Mock;
+    headObject: jest.Mock;
+    restoreObject: jest.Mock;
+    testConnection: jest.Mock;
+  }
+
+  function makeStorage(
+    overrides: { refreezeImpl?: jest.Mock } = {}
+  ): FakeStorage {
+    return {
+      refreeze:
+        overrides.refreezeImpl ??
+        jest.fn().mockResolvedValue({ refrozen: 5, skipped: 0, errors: 0 }),
+      listObjects: jest.fn().mockResolvedValue([]),
+      headObject: jest.fn(),
+      restoreObject: jest.fn().mockResolvedValue(undefined),
+      testConnection: jest.fn().mockResolvedValue(true),
+    };
+  }
+
+  it('calls refreeze for every archived repo before unmount, with normalized prefix and default GLACIER class', async () => {
+    const { client, trace } = makeClient({
+      settings: settings({ last_suffix: '000003' }),
+      repositoryDocs: [
+        repoDoc('deepfreeze-000001'),
+        repoDoc('deepfreeze-000002'),
+        repoDoc('deepfreeze-000003'),
+      ],
+    });
+    const storage = makeStorage();
+
+    await runRotate(client, { keep: 1 }, { storage });
+
+    expect(storage.refreeze).toHaveBeenCalledTimes(2);
+    // base_path is `deepfreeze/snapshots-000001` etc; the action appends `/`.
+    expect(storage.refreeze).toHaveBeenNthCalledWith(
+      1,
+      'my-bucket',
+      'deepfreeze/snapshots-000001/',
+      'GLACIER'
+    );
+    expect(storage.refreeze).toHaveBeenNthCalledWith(
+      2,
+      'my-bucket',
+      'deepfreeze/snapshots-000002/',
+      'GLACIER'
+    );
+    expect(trace.deleted_repos).toEqual([
+      'deepfreeze-000001',
+      'deepfreeze-000002',
+    ]);
+  });
+
+  it('uses the configured archive_storage_class when provided', async () => {
+    const { client } = makeClient({
+      settings: settings({ last_suffix: '000002' }),
+      repositoryDocs: [repoDoc('deepfreeze-000001'), repoDoc('deepfreeze-000002')],
+    });
+    const storage = makeStorage();
+
+    await runRotate(
+      client,
+      { keep: 1 },
+      { storage, archive_storage_class: 'DEEP_ARCHIVE' }
+    );
+
+    expect(storage.refreeze).toHaveBeenCalledWith(
+      'my-bucket',
+      'deepfreeze/snapshots-000001/',
+      'DEEP_ARCHIVE'
+    );
+  });
+
+  it('still unmounts when refreeze throws, and records the error', async () => {
+    const { client, trace } = makeClient({
+      settings: settings({ last_suffix: '000002' }),
+      repositoryDocs: [repoDoc('deepfreeze-000001'), repoDoc('deepfreeze-000002')],
+    });
+    const storage = makeStorage({
+      refreezeImpl: jest.fn().mockRejectedValue(new Error('cred-fail')),
+    });
+
+    const result = await runRotate(client, { keep: 1 }, { storage });
+
+    expect(trace.deleted_repos).toEqual(['deepfreeze-000001']);
+    expect(result.archived).toEqual(['deepfreeze-000001']);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'ACTION_FAILED',
+          target: 'deepfreeze-000001',
+          message: expect.stringMatching(/Refreeze.*cred-fail/),
+        }),
+      ])
+    );
+    // The repo doc still flipped to frozen.
+    const frozen = trace.index_calls
+      .map((c) => c.document as Record<string, unknown>)
+      .filter((d) => d.doctype === 'repository' && d.thaw_state === 'frozen');
+    expect(frozen.map((d) => d.name)).toEqual(['deepfreeze-000001']);
+  });
+
+  it('records refreeze partial-failure summary on errors[]', async () => {
+    const { client } = makeClient({
+      settings: settings({ last_suffix: '000002' }),
+      repositoryDocs: [repoDoc('deepfreeze-000001'), repoDoc('deepfreeze-000002')],
+    });
+    const storage = makeStorage({
+      refreezeImpl: jest
+        .fn()
+        .mockResolvedValue({ refrozen: 8, skipped: 0, errors: 2 }),
+    });
+
+    const result = await runRotate(client, { keep: 1 }, { storage });
+
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          target: 'deepfreeze-000001',
+          message: expect.stringMatching(/2 per-object errors/),
+        }),
+      ])
+    );
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'archive_objects',
+          action: 'archived_objects',
+          name: 'deepfreeze-000001',
+          detail: expect.stringMatching(/8 refrozen.*2 errors/),
+        }),
+      ])
+    );
+  });
+
+  it('skips refreeze entirely when no storage client is passed (rotate still works)', async () => {
+    const { client, trace } = makeClient({
+      settings: settings({ last_suffix: '000002' }),
+      repositoryDocs: [repoDoc('deepfreeze-000001'), repoDoc('deepfreeze-000002')],
+    });
+
+    const result = await runRotate(client, { keep: 1 });
+
+    expect(result.archived).toEqual(['deepfreeze-000001']);
+    expect(trace.deleted_repos).toEqual(['deepfreeze-000001']);
+    expect(result.steps.filter((s) => s.type === 'archive_objects')).toEqual([]);
+  });
+
+  it('dry-run emits a would_archive_objects step per archived candidate', async () => {
+    const { client } = makeClient({
+      settings: settings({ last_suffix: '000003' }),
+      repositoryDocs: [
+        repoDoc('deepfreeze-000001'),
+        repoDoc('deepfreeze-000002'),
+        repoDoc('deepfreeze-000003'),
+      ],
+    });
+
+    const result = await runRotateDryRun(client, { keep: 1 });
+
+    const archiveSteps = result.steps.filter(
+      (s) => s.type === 'archive_objects' && s.action === 'would_archive_objects'
+    );
+    expect(archiveSteps.map((s) => s.name).sort()).toEqual([
+      'deepfreeze-000001',
+      'deepfreeze-000002',
+    ]);
+  });
+});
+
 describe('runRotate partial failures', () => {
   it('records archive unmount failures as warnings and reports them in skipped[]', async () => {
     const { client } = makeClient({

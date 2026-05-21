@@ -29,6 +29,7 @@ import {
   storageClientFactory,
   type AwsStorageClientOptions,
 } from '../storage/factory';
+import type { StorageClient } from '../storage/types';
 import { bootstrapTaskId, resolveTaskTypeForAction } from './bootstrap';
 
 /**
@@ -96,7 +97,26 @@ export async function runActionForSchedule(
   }
 ): Promise<unknown> {
   if (job.action === 'rotate') {
-    return runRotate(client, (job.params ?? {}) as RotateConfig, { log: opts.log });
+    // Best-effort StorageClient: refreeze step is silently skipped if
+    // creds aren't resolvable. Matches the scheduled task runner's
+    // behaviour in task_types.ts.
+    let storage: StorageClient | undefined;
+    try {
+      const settings = await getSettings(client);
+      if (settings) {
+        storage = await storageClientFactory(
+          settings.provider,
+          opts.storageOptions?.aws ?? {}
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      opts.log.debug(`Rotate: storage client unavailable; skipping refreeze (${msg})`);
+    }
+    return runRotate(client, (job.params ?? {}) as RotateConfig, {
+      log: opts.log,
+      storage,
+    });
   }
   if (job.action === 'cleanup') {
     return runCleanup(client, {}, { log: opts.log });

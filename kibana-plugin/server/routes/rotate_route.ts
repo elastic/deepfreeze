@@ -11,7 +11,17 @@ import {
   type RotateConfig,
 } from '../actions/rotate';
 import { ActionError, MissingIndexError, MissingSettingsError } from '../errors';
+import { getSettings } from '../repositories/settings_repo';
+import {
+  storageClientFactory,
+  type AwsStorageClientOptions,
+} from '../storage/factory';
+import type { StorageClient } from '../storage/types';
 import type { GetCurrentUser } from './setup_route';
+
+export interface RotateRouteStorageOptions {
+  aws?: AwsStorageClientOptions;
+}
 
 const rotateBodySchema = schema.object({
   keep: schema.maybe(schema.number({ min: 0, max: 1000 })),
@@ -25,6 +35,14 @@ export interface RegisterRotateRouteOptions {
   logger: Logger;
   version: string;
   getCurrentUser: GetCurrentUser;
+  /**
+   * Storage options used to construct a `StorageClient` for the
+   * refreeze step. When omitted (or when client construction fails),
+   * `runRotate` proceeds without a storage client — objects stay in
+   * their original storage class and operators rely on bucket-level
+   * S3 lifecycle policies.
+   */
+  storageOptions?: RotateRouteStorageOptions;
 }
 
 /**
@@ -39,6 +57,7 @@ export function registerRotateRoute({
   logger,
   version,
   getCurrentUser,
+  storageOptions,
 }: RegisterRotateRouteOptions): void {
   router.post(
     {
@@ -70,11 +89,14 @@ export function registerRotateRoute({
           log: { debug: (m) => logger.debug(m), warn: (m) => logger.warn(m) },
         });
 
+        const storage = await tryBuildStorage(esClient, storageOptions, logger);
+
         const result = await audit.track(
           { action: 'rotate', dryRun: false, parameters: { ...config }, user },
           async (tracker) => {
             const out = await runRotate(esClient, config, {
               log: { debug: (m) => logger.debug(m), warn: (m) => logger.warn(m) },
+              storage,
             });
             for (const step of out.steps) {
               tracker.addResult({
@@ -111,4 +133,31 @@ export function registerRotateRoute({
       }
     }
   );
+}
+
+/**
+ * Build a StorageClient for the refreeze step, swallowing all errors —
+ * rotate must keep working when storage is unconfigured, the provider
+ * isn't supported yet, or the SDK throws. We return `undefined` in
+ * those cases and `runRotate` skips the refreeze step accordingly.
+ *
+ * Same shape as status_route's `tryBuildStorage`; kept inline here so
+ * the logger/log context stays with the rotate route's debug output.
+ */
+async function tryBuildStorage(
+  esClient: RotateActionEsClient,
+  storageOptions: RotateRouteStorageOptions | undefined,
+  logger: Logger
+): Promise<StorageClient | undefined> {
+  try {
+    const settings = await getSettings(esClient);
+    if (!settings) return undefined;
+    return await storageClientFactory(settings.provider, storageOptions?.aws ?? {});
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.debug(
+      `Rotate: storage client unavailable; skipping refreeze step (${msg})`
+    );
+    return undefined;
+  }
 }
