@@ -192,11 +192,11 @@ describe('resolveNaming', () => {
 // -- getSetupOptions -------------------------------------------------------
 
 describe('getSetupOptions', () => {
-  it('returns buckets, ILM policy names, and index template names', async () => {
+  it('returns buckets, ILM policy names, index template names, and s3 client names', async () => {
     const { client } = makeClient({
       existingSnapshotRepos: {
         a: { type: 's3', settings: { bucket: 'b1', base_path: 'p1' } },
-        b: { type: 's3', settings: { bucket: 'b2', base_path: 'p2' } },
+        b: { type: 's3', settings: { bucket: 'b2', base_path: 'p2', client: 'archive' } },
       },
       existingIlmPolicies: {
         'zeta-policy': { phases: {} },
@@ -213,6 +213,7 @@ describe('getSetupOptions', () => {
       buckets_in_use: ['b1', 'b2'],
       ilm_policy_names: ['alpha-policy', 'zeta-policy'],
       index_template_names: ['logs-template', 'metrics-template'],
+      s3_client_names: ['archive', 'default'],
     });
   });
 
@@ -222,6 +223,7 @@ describe('getSetupOptions', () => {
       buckets_in_use: [],
       ilm_policy_names: [],
       index_template_names: [],
+      s3_client_names: [],
     });
   });
 

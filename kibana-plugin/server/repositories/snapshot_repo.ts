@@ -24,6 +24,14 @@ export interface SnapshotRepositoryConfig {
   bucket: string;
   /** Path within the bucket. Empty when the repo writes to the bucket root. */
   base_path: string;
+  /**
+   * Client name configured on the repo (`settings.client`). For s3 repos
+   * this maps to the keystore prefix `s3.client.<name>.{access_key,secret_key}`
+   * on the ES side. Defaults to `"default"` when the repo settings omit it
+   * (matching ES behavior). Empty string for non-s3 repos — Azure/GCS use
+   * different client-naming conventions we don't yet surface.
+   */
+  client: string;
 }
 
 /**
@@ -62,7 +70,11 @@ export async function getSnapshotRepositoryConfigs(
     // s3 / gcs use `bucket`; azure uses `container`.
     const bucket = String(settings.bucket ?? settings.container ?? '');
     const base_path = String(settings.base_path ?? '');
-    return { name, type, bucket, base_path };
+    // ES defaults the S3 repo's client name to "default" when omitted.
+    // For non-s3 repos we leave `client` blank — the field exists for the
+    // setup wizard's keystore-mirroring callout, which is AWS-only today.
+    const client = type === 's3' ? String(settings.client ?? 'default') : '';
+    return { name, type, bucket, base_path, client };
   });
 }
 
@@ -76,6 +88,22 @@ export async function getBucketsInUse(client: SnapshotRepoEsClient): Promise<str
   const seen = new Set<string>();
   for (const cfg of configs) {
     if (cfg.bucket) seen.add(cfg.bucket);
+  }
+  return Array.from(seen).sort();
+}
+
+/**
+ * Return the unique set of S3 client names referenced by any existing s3
+ * snapshot repository in the cluster. Non-s3 repos are dropped. Sorted
+ * for stable UI display. Used by the setup wizard to render keystore-
+ * mirroring guidance (`s3.client.<name>.access_key` on the ES side maps
+ * to `xpack.deepfreeze.aws.accessKeyId` on the Kibana side).
+ */
+export async function getS3ClientNamesInUse(client: SnapshotRepoEsClient): Promise<string[]> {
+  const configs = await getSnapshotRepositoryConfigs(client);
+  const seen = new Set<string>();
+  for (const cfg of configs) {
+    if (cfg.type === 's3' && cfg.client) seen.add(cfg.client);
   }
   return Array.from(seen).sort();
 }

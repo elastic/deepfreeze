@@ -2,6 +2,7 @@ import {
   createSnapshotRepository,
   getBucketsInUse,
   getReposMatchingPrefix,
+  getS3ClientNamesInUse,
   getSnapshotRepositoryConfigs,
   isBucketBasePathInUse,
   type SnapshotRepoEsClient,
@@ -38,12 +39,55 @@ describe('getSnapshotRepositoryConfigs', () => {
     const cfgs = await getSnapshotRepositoryConfigs(client);
     expect(cfgs).toEqual(
       expect.arrayContaining([
-        { name: 'df-001', type: 's3', bucket: 'b1', base_path: 'snapshots-1' },
-        { name: 'df-002', type: 'gcs', bucket: 'b2', base_path: 'snapshots-2' },
-        { name: 'df-003', type: 'azure', bucket: 'b3', base_path: 'snapshots-3' },
-        { name: 'local-fs', type: 'fs', bucket: '', base_path: '' },
+        { name: 'df-001', type: 's3', bucket: 'b1', base_path: 'snapshots-1', client: 'default' },
+        { name: 'df-002', type: 'gcs', bucket: 'b2', base_path: 'snapshots-2', client: '' },
+        { name: 'df-003', type: 'azure', bucket: 'b3', base_path: 'snapshots-3', client: '' },
+        { name: 'local-fs', type: 'fs', bucket: '', base_path: '', client: '' },
       ])
     );
+  });
+
+  it("uses the explicit s3 settings.client when set, defaulting to 'default'", async () => {
+    const client = makeClient({
+      repos: {
+        'df-explicit': {
+          type: 's3',
+          settings: { bucket: 'b1', base_path: 'snapshots', client: 'archive' },
+        },
+        'df-implicit': { type: 's3', settings: { bucket: 'b2', base_path: 'snapshots' } },
+      },
+    });
+
+    const cfgs = await getSnapshotRepositoryConfigs(client);
+    const byName = Object.fromEntries(cfgs.map((c) => [c.name, c]));
+    expect(byName['df-explicit'].client).toBe('archive');
+    expect(byName['df-implicit'].client).toBe('default');
+  });
+});
+
+describe('getS3ClientNamesInUse', () => {
+  it('returns deduplicated sorted s3 client names and ignores non-s3 repos', async () => {
+    const client = makeClient({
+      repos: {
+        a: { type: 's3', settings: { bucket: 'b1', base_path: '1', client: 'default' } },
+        b: { type: 's3', settings: { bucket: 'b2', base_path: '2', client: 'archive' } },
+        c: { type: 's3', settings: { bucket: 'b3', base_path: '3', client: 'default' } },
+        d: { type: 'gcs', settings: { bucket: 'b4', base_path: '4' } },
+        e: { type: 'fs', settings: {} },
+      },
+    });
+
+    expect(await getS3ClientNamesInUse(client)).toEqual(['archive', 'default']);
+  });
+
+  it('returns an empty array when no s3 repos exist', async () => {
+    const client = makeClient({
+      repos: {
+        a: { type: 'gcs', settings: { bucket: 'b1', base_path: '1' } },
+      },
+    });
+
+    expect(await getS3ClientNamesInUse(client)).toEqual([]);
   });
 });
 

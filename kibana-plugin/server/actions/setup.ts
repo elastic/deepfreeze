@@ -55,6 +55,7 @@ import {
   createSnapshotRepository,
   getBucketsInUse,
   getReposMatchingPrefix,
+  getS3ClientNamesInUse,
   isBucketBasePathInUse,
   type SnapshotRepoEsClient,
 } from '../repositories/snapshot_repo';
@@ -148,6 +149,14 @@ export interface SetupOptions {
   buckets_in_use: string[];
   ilm_policy_names: string[];
   index_template_names: string[];
+  /**
+   * Unique `client` names referenced by existing s3 snapshot repos in
+   * the cluster (ES defaults this to `"default"` when unset). Empty when
+   * no s3 repos exist. The wizard uses this to surface the exact
+   * `s3.client.<name>.{access_key,secret_key}` → keystore mirroring
+   * the customer needs to do for Kibana-side AWS calls.
+   */
+  s3_client_names: string[];
 }
 
 /** Helpers exposed for the wizard's pre-flight dropdowns. */
@@ -157,7 +166,8 @@ export async function getSetupOptions(
   const buckets_in_use = await getBucketsInUse(client);
   const ilm_policy_names = await getAllIlmPolicyNames(client);
   const index_template_names = await getAllIndexTemplateNames(client);
-  return { buckets_in_use, ilm_policy_names, index_template_names };
+  const s3_client_names = await getS3ClientNamesInUse(client);
+  return { buckets_in_use, ilm_policy_names, index_template_names, s3_client_names };
 }
 
 /** Compute the suffix used in repo/base_path naming for this setup. */
