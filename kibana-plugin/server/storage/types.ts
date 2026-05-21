@@ -7,10 +7,11 @@
  *
  * Mirrors the abstract `S3Client` interface in
  *   packages/deepfreeze-core/deepfreeze_core/s3client.py
- * pared down to what Thaw actually needs (object listing, head check,
- * restore initiation, connection probe). The broader bucket-lifecycle
- * surface (create_bucket / delete_bucket / put_object / copy_object)
- * stays in Python until we have a concrete use case for it server-side.
+ * pared down to what Thaw + Rotate actually need: object listing, head
+ * check, restore initiation, archive-tier transition, connection probe.
+ * The broader bucket-lifecycle surface (create_bucket / delete_bucket /
+ * put_object) stays in Python until we have a concrete use case for it
+ * server-side.
  */
 
 import type { Provider } from '../../common/constants';
@@ -63,6 +64,21 @@ export interface RestoreOptions {
 }
 
 /**
+ * Per-object outcome counts returned by `refreeze`. Mirrors the
+ * summary that `utilities.push_to_glacier` logs in the Python port.
+ *
+ * `refrozen` is the count of objects that were transitioned to the
+ * target storage class. `skipped` is the count already in the target
+ * class. `errors` is the count of per-object failures (the operation
+ * continues past them; only catastrophic listing failures throw).
+ */
+export interface RefreezeResult {
+  refrozen: number;
+  skipped: number;
+  errors: number;
+}
+
+/**
  * Common cloud-storage surface used by the deepfreeze action layer.
  *
  * Each method targets exactly the work Thaw / RepairMetadata need;
@@ -91,6 +107,18 @@ export interface StorageClient {
    * disambiguate.
    */
   restoreObject(bucket: string, key: string, opts: RestoreOptions): Promise<void>;
+
+  /**
+   * Transition every object under `prefix` in `bucket` to
+   * `storage_class`. Objects already in the target class are skipped.
+   * Per-object failures are counted and the operation continues —
+   * implementations only throw on catastrophic listing failures.
+   *
+   * AWS uses `CopyObject` with the source equal to the destination.
+   * Provider equivalents (Azure tier change, GCS storage-class update)
+   * land here when those adapters arrive.
+   */
+  refreeze(bucket: string, prefix: string, storage_class: string): Promise<RefreezeResult>;
 }
 
 /** Provider tag → adapter implementation. */

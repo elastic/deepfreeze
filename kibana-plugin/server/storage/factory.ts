@@ -367,6 +367,34 @@ function buildAwsS3Api(opts: AwsStorageClientOptions): S3ClientApi {
       }
       return undefined;
     },
+
+    copyObject: async (params) => {
+      // S3 CopyObject: PUT /<bucket>/<key> with `x-amz-copy-source`
+      // pointing at the same object and `x-amz-storage-class` set to
+      // the target tier. `MetadataDirective: COPY` (the default)
+      // preserves user-defined metadata. Body is empty — the source
+      // object is read by S3, not posted.
+      const resp = await signedRequest(opts, {
+        method: 'PUT',
+        bucket: params.Bucket,
+        key: params.Key,
+        headers: {
+          // CopySource is bucket+key; aws4 signs the header verbatim.
+          // `params.CopySource` already includes the leading `/<bucket>/`.
+          'x-amz-copy-source': params.CopySource,
+          'x-amz-storage-class': params.StorageClass,
+          'x-amz-metadata-directive': 'COPY',
+          'Content-Length': '0',
+        },
+      });
+
+      if (resp.status >= 400) {
+        throw new Error(
+          `S3 CopyObject ${params.Bucket}/${params.Key} failed with status ${resp.status}: ${String(resp.data)}`
+        );
+      }
+      return undefined;
+    },
   };
 }
 

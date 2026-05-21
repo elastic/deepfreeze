@@ -11,6 +11,8 @@ interface FakeOpts {
   heads?: Record<string, { StorageClass?: string; Restore?: string }>;
   /** Make headBucket throw. */
   failHeadBucket?: boolean;
+  /** Set of keys for which copyObject should throw (used by refreeze tests). */
+  failCopyKeys?: Set<string>;
 }
 
 interface Trace {
@@ -21,6 +23,12 @@ interface Trace {
     Key: string;
     RestoreRequest: { Days: number; GlacierJobParameters?: { Tier: string } };
   }>;
+  copy_calls: Array<{
+    Bucket: string;
+    Key: string;
+    CopySource: string;
+    StorageClass: string;
+  }>;
   head_bucket_calls: string[];
 }
 
@@ -29,6 +37,7 @@ function makeApi(opts: FakeOpts = {}): { api: S3ClientApi; trace: Trace } {
     list_calls: [],
     head_calls: [],
     restore_calls: [],
+    copy_calls: [],
     head_bucket_calls: [],
   };
 
@@ -46,6 +55,13 @@ function makeApi(opts: FakeOpts = {}): { api: S3ClientApi; trace: Trace } {
     },
     restoreObject: async (params) => {
       trace.restore_calls.push(params);
+      return {};
+    },
+    copyObject: async (params) => {
+      trace.copy_calls.push(params);
+      if (opts.failCopyKeys?.has(params.Key)) {
+        throw new Error(`copy failed for ${params.Key}`);
+      }
       return {};
     },
     headBucket: async ({ Bucket }) => {
@@ -243,5 +259,128 @@ describe('AwsStorageClient.restoreObject', () => {
     const client = new AwsStorageClient(api);
     await client.restoreObject('b', 'o', { days: 7 });
     expect(trace.restore_calls).toEqual([]);
+  });
+});
+
+describe('AwsStorageClient.refreeze', () => {
+  it('copies every object below the target tier and skips those already in it', async () => {
+    const { api, trace } = makeApi({
+      listPages: [
+        {
+          Contents: [
+            { Key: 'snapshots-1/a', StorageClass: 'STANDARD' },
+            { Key: 'snapshots-1/b', StorageClass: 'STANDARD_IA' },
+            { Key: 'snapshots-1/c', StorageClass: 'GLACIER' },
+            { Key: 'snapshots-1/d' }, // omitted StorageClass = STANDARD
+          ],
+        },
+      ],
+    });
+    const client = new AwsStorageClient(api);
+
+    const result = await client.refreeze('my-bucket', 'snapshots-1/', 'GLACIER');
+
+    expect(result).toEqual({ refrozen: 3, skipped: 1, errors: 0 });
+    expect(trace.copy_calls).toEqual([
+      {
+        Bucket: 'my-bucket',
+        Key: 'snapshots-1/a',
+        CopySource: '/my-bucket/snapshots-1/a',
+        StorageClass: 'GLACIER',
+      },
+      {
+        Bucket: 'my-bucket',
+        Key: 'snapshots-1/b',
+        CopySource: '/my-bucket/snapshots-1/b',
+        StorageClass: 'GLACIER',
+      },
+      {
+        Bucket: 'my-bucket',
+        Key: 'snapshots-1/d',
+        CopySource: '/my-bucket/snapshots-1/d',
+        StorageClass: 'GLACIER',
+      },
+    ]);
+  });
+
+  it('walks paginated listings', async () => {
+    const { api, trace } = makeApi({
+      listPages: [
+        {
+          Contents: [{ Key: 'snapshots-1/a', StorageClass: 'STANDARD' }],
+          IsTruncated: true,
+          NextContinuationToken: 'tok-1',
+        },
+        {
+          Contents: [{ Key: 'snapshots-1/b', StorageClass: 'STANDARD' }],
+          IsTruncated: false,
+        },
+      ],
+    });
+    const client = new AwsStorageClient(api);
+
+    const result = await client.refreeze('my-bucket', 'snapshots-1/', 'GLACIER');
+
+    expect(result).toEqual({ refrozen: 2, skipped: 0, errors: 0 });
+    expect(trace.list_calls).toEqual([
+      { Bucket: 'my-bucket', Prefix: 'snapshots-1/', ContinuationToken: undefined },
+      { Bucket: 'my-bucket', Prefix: 'snapshots-1/', ContinuationToken: 'tok-1' },
+    ]);
+  });
+
+  it('counts per-object copy failures and keeps going', async () => {
+    const { api, trace } = makeApi({
+      listPages: [
+        {
+          Contents: [
+            { Key: 'snapshots-1/a', StorageClass: 'STANDARD' },
+            { Key: 'snapshots-1/b', StorageClass: 'STANDARD' },
+            { Key: 'snapshots-1/c', StorageClass: 'STANDARD' },
+          ],
+        },
+      ],
+      failCopyKeys: new Set(['snapshots-1/b']),
+    });
+    const client = new AwsStorageClient(api);
+
+    const result = await client.refreeze('my-bucket', 'snapshots-1/', 'GLACIER');
+
+    expect(result).toEqual({ refrozen: 2, skipped: 0, errors: 1 });
+    // Even after the failure on `b`, `c` still gets attempted.
+    expect(trace.copy_calls.map((c) => c.Key)).toEqual([
+      'snapshots-1/a',
+      'snapshots-1/b',
+      'snapshots-1/c',
+    ]);
+  });
+
+  it('skips objects without a Key (defensive against malformed pages)', async () => {
+    const { api, trace } = makeApi({
+      listPages: [
+        {
+          Contents: [
+            { Key: 'snapshots-1/a', StorageClass: 'STANDARD' },
+            // Bogus entry with no Key — should be silently ignored.
+            { StorageClass: 'STANDARD' },
+          ],
+        },
+      ],
+    });
+    const client = new AwsStorageClient(api);
+
+    const result = await client.refreeze('my-bucket', 'snapshots-1/', 'GLACIER');
+
+    expect(result).toEqual({ refrozen: 1, skipped: 0, errors: 0 });
+    expect(trace.copy_calls).toHaveLength(1);
+  });
+
+  it('returns zero counts on an empty prefix', async () => {
+    const { api, trace } = makeApi({ listPages: [{ Contents: [] }] });
+    const client = new AwsStorageClient(api);
+
+    const result = await client.refreeze('my-bucket', 'snapshots-1/', 'GLACIER');
+
+    expect(result).toEqual({ refrozen: 0, skipped: 0, errors: 0 });
+    expect(trace.copy_calls).toEqual([]);
   });
 });

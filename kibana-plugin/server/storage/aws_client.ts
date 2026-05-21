@@ -12,6 +12,7 @@
 
 import {
   type ObjectRestoreState,
+  type RefreezeResult,
   type RestoreOptions,
   type StorageClient,
   type StorageObject,
@@ -54,6 +55,19 @@ export interface S3ClientApi {
       Days: number;
       GlacierJobParameters?: { Tier: string };
     };
+  }): Promise<unknown>;
+
+  /**
+   * Copy an object in place, changing its storage class. Used by
+   * `refreeze` to transition objects to GLACIER / DEEP_ARCHIVE.
+   * S3 requires `CopySource` even when source and destination are
+   * the same — that's how the API expresses "rewrite this object".
+   */
+  copyObject(params: {
+    Bucket: string;
+    Key: string;
+    CopySource: string;
+    StorageClass: string;
   }): Promise<unknown>;
 
   headBucket(params: { Bucket: string }): Promise<unknown>;
@@ -166,5 +180,59 @@ export class AwsStorageClient implements StorageClient {
         GlacierJobParameters: { Tier: opts.tier ?? 'Standard' },
       },
     });
+  }
+
+  async refreeze(
+    bucket: string,
+    prefix: string,
+    storage_class: string
+  ): Promise<RefreezeResult> {
+    let refrozen = 0;
+    let skipped = 0;
+    let errors = 0;
+    let token: string | undefined;
+
+    // Stream through pages so a repo with millions of objects doesn't
+    // buffer them all into memory. We don't reuse `listObjects` here
+    // because that materializes the full list before returning.
+    do {
+      const page = await this.s3.listObjectsV2({
+        Bucket: bucket,
+        Prefix: prefix,
+        ContinuationToken: token,
+      });
+
+      for (const obj of page.Contents ?? []) {
+        if (!obj.Key) continue;
+
+        // S3 reports STANDARD by omitting the field. Treat absent as
+        // STANDARD so the same-class skip still works.
+        const current = obj.StorageClass ?? 'STANDARD';
+        if (current === storage_class) {
+          skipped++;
+          continue;
+        }
+
+        try {
+          await this.s3.copyObject({
+            Bucket: bucket,
+            Key: obj.Key,
+            CopySource: `/${bucket}/${obj.Key}`,
+            StorageClass: storage_class,
+          });
+          refrozen++;
+        } catch {
+          // Per-object failure is non-fatal — match Python semantics.
+          // The caller logs the summary; individual error details are
+          // visible in the Kibana server log at debug level via the
+          // underlying axios/aws4 error path.
+          errors++;
+        }
+      }
+
+      token = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (token);
+
+    return { refrozen, skipped, errors };
   }
 }
