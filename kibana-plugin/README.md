@@ -13,40 +13,56 @@ once it reaches feature parity (see the migration plan).
 
 | Phase | Description | State |
 |---|---|---|
-| 0 | Foundation: scaffold, schemas, types, CI | **in progress** |
-| 1 | Read-only `Status` (Overview, Repos, Thaws, Activity) | not started |
-| 2 | `Setup` wizard | not started |
-| 3 | `Rotate`, `Cleanup`, `Refreeze` | not started |
-| 4 | `Thaw` + `RepairMetadata` (long-running ops) | not started |
-| 5 | Scheduler | not started |
+| 0 | Foundation: scaffold, schemas, types, CI | complete |
+| 1 | Read-only `Status` (Overview, Repos, Thaws, Activity) | complete |
+| 2 | `Setup` wizard | complete |
+| 3 | `Rotate`, `Cleanup`, `Refreeze` | complete |
+| 4 | `Thaw` + `RepairMetadata` (long-running ops) | complete |
+| 5 | Scheduler | complete |
 | 6 | Python server + CLI deprecated | not started |
-| 7 | Upstream submission | not started |
+| 7 | Upstream submission | **in progress** |
 
-The full plan lives in the Obsidian vault at
-`Notes/Projects/deepfreeze/kibana-plugin-migration-plan.md`.
+The full migration plan lives in the Obsidian vault at
+`Notes/Projects/deepfreeze/kibana-plugin-migration-plan.md`. AWS credential
+configuration is covered in [`../AWS_CREDENTIALS.md`](../AWS_CREDENTIALS.md).
 
 ## Layout
 
 ```
 kibana-plugin/
-├── kibana.jsonc        Plugin manifest (Kibana 9 v2 format)
-├── package.json        Node package descriptor
-├── tsconfig.json       TS config (extends Kibana base)
-├── README.md           ← you are here
-├── DEVELOPMENT.md      How to build / run / test
-├── common/             Shared between server and public
+├── kibana.jsonc          Plugin manifest (Kibana 9 v2 format)
+├── package.json          Node package descriptor
+├── tsconfig.json         TS config (extends Kibana base)
+├── README.md             ← you are here
+├── DEVELOPMENT.md        How to build / run / test
+├── common/               Shared between server and public
+│   ├── api/              HTTP path constants
 │   ├── constants.ts
-│   ├── schemas/        ES index mappings + doc shapes (storage contract)
-│   └── types/          API request/response shapes (HTTP contract)
-├── server/             Node entry point
-│   ├── index.ts
+│   ├── schemas/          ES index mappings + doc shapes (storage contract)
+│   └── types/            API request/response shapes (HTTP contract)
+├── server/               Node entry point
+│   ├── actions/          status, setup, rotate, cleanup, refreeze, thaw, repair_metadata, update_date_ranges
+│   ├── audit/            AuditLogger + tracker (all mutating actions tracked)
+│   ├── es/               Index bootstrap (status + audit index lifecycle)
+│   ├── errors.ts         Domain error types
+│   ├── repositories/     ES data-access helpers (one per doctype + ILM/template)
+│   ├── routes/           HTTP route handlers (one per action + scheduler diagnostics)
+│   ├── scheduler/        TaskManager registration, sync, bootstrap, schedules CRUD
+│   ├── storage/          Cloud-storage adapters (aws_client + factory; Azure/GCS TBD)
+│   ├── telemetry/        Opt-in usage collector
 │   ├── plugin.ts
 │   ├── config.ts
+│   ├── index.ts
 │   └── types.ts
-└── public/             Browser entry point
-    ├── index.ts
-    ├── plugin.ts
+└── public/               Browser entry point
+    ├── components/       Reusable UI bits (modals, refresh control, page states)
+    ├── hooks/            React hooks (use_status, etc.)
+    ├── pages/            overview, repositories, thaw_requests, activity, schedules, setup_wizard
+    ├── utils/            Date formatting + shared helpers
+    ├── app.tsx           Router + tab shell + breadcrumbs
     ├── application.tsx
+    ├── plugin.ts
+    ├── index.ts
     └── types.ts
 ```
 
