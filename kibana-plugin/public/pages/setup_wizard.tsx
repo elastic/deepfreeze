@@ -38,6 +38,7 @@ interface SetupOptionsResponse {
   buckets_in_use: string[];
   ilm_policy_names: string[];
   index_template_names: string[];
+  s3_client_names: string[];
 }
 
 const BASE_PATH_REQUIRED_PREFIX = 'deepfreeze/';
@@ -287,7 +288,11 @@ export function SetupWizard({ http, onComplete }: SetupWizardProps) {
             status: stepStatuses[2],
             children:
               stepIndex === 2 ? (
-                <Step3StorageDetails form={form} update={update} />
+                <Step3StorageDetails
+                  form={form}
+                  update={update}
+                  s3ClientNames={options?.s3_client_names ?? []}
+                />
               ) : null,
           },
           {
@@ -496,9 +501,11 @@ function Step2Naming({
 function Step3StorageDetails({
   form,
   update,
+  s3ClientNames,
 }: {
   form: FormState;
   update: <K extends keyof FormState>(k: K, v: FormState[K]) => void;
+  s3ClientNames: string[];
 }) {
   if (form.provider !== 'aws') {
     return (
@@ -530,7 +537,76 @@ function Step3StorageDetails({
           onChange={(e) => update('storage_class', e.target.value)}
         />
       </EuiFormRow>
+      <EuiSpacer size="m" />
+      <KeystoreGuidanceCallout s3ClientNames={s3ClientNames} />
     </EuiForm>
+  );
+}
+
+/**
+ * Informational callout reminding the user that deepfreeze's Kibana-side
+ * S3 calls (restore-on-thaw, tier sampling) need AWS credentials reachable
+ * by the Kibana process — separate from the credentials ES stores in its
+ * own keystore under `s3.client.<name>.{access_key,secret_key}`. We surface
+ * the client names ES reports so the customer knows which ES-keystore
+ * entries to mirror.
+ *
+ * Two install profiles, both covered:
+ *   - Self-managed: ambient AWS_* env vars, ~/.aws/credentials, or an
+ *     EC2/ECS instance role all work — no keystore needed.
+ *   - Elastic Cloud: no ambient sources; the Kibana keystore is the only
+ *     option, configurable via "Edit user settings" in the cloud console.
+ */
+function KeystoreGuidanceCallout({ s3ClientNames }: { s3ClientNames: string[] }) {
+  return (
+    <EuiCallOut
+      color="primary"
+      iconType="iInCircle"
+      size="s"
+      title="AWS credentials for Kibana-side S3 calls"
+    >
+      <EuiText size="s">
+        <p>
+          Deepfreeze restores archived snapshots and samples object tiers by calling S3 from the
+          Kibana process. ES stores its own snapshot-repo credentials under{' '}
+          <EuiCode>s3.client.&lt;name&gt;.access_key</EuiCode> and{' '}
+          <EuiCode>s3.client.&lt;name&gt;.secret_key</EuiCode> in the ES keystore, but Kibana
+          can&apos;t read those — it needs its own copy.
+        </p>
+        {s3ClientNames.length > 0 ? (
+          <p>
+            Detected ES S3 client name{s3ClientNames.length === 1 ? '' : 's'}:{' '}
+            {s3ClientNames.map((n, i) => (
+              <React.Fragment key={n}>
+                {i > 0 && ', '}
+                <EuiCode>{n}</EuiCode>
+              </React.Fragment>
+            ))}
+            . Mirror the credentials for{' '}
+            {s3ClientNames.length === 1 ? 'that client' : 'at least one of those clients'} into the
+            Kibana keystore on every Kibana node:
+          </p>
+        ) : (
+          <p>
+            On every Kibana node, add the same AWS access key + secret you intend to use for
+            deepfreeze snapshots to the Kibana keystore:
+          </p>
+        )}
+        <pre>
+          <code>
+            {`bin/kibana-keystore add xpack.deepfreeze.aws.accessKeyId\nbin/kibana-keystore add xpack.deepfreeze.aws.secretAccessKey`}
+          </code>
+        </pre>
+        <p>
+          Self-managed alternative: set <EuiCode>AWS_ACCESS_KEY_ID</EuiCode> /{' '}
+          <EuiCode>AWS_SECRET_ACCESS_KEY</EuiCode> on the Kibana process, configure{' '}
+          <EuiCode>~/.aws/credentials</EuiCode>, or attach an EC2/ECS instance role. The plugin
+          falls back to the AWS SDK&apos;s default credential chain when the keystore entries are
+          absent. (Elastic Cloud has none of these — use the keystore route there, via{' '}
+          <em>Edit user settings</em> in the cloud console.)
+        </p>
+      </EuiText>
+    </EuiCallOut>
   );
 }
 
