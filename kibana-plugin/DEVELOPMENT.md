@@ -215,6 +215,12 @@ bin/kibana-keystore add xpack.deepfreeze.aws.secretAccessKey
 bin/kibana-keystore add xpack.deepfreeze.aws.sessionToken
 ```
 
+The keystore is the recommended path. The plugin also accepts ambient
+credentials via the AWS SDK default chain (env vars, `~/.aws/credentials`,
+SSO, EC2 / ECS / EKS instance roles) when the keystore entries are
+absent — see [../AWS_CREDENTIALS.md](../AWS_CREDENTIALS.md) for the
+full set of supported methods and their trade-offs.
+
 The plugin reads these at startup and passes them through to the
 AWS storage adapter for SigV4 signing. Without them, the status
 endpoint still works but skips per-repository tier sampling, and

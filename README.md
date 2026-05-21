@@ -16,6 +16,14 @@ See Elastic Search Labs blog post at https://www.elastic.co/search-labs/blog/s3-
 | [deepfreeze-cli](packages/deepfreeze-cli/README.md) | Standalone CLI tool (local or remote via server) |
 | [deepfreeze-server](packages/deepfreeze-server/README.md) | Persistent daemon — REST API, job management, SSE events, Web UI |
 
+## Documentation
+
+| Topic | Document |
+|-------|----------|
+| AWS credentials for the Kibana plugin (keystore, env vars, SSO, EC2/ECS/EKS roles) | [AWS_CREDENTIALS.md](AWS_CREDENTIALS.md) |
+| Contributing to deepfreeze | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Code of conduct | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) |
+
 ## Supported Cloud Providers
 
 | Provider | Storage Type | Archive Tier |
