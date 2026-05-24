@@ -1,16 +1,16 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   EuiBadge,
   EuiBasicTable,
   EuiButton,
   EuiCallOut,
-  EuiDescriptionList,
   EuiFlexGroup,
   EuiFlexItem,
   EuiFlyout,
   EuiFlyoutBody,
   EuiFlyoutHeader,
   EuiHealth,
+  EuiLink,
   EuiPanel,
   EuiSpacer,
   EuiStat,
@@ -26,11 +26,7 @@ import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
 import { RotateModal } from '../components/rotate_modal';
 import { CleanupModal } from '../components/cleanup_modal';
-import {
-  formatDate,
-  formatStoredDatetime,
-  formatTimestamp,
-} from '../utils/format';
+import { formatStoredDatetime, formatTimestamp } from '../utils/format';
 import { SetupWizard } from './setup_wizard';
 import type { StatusResult } from '../../server/actions/status';
 
@@ -100,10 +96,11 @@ const repoColumns: Array<EuiBasicTableColumn<Repo>> = [
     render: (v: string) => <strong>{v}</strong>,
   },
   {
-    field: 'bucket',
-    name: 'Bucket path',
+    field: 'base_path',
+    name: 'Path',
     truncateText: true,
-    render: (_: unknown, item: Repo) => `${item.bucket || ''}/${item.base_path || ''}`,
+    render: (_: unknown, item: Repo) =>
+      (item.base_path || '').replace(/^deepfreeze\//, '') || '/',
   },
   {
     field: 'start',
@@ -164,10 +161,10 @@ const thawColumns: Array<EuiBasicTableColumn<ThawReq>> = [
   },
   {
     field: 'start_date',
-    name: 'Date range',
+    name: 'Date range (UTC)',
     render: (_: unknown, item: ThawReq) => {
-      const start = formatDate(item.start_date);
-      const end = formatDate(item.end_date);
+      const start = formatStoredDatetime(item.start_date);
+      const end = formatStoredDatetime(item.end_date);
       if (!start && !end) return '--';
       return (
         <EuiText size="s">
@@ -188,13 +185,35 @@ const thawColumns: Array<EuiBasicTableColumn<ThawReq>> = [
   },
 ];
 
-const ilmColumns: Array<EuiBasicTableColumn<IlmPolicy>> = [
-  { field: 'name', name: 'Policy name', sortable: true, render: (v: string) => <strong>{v}</strong> },
-  { field: 'repository', name: 'Repository', sortable: true },
-  { field: 'indices_count', name: 'Indices', sortable: true },
-  { field: 'data_streams_count', name: 'Data streams', sortable: true },
-  { field: 'templates_count', name: 'Templates', sortable: true },
-];
+function buildIlmColumns(
+  http: CoreStart['http']
+): Array<EuiBasicTableColumn<IlmPolicy>> {
+  return [
+    {
+      field: 'name',
+      name: 'Policy name',
+      sortable: true,
+      render: (name: string) => (
+        <EuiLink
+          href={http.basePath.prepend(
+            `/app/management/data/index_lifecycle_management/policies/edit/${encodeURIComponent(
+              name
+            )}`
+          )}
+          // Open in the same tab; Kibana's router handles the cross-app
+          // navigation. EuiLink renders an <a href>, so Cmd/Ctrl-click
+          // still works for "open in new tab".
+        >
+          <strong>{name}</strong>
+        </EuiLink>
+      ),
+    },
+    { field: 'repository', name: 'Repository', sortable: true },
+    { field: 'indices_count', name: 'Indices', sortable: true },
+    { field: 'data_streams_count', name: 'Data streams', sortable: true },
+    { field: 'templates_count', name: 'Templates', sortable: true },
+  ];
+}
 
 type FlyoutState =
   | { kind: 'repo'; title: string; items: Repo[] }
@@ -207,6 +226,7 @@ export function OverviewPage({ http, notifications }: OverviewPageProps) {
   const [detailRepo, setDetailRepo] = useState<Repo | null>(null);
   const [detailThaw, setDetailThaw] = useState<ThawReq | null>(null);
   const [activeAction, setActiveAction] = useState<'rotate' | 'cleanup' | null>(null);
+  const ilmColumns = useMemo(() => buildIlmColumns(http), [http]);
 
   if (loading && !status) return <PageLoading />;
   if (error && !status) return <PageError message={error} onRetry={refresh} />;
@@ -374,6 +394,8 @@ export function OverviewPage({ http, notifications }: OverviewPageProps) {
               <EuiBasicTable
                 items={flyout.items}
                 columns={repoColumns}
+                compressed
+                responsiveBreakpoint={false}
                 rowProps={(item) => ({
                   onClick: () => setDetailRepo(item),
                   style: { cursor: 'pointer' },
@@ -385,6 +407,8 @@ export function OverviewPage({ http, notifications }: OverviewPageProps) {
               <EuiBasicTable
                 items={flyout.items}
                 columns={thawColumns}
+                compressed
+                responsiveBreakpoint={false}
                 rowProps={(item) => ({
                   onClick: () => setDetailThaw(item),
                   style: { cursor: 'pointer' },
@@ -396,6 +420,8 @@ export function OverviewPage({ http, notifications }: OverviewPageProps) {
               <EuiBasicTable
                 items={flyout.items}
                 columns={ilmColumns}
+                compressed
+                responsiveBreakpoint={false}
                 noItemsMessage="No ILM policies found"
               />
             )}
@@ -471,36 +497,78 @@ function ErrorCallouts({ errors }: { errors: StatusResult['errors'] }) {
   );
 }
 
+interface FieldRow {
+  field: string;
+  value: string;
+}
+
+const FIELD_VALUE_COLUMNS: Array<EuiBasicTableColumn<FieldRow>> = [
+  { field: 'field', name: 'Field', width: '200px' },
+  {
+    field: 'value',
+    name: 'Value',
+    render: (v: string) => (
+      <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{v}</span>
+    ),
+  },
+];
+
+/**
+ * Render a record's fields as a two-column (Field | Value) table.
+ *
+ * For repository records, two fields get extra treatment so they stay
+ * scannable when many repos share the same bucket and `deepfreeze/`
+ * prefix: `bucket` is hidden (it's uniform across an install), and
+ * `base_path` is shown without its forced `deepfreeze/` prefix.
+ */
 function RecordList({ record }: { record: object }) {
+  const items: FieldRow[] = Object.entries(record)
+    .filter(([key, v]) => v !== null && v !== undefined && key !== 'bucket')
+    .map(([key, value]) => {
+      let displayValue: string;
+      if (key === 'base_path' && typeof value === 'string') {
+        displayValue = value.replace(/^deepfreeze\//, '') || '/';
+      } else if (typeof value === 'object') {
+        displayValue = JSON.stringify(value, null, 2);
+      } else {
+        displayValue = String(value);
+      }
+      return {
+        field: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+        value: displayValue,
+      };
+    });
   return (
-    <EuiDescriptionList
-      type="column"
+    <EuiBasicTable
+      items={items}
+      columns={FIELD_VALUE_COLUMNS}
       compressed
-      listItems={Object.entries(record)
-        .filter(([, v]) => v !== null && v !== undefined)
-        .map(([key, value]) => ({
-          title: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-          description:
-            typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value),
-        }))}
+      responsiveBreakpoint={false}
+      itemId="field"
     />
   );
 }
 
 function ThawDetailContent({ item }: { item: ThawReq }) {
-  const listItems = [
-    { title: 'Request ID', description: String(item.request_id || '--') },
-    { title: 'Status', description: String(item.status || '--') },
-    { title: 'Created at', description: formatTimestamp(item.created_at) || '--' },
+  const items: FieldRow[] = [
+    { field: 'Request ID', value: String(item.request_id || '--') },
+    { field: 'Status', value: String(item.status || '--') },
+    { field: 'Created at', value: formatTimestamp(item.created_at) || '--' },
     {
-      title: 'Date range',
-      description: `${formatDate(item.start_date) || '?'} → ${formatDate(item.end_date) || '?'}`,
+      field: 'Date range (UTC)',
+      value: `${formatStoredDatetime(item.start_date) || '?'} → ${formatStoredDatetime(item.end_date) || '?'}`,
     },
   ];
 
   return (
     <>
-      <EuiDescriptionList type="column" compressed listItems={listItems} />
+      <EuiBasicTable
+        items={items}
+        columns={FIELD_VALUE_COLUMNS}
+        compressed
+        responsiveBreakpoint={false}
+        itemId="field"
+      />
       {Array.isArray(item.repos) && item.repos.length > 0 && (
         <>
           <EuiSpacer size="l" />
