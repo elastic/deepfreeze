@@ -1,16 +1,17 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   EuiBadge,
-  EuiBasicTable,
   EuiButton,
   EuiButtonEmpty,
   EuiConfirmModal,
   EuiFlexGroup,
   EuiFlexItem,
+  EuiInMemoryTable,
   EuiSpacer,
   EuiText,
   EuiTitle,
   type EuiBasicTableColumn,
+  type EuiSearchBarProps,
 } from '@elastic/eui';
 import type { CoreStart } from '@kbn/core/public';
 
@@ -26,10 +27,6 @@ interface SchedulesPageProps {
   notifications: CoreStart['notifications'];
 }
 
-/**
- * Format an interval (seconds) as a compact human string. Examples:
- *   60 → "1m", 3600 → "1h", 86400 → "1d", 7200 → "2h", 90 → "90s"
- */
 function formatInterval(seconds: number | null | undefined): string {
   if (!seconds || seconds <= 0) return '—';
   if (seconds % 86400 === 0) return `${seconds / 86400}d`;
@@ -80,7 +77,7 @@ export function SchedulesPage({ http, notifications }: SchedulesPageProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<ScheduledJobDoc | null>(null);
   const [deleting, setDeleting] = useState<ScheduledJobDoc | null>(null);
-  const [busy, setBusy] = useState<string | null>(null); // name being mutated
+  const [busy, setBusy] = useState<string | null>(null);
 
   const handlePauseResume = useCallback(
     async (job: ScheduledJobDoc) => {
@@ -144,6 +141,14 @@ export function SchedulesPage({ http, notifications }: SchedulesPageProps) {
     }
   }, [deleting, deleteSchedule, notifications]);
 
+  const actionOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const s of schedules) {
+      if (s.action) seen.add(s.action);
+    }
+    return [...seen].sort().map((value) => ({ value, name: actionLabel(value) }));
+  }, [schedules]);
+
   if (loading && schedules.length === 0) return <PageLoading />;
   if (error && schedules.length === 0)
     return <PageError message={error} onRetry={refresh} />;
@@ -165,12 +170,14 @@ export function SchedulesPage({ http, notifications }: SchedulesPageProps) {
       field: 'interval_seconds',
       name: 'Interval',
       sortable: true,
+      width: '100px',
       render: (s: number | null) => formatInterval(s),
     },
     {
       field: 'paused',
       name: 'Status',
       sortable: true,
+      width: '100px',
       render: (paused: boolean) => (
         <EuiBadge color={paused ? 'warning' : 'success'}>
           {paused ? 'Paused' : 'Active'}
@@ -181,10 +188,12 @@ export function SchedulesPage({ http, notifications }: SchedulesPageProps) {
       field: 'created_at',
       name: 'Created',
       sortable: true,
+      width: '180px',
       render: (ts: string) => (ts ? formatTimestamp(ts) : '—'),
     },
     {
       name: 'Actions',
+      width: '140px',
       actions: [
         {
           name: 'Pause/Resume',
@@ -227,6 +236,41 @@ export function SchedulesPage({ http, notifications }: SchedulesPageProps) {
     },
   ];
 
+  const search: EuiSearchBarProps = {
+    box: { incremental: true, schema: true, placeholder: 'Search schedules…' },
+    toolsRight: [
+      <EuiButton
+        key="new-schedule"
+        iconType="plusInCircle"
+        fill
+        onClick={() => {
+          setEditing(null);
+          setModalOpen(true);
+        }}
+      >
+        New schedule
+      </EuiButton>,
+      <RefreshControl key="refresh" onRefresh={refresh} loading={loading} />,
+    ],
+    filters: [
+      {
+        type: 'field_value_selection',
+        field: 'action',
+        name: 'Action',
+        multiSelect: 'or',
+        options: actionOptions,
+      },
+      {
+        type: 'field_value_toggle_group',
+        field: 'paused',
+        items: [
+          { value: false, name: 'Active' },
+          { value: true, name: 'Paused' },
+        ],
+      },
+    ],
+  };
+
   return (
     <>
       <EuiFlexGroup justifyContent="spaceBetween" alignItems="center">
@@ -235,49 +279,40 @@ export function SchedulesPage({ http, notifications }: SchedulesPageProps) {
             <h2>Schedules</h2>
           </EuiTitle>
         </EuiFlexItem>
-        <EuiFlexItem grow={false}>
-          <EuiFlexGroup gutterSize="s" alignItems="center">
-            <EuiFlexItem grow={false}>
-              <EuiButton
-                iconType="plusInCircle"
-                onClick={() => {
-                  setEditing(null);
-                  setModalOpen(true);
-                }}
-              >
-                New schedule
-              </EuiButton>
-            </EuiFlexItem>
-            <EuiFlexItem grow={false}>
-              <RefreshControl onRefresh={refresh} loading={loading} />
-            </EuiFlexItem>
-          </EuiFlexGroup>
-        </EuiFlexItem>
       </EuiFlexGroup>
 
       <EuiSpacer size="m" />
 
-      <EuiBasicTable
+      <EuiInMemoryTable
         items={schedules}
         columns={columns}
-        loading={!!busy}
+        compressed
+        responsiveBreakpoint={false}
+        search={search}
+        sorting={{ sort: { field: 'name', direction: 'asc' } }}
+        pagination={{ pageSizeOptions: [10, 25, 50], initialPageSize: 25 }}
+        loading={!!busy || loading}
         noItemsMessage={
-          <EuiFlexGroup direction="column" alignItems="center" gutterSize="s">
-            <EuiFlexItem>
-              <EuiText size="s">No schedules yet.</EuiText>
-            </EuiFlexItem>
-            <EuiFlexItem>
-              <EuiButtonEmpty
-                iconType="plusInCircle"
-                onClick={() => {
-                  setEditing(null);
-                  setModalOpen(true);
-                }}
-              >
-                Create your first schedule
-              </EuiButtonEmpty>
-            </EuiFlexItem>
-          </EuiFlexGroup>
+          schedules.length === 0 ? (
+            <EuiFlexGroup direction="column" alignItems="center" gutterSize="s">
+              <EuiFlexItem>
+                <EuiText size="s">No schedules yet.</EuiText>
+              </EuiFlexItem>
+              <EuiFlexItem>
+                <EuiButtonEmpty
+                  iconType="plusInCircle"
+                  onClick={() => {
+                    setEditing(null);
+                    setModalOpen(true);
+                  }}
+                >
+                  Create your first schedule
+                </EuiButtonEmpty>
+              </EuiFlexItem>
+            </EuiFlexGroup>
+          ) : (
+            'No schedules match the current filters.'
+          )
         }
       />
 
