@@ -1,7 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   EuiBadge,
-  EuiBasicTable,
   EuiCallOut,
   EuiCodeBlock,
   EuiDescriptionList,
@@ -11,11 +10,12 @@ import {
   EuiFlyoutBody,
   EuiFlyoutHeader,
   EuiIcon,
+  EuiInMemoryTable,
   EuiSpacer,
   EuiText,
   EuiTitle,
-  type CriteriaWithPagination,
   type EuiBasicTableColumn,
+  type EuiSearchBarProps,
 } from '@elastic/eui';
 import type { CoreStart } from '@kbn/core/public';
 
@@ -38,10 +38,6 @@ export function ActivityPage({ http }: ActivityPageProps) {
   const [entries, setEntries] = useState<AuditEntryDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortField, setSortField] = useState<keyof AuditEntryDoc>('timestamp');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [pageIndex, setPageIndex] = useState(0);
-  const [pageSize, setPageSize] = useState(25);
   const [flyoutEntry, setFlyoutEntry] = useState<AuditEntryDoc | null>(null);
 
   const fetchAudit = useCallback(async () => {
@@ -61,13 +57,13 @@ export function ActivityPage({ http }: ActivityPageProps) {
     fetchAudit();
   }, [fetchAudit]);
 
-  const sorted = [...entries].sort((a, b) => {
-    const aVal = String(a[sortField] ?? '');
-    const bVal = String(b[sortField] ?? '');
-    return sortDirection === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-  });
-
-  const paged = sorted.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize);
+  const actionOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const e of entries) {
+      if (e.action) seen.add(e.action);
+    }
+    return [...seen].sort().map((value) => ({ value, name: value }));
+  }, [entries]);
 
   if (loading && entries.length === 0) return <PageLoading />;
   if (error && entries.length === 0) {
@@ -79,6 +75,7 @@ export function ActivityPage({ http }: ActivityPageProps) {
       field: 'timestamp',
       name: 'Timestamp',
       sortable: true,
+      width: '180px',
       render: (ts: string) => (ts ? formatTimestamp(ts) : '--'),
     },
     {
@@ -94,9 +91,24 @@ export function ActivityPage({ http }: ActivityPageProps) {
       render: (user: string) => <EuiText size="s">{user || '--'}</EuiText>,
     },
     {
+      field: 'success',
+      name: 'Status',
+      sortable: true,
+      width: '80px',
+      align: 'center',
+      render: (success: boolean) => (
+        <EuiIcon
+          type={success ? 'checkInCircleFilled' : 'cross'}
+          color={success ? 'success' : 'danger'}
+          size="m"
+        />
+      ),
+    },
+    {
       field: 'dry_run',
       name: 'Dry run',
       sortable: true,
+      width: '100px',
       render: (dryRun: boolean) =>
         dryRun ? (
           <EuiBadge color="warning">Yes</EuiBadge>
@@ -107,26 +119,16 @@ export function ActivityPage({ http }: ActivityPageProps) {
         ),
     },
     {
-      field: 'success',
-      name: 'Status',
-      sortable: true,
-      render: (success: boolean) => (
-        <EuiIcon
-          type={success ? 'checkInCircleFilled' : 'cross'}
-          color={success ? 'success' : 'danger'}
-          size="m"
-        />
-      ),
-    },
-    {
       field: 'duration_ms',
       name: 'Duration',
       sortable: true,
+      width: '110px',
       render: (ms: number) => formatDuration(ms),
     },
     {
       field: 'errors',
       name: 'Errors',
+      width: '90px',
       render: (errs: unknown[]) => {
         const count = Array.isArray(errs) ? errs.length : 0;
         return count > 0 ? (
@@ -140,15 +142,32 @@ export function ActivityPage({ http }: ActivityPageProps) {
     },
   ];
 
-  const onTableChange = ({ page, sort }: CriteriaWithPagination<AuditEntryDoc>) => {
-    if (page) {
-      setPageIndex(page.index);
-      setPageSize(page.size);
-    }
-    if (sort) {
-      setSortField(sort.field as keyof AuditEntryDoc);
-      setSortDirection(sort.direction);
-    }
+  const search: EuiSearchBarProps = {
+    box: { incremental: true, schema: true, placeholder: 'Search activity…' },
+    toolsRight: <RefreshControl onRefresh={fetchAudit} loading={loading} />,
+    filters: [
+      {
+        type: 'field_value_selection',
+        field: 'action',
+        name: 'Action',
+        multiSelect: 'or',
+        options: actionOptions,
+      },
+      {
+        type: 'field_value_toggle_group',
+        field: 'success',
+        items: [
+          { value: true, name: 'Success' },
+          { value: false, name: 'Failure' },
+        ],
+      },
+      {
+        type: 'field_value_toggle',
+        field: 'dry_run',
+        value: true,
+        name: 'Dry run',
+      },
+    ],
   };
 
   return (
@@ -159,29 +178,26 @@ export function ActivityPage({ http }: ActivityPageProps) {
             <h2>Activity</h2>
           </EuiTitle>
         </EuiFlexItem>
-        <EuiFlexItem grow={false}>
-          <RefreshControl onRefresh={fetchAudit} loading={loading} />
-        </EuiFlexItem>
       </EuiFlexGroup>
 
       <EuiSpacer size="m" />
 
-      <EuiBasicTable
-        items={paged}
+      <EuiInMemoryTable
+        items={entries}
         columns={columns}
-        sorting={{ sort: { field: sortField, direction: sortDirection } }}
-        pagination={{
-          pageIndex,
-          pageSize,
-          totalItemCount: sorted.length,
-          pageSizeOptions: [10, 25, 50, 100],
-        }}
-        onChange={onTableChange}
+        compressed
+        responsiveBreakpoint={false}
+        search={search}
+        sorting={{ sort: { field: 'timestamp', direction: 'desc' } }}
+        pagination={{ pageSizeOptions: [10, 25, 50, 100], initialPageSize: 25 }}
+        loading={loading}
         rowProps={(item: AuditEntryDoc) => ({
           onClick: () => setFlyoutEntry(item),
           style: { cursor: 'pointer' },
         })}
-        noItemsMessage="No audit entries found"
+        noItemsMessage={
+          loading ? 'Loading audit log…' : 'No audit entries match the current filters.'
+        }
       />
 
       {flyoutEntry && (
