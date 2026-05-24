@@ -18,10 +18,13 @@
  *
  *   - `formatDate(val)` — date portion of the ISO string with NO
  *     timezone conversion, e.g. "2026-05-19". Use for date-range
- *     boundaries where the stored Y-M-D is the meaningful unit (user
- *     picked a date in a date-picker): thaw request `start_date` /
- *     `end_date`. We don't TZ-convert because the user's Jan 15
- *     should stay Jan 15 regardless of where their browser sits.
+ *     boundaries where the stored Y-M-D is the meaningful unit and
+ *     there's no time component to preserve. Currently no callers
+ *     after thaw request dates picked up sub-day precision (they now
+ *     use `formatStoredDatetime` so the user's chosen time shows
+ *     through). Kept for future Y-M-D-only contexts (e.g. a Setup
+ *     wizard date selector). We don't TZ-convert because the user's
+ *     Jan 15 should stay Jan 15 regardless of where their browser sits.
  *
  * All three are forgiving: null/undefined/empty → "", an unparseable
  * string falls through to the raw input so we never silently swallow

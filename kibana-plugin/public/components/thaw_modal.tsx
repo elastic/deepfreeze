@@ -58,13 +58,28 @@ function extractErrorMessage(err: unknown): string {
 }
 
 /**
- * Promote a YYYY-MM-DD value from `<input type="date">` to an ISO 8601
- * timestamp. Start dates clamp to 00:00:00Z; end dates to 23:59:59Z so
- * a user-picked single day actually spans the whole day server-side.
+ * Promote a `<input type="datetime-local">` value to an ISO 8601 UTC
+ * timestamp. The browser emits `YYYY-MM-DDTHH:MM` (no timezone) — we
+ * always treat it as UTC because the entire deepfreeze data model is
+ * UTC-centric (repo `start`/`end` are stored as UTC `@timestamp`).
+ *
+ * Both endpoints default to UTC midnight when the user only picks a
+ * date — that's the browser's native time-portion default. A user who
+ * wants "all of May 24" should pick start = 2026-05-24T00:00 and
+ * end = 2026-05-25T00:00 (the end-of-range comparison is inclusive,
+ * but for full-day windows the next-day-midnight convention is
+ * unambiguous).
  */
-function toIso(date: string, kind: 'start' | 'end'): string {
-  const suffix = kind === 'start' ? 'T00:00:00.000Z' : 'T23:59:59.999Z';
-  return `${date}${suffix}`;
+function toIso(value: string): string {
+  // datetime-local format: `YYYY-MM-DDTHH:MM` (16 chars).
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
+    return `${value}:00.000Z`;
+  }
+  // Defensive: a bare YYYY-MM-DD (e.g. a stale value) gets UTC midnight.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return `${value}T00:00:00.000Z`;
+  }
+  return value;
 }
 
 /**
@@ -79,7 +94,10 @@ export function ThawModal({
   onClose,
   onComplete,
 }: ThawModalProps) {
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  // `datetime-local` input's `max` accepts the same `YYYY-MM-DDTHH:MM`
+  // shape it emits. Pin to current UTC minute so users can't pick a
+  // future moment.
+  const nowUtc = useMemo(() => new Date().toISOString().slice(0, 16), []);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [restoreDays, setRestoreDays] = useState<number>(DEFAULT_RESTORE_DAYS);
@@ -100,8 +118,8 @@ export function ThawModal({
   const buildBody = useCallback(
     (dry: boolean) =>
       JSON.stringify({
-        start_date: toIso(startDate, 'start'),
-        end_date: toIso(endDate, 'end'),
+        start_date: toIso(startDate),
+        end_date: toIso(endDate),
         restore_days: restoreDays,
         retrieval_tier: retrievalTier,
         dry_run: dry,
@@ -161,37 +179,41 @@ export function ThawModal({
         <EuiText size="s" color="subdued">
           <p>
             Restores snapshot data from Glacier storage so that it can be re-mounted as
-            searchable snapshots. Pick a date range and a restore window; deepfreeze will find
-            every repository whose data overlaps the range, issue an S3 restore for each
-            object, and create a thaw request you can monitor.
+            searchable snapshots. Pick a UTC start and end (date plus optional time) and a
+            restore window; deepfreeze will find every repository whose data overlaps the
+            range, issue an S3 restore for each object, and create a thaw request you can
+            monitor.
           </p>
         </EuiText>
         <EuiSpacer size="m" />
         <EuiForm component="div">
-          <EuiFormRow label="Start date" helpText="Inclusive — UTC midnight.">
+          <EuiFormRow
+            label="Start (UTC)"
+            helpText="Defaults to UTC midnight. Override the time portion for sub-day precision."
+          >
             <EuiFieldText
               // EuiFieldText doesn't expose `type` directly in its props,
               // but it forwards extra HTML attributes onto the underlying input.
-              {...({ type: 'date' } as { type: string })}
-              max={today}
+              {...({ type: 'datetime-local' } as { type: string })}
+              max={nowUtc}
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
               fullWidth
             />
           </EuiFormRow>
           <EuiFormRow
-            label="End date"
-            helpText="Inclusive — UTC end of day."
+            label="End (UTC)"
+            helpText="Defaults to UTC midnight. For a full-day window, pick the next day's midnight as the end."
             isInvalid={startDate !== '' && endDate !== '' && endDate < startDate}
             error={
               startDate !== '' && endDate !== '' && endDate < startDate
-                ? 'End date must be on or after the start date.'
+                ? 'End must be on or after the start.'
                 : undefined
             }
           >
             <EuiFieldText
-              {...({ type: 'date' } as { type: string })}
-              max={today}
+              {...({ type: 'datetime-local' } as { type: string })}
+              max={nowUtc}
               min={startDate || undefined}
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}

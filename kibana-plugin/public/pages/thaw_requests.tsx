@@ -26,7 +26,7 @@ import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
 import { RefreezeModal } from '../components/refreeze_modal';
 import { ThawModal } from '../components/thaw_modal';
-import { formatDate, formatTimestamp } from '../utils/format';
+import { formatStoredDatetime, formatTimestamp } from '../utils/format';
 import type { StatusResult } from '../../server/actions/status';
 import type { ThawProgressResult } from '../../server/actions/thaw';
 
@@ -237,10 +237,10 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
     },
     {
       field: 'start_date',
-      name: 'Date range',
+      name: 'Date range (UTC)',
       render: (_: unknown, item: ThawReq) => {
-        const start = formatDate(item.start_date);
-        const end = formatDate(item.end_date);
+        const start = formatStoredDatetime(item.start_date);
+        const end = formatStoredDatetime(item.end_date);
         if (!start && !end) return '--';
         return (
           <EuiText size="s">
@@ -352,9 +352,9 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
                   description: formatTimestamp(flyoutItem.created_at) || '--',
                 },
                 {
-                  title: 'Date range',
-                  description: `${formatDate(flyoutItem.start_date) || '?'} → ${
-                    formatDate(flyoutItem.end_date) || '?'
+                  title: 'Date range (UTC)',
+                  description: `${formatStoredDatetime(flyoutItem.start_date) || '?'} → ${
+                    formatStoredDatetime(flyoutItem.end_date) || '?'
                   }`,
                 },
               ]}
