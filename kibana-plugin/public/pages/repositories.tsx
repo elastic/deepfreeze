@@ -1,21 +1,20 @@
 import React, { useMemo, useState } from 'react';
 import {
   EuiBadge,
-  EuiBasicTable,
   EuiButton,
   EuiDescriptionList,
-  EuiFieldSearch,
   EuiFlexGroup,
   EuiFlexItem,
   EuiFlyout,
   EuiFlyoutBody,
   EuiFlyoutHeader,
   EuiHealth,
+  EuiInMemoryTable,
   EuiSpacer,
   EuiText,
   EuiTitle,
-  type CriteriaWithPagination,
   type EuiBasicTableColumn,
+  type EuiSearchBarProps,
 } from '@elastic/eui';
 import type { CoreStart } from '@kbn/core/public';
 
@@ -55,8 +54,8 @@ function stateHealthColor(
 /**
  * Color a sampled storage tier so the table communicates state at a
  * glance. Archive = primary (long-term cold storage, the deepfreeze
- * happy path), Hot/Cool = success/warning (data still in fast tiers),
- * Mixed/Empty/Unknown/N/A = hollow (informational).
+ * happy path), Standard/Cool = success/warning (data still in fast
+ * tiers), Mixed/Empty/Unknown/N/A = hollow (informational).
  */
 function renderTierBadge(tier: string | undefined): JSX.Element {
   if (!tier) {
@@ -75,39 +74,26 @@ function renderTierBadge(tier: string | undefined): JSX.Element {
 
 export function RepositoriesPage({ http, notifications }: RepositoriesPageProps) {
   const { status, loading, error, refresh } = useStatus(http);
-  const [search, setSearch] = useState('');
   const [flyoutRepo, setFlyoutRepo] = useState<Repo | null>(null);
   const [repairOpen, setRepairOpen] = useState(false);
-  const [sortField, setSortField] = useState<keyof Repo>('name');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [pageIndex, setPageIndex] = useState(0);
-  const [pageSize, setPageSize] = useState(20);
 
-  const repos = useMemo<Repo[]>(() => {
-    if (!status) return [];
-    let list = status.repositories || [];
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter((r) => {
-        const name = String(r.name || '').toLowerCase();
-        const basePath = String(r.base_path || '').toLowerCase();
-        return name.includes(q) || basePath.includes(q);
-      });
+  const repos = useMemo<Repo[]>(() => status?.repositories ?? [], [status]);
+
+  const stateOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const r of repos) {
+      if (r.thaw_state) seen.add(r.thaw_state);
     }
-    return list;
-  }, [status, search]);
+    return [...seen].sort().map((value) => ({ value, name: value }));
+  }, [repos]);
 
-  const sorted = useMemo(() => {
-    const copy = [...repos];
-    copy.sort((a, b) => {
-      const aVal = String(a[sortField] ?? '');
-      const bVal = String(b[sortField] ?? '');
-      return sortDirection === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-    });
-    return copy;
-  }, [repos, sortField, sortDirection]);
-
-  const paged = sorted.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize);
+  const tierOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const r of repos) {
+      if (r.storage_tier) seen.add(r.storage_tier);
+    }
+    return [...seen].sort().map((value) => ({ value, name: value }));
+  }, [repos]);
 
   if (loading && !status) return <PageLoading />;
   if (error && !status) return <PageError message={error} onRetry={refresh} />;
@@ -120,15 +106,21 @@ export function RepositoriesPage({ http, notifications }: RepositoriesPageProps)
       render: (name: string) => <strong>{name}</strong>,
     },
     {
-      field: 'bucket',
-      name: 'Bucket path',
+      field: 'base_path',
+      name: 'Path',
       sortable: true,
       truncateText: true,
-      render: (_: unknown, item: Repo) => `${item.bucket || ''}/${item.base_path || ''}`,
+      // Bucket is uniform across all repos in a deepfreeze install
+      // (Setup pins one bucket), and `deepfreeze/` is the forced
+      // prefix on every base_path — so we strip both and show just
+      // the per-repo suffix (e.g. `snapshots-000001`).
+      render: (_: unknown, item: Repo) =>
+        (item.base_path || '').replace(/^deepfreeze\//, '') || '/',
     },
     {
       field: 'start',
       name: 'Date range',
+      width: '210px',
       render: (_: unknown, item: Repo) => {
         const start = formatStoredDatetime(item.start);
         const end = formatStoredDatetime(item.end);
@@ -151,6 +143,7 @@ export function RepositoriesPage({ http, notifications }: RepositoriesPageProps)
       field: 'is_mounted',
       name: 'Mounted',
       sortable: true,
+      width: '90px',
       render: (mounted: boolean) => (
         <EuiBadge color={mounted ? 'success' : 'default'}>{mounted ? 'Yes' : 'No'}</EuiBadge>
       ),
@@ -159,27 +152,50 @@ export function RepositoriesPage({ http, notifications }: RepositoriesPageProps)
       field: 'storage_tier',
       name: 'Tier',
       sortable: true,
+      width: '110px',
       render: (tier: string | undefined) => renderTierBadge(tier),
     },
     {
       field: 'thaw_state',
       name: 'State',
       sortable: true,
+      width: '110px',
       render: (state: string) => (
         <EuiHealth color={stateHealthColor(state || 'unknown')}>{state || 'unknown'}</EuiHealth>
       ),
     },
   ];
 
-  const onTableChange = ({ page, sort }: CriteriaWithPagination<Repo>) => {
-    if (page) {
-      setPageIndex(page.index);
-      setPageSize(page.size);
-    }
-    if (sort) {
-      setSortField(sort.field as keyof Repo);
-      setSortDirection(sort.direction);
-    }
+  const search: EuiSearchBarProps = {
+    box: { incremental: true, schema: true, placeholder: 'Search repositories…' },
+    toolsRight: [
+      <EuiButton key="repair" iconType="wrench" onClick={() => setRepairOpen(true)}>
+        Repair metadata
+      </EuiButton>,
+      <RefreshControl key="refresh" onRefresh={refresh} loading={loading} />,
+    ],
+    filters: [
+      {
+        type: 'field_value_selection',
+        field: 'thaw_state',
+        name: 'State',
+        multiSelect: 'or',
+        options: stateOptions,
+      },
+      {
+        type: 'field_value_selection',
+        field: 'storage_tier',
+        name: 'Tier',
+        multiSelect: 'or',
+        options: tierOptions,
+      },
+      {
+        type: 'field_value_toggle',
+        field: 'is_mounted',
+        value: true,
+        name: 'Mounted',
+      },
+    ],
   };
 
   return (
@@ -190,51 +206,24 @@ export function RepositoriesPage({ http, notifications }: RepositoriesPageProps)
             <h2>Repositories</h2>
           </EuiTitle>
         </EuiFlexItem>
-        <EuiFlexItem grow={false}>
-          <EuiFlexGroup gutterSize="s" alignItems="center">
-            <EuiFlexItem grow={false}>
-              <EuiButton iconType="wrench" onClick={() => setRepairOpen(true)}>
-                Repair metadata
-              </EuiButton>
-            </EuiFlexItem>
-            <EuiFlexItem grow={false}>
-              <RefreshControl onRefresh={refresh} loading={loading} />
-            </EuiFlexItem>
-          </EuiFlexGroup>
-        </EuiFlexItem>
       </EuiFlexGroup>
 
       <EuiSpacer size="m" />
 
-      <EuiFieldSearch
-        placeholder="Search repositories..."
-        value={search}
-        onChange={(e) => {
-          setSearch(e.target.value);
-          setPageIndex(0);
-        }}
-        fullWidth
-        aria-label="Search repositories"
-      />
-
-      <EuiSpacer size="m" />
-
-      <EuiBasicTable
-        items={paged}
+      <EuiInMemoryTable
+        items={repos}
         columns={columns}
-        sorting={{ sort: { field: sortField, direction: sortDirection } }}
-        pagination={{
-          pageIndex,
-          pageSize,
-          totalItemCount: sorted.length,
-          pageSizeOptions: [10, 20, 50],
-        }}
-        onChange={onTableChange}
+        compressed
+        responsiveBreakpoint={false}
+        search={search}
+        sorting={{ sort: { field: 'name', direction: 'asc' } }}
+        pagination={{ pageSizeOptions: [10, 25, 50], initialPageSize: 25 }}
+        loading={loading}
         rowProps={(item: Repo) => ({
           onClick: () => setFlyoutRepo(item),
           style: { cursor: 'pointer' },
         })}
-        noItemsMessage="No repositories found"
+        noItemsMessage="No repositories match the current filters."
       />
 
       {flyoutRepo && (
