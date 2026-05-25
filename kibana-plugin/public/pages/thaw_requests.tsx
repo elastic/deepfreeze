@@ -195,6 +195,44 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState(20);
+  // Per-row "checking now" state — keyed by request_id so multiple
+  // in_progress rows don't block each other.
+  const [checkingId, setCheckingId] = useState<string | null>(null);
+
+  const handleCheckNow = useCallback(
+    async (item: ThawReq) => {
+      const id = item.request_id;
+      if (!id) return;
+      setCheckingId(id);
+      try {
+        const result = await postThawCheck(http, id);
+        if (result.status === 'completed') {
+          notifications.toasts.addSuccess({
+            title: `Thaw completed (${id.slice(0, 8)})`,
+            text: 'All objects restored; repositories mounted.',
+          });
+        } else if (result.status === 'failed') {
+          notifications.toasts.addDanger({
+            title: `Thaw failed (${id.slice(0, 8)})`,
+            text:
+              result.errors.map((e) => e.message).join('; ') || 'Mount step failed.',
+          });
+        } else {
+          notifications.toasts.addInfo({
+            title: `Still restoring (${id.slice(0, 8)})`,
+            text: 'Restore is in progress; the poller will keep checking every 60s.',
+          });
+        }
+        refresh();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Unknown error';
+        notifications.toasts.addDanger({ title: 'Check failed', text: msg });
+      } finally {
+        setCheckingId(null);
+      }
+    },
+    [http, notifications, refresh]
+  );
 
   const requests = useMemo<ThawReq[]>(
     () => (status ? status.thaw_requests : []),
@@ -259,6 +297,26 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
       name: 'Created',
       sortable: true,
       render: (ts: string) => (ts ? formatTimestamp(ts) : '--'),
+    },
+    {
+      name: 'Actions',
+      width: '120px',
+      actions: [
+        {
+          name: 'Check now',
+          description:
+            'Force an immediate restore-completion check (the background poller already runs every 60s).',
+          icon: 'refresh',
+          type: 'icon',
+          // Only enabled for in_progress requests AND not while a check
+          // is in flight against this same row.
+          enabled: (item: ThawReq) =>
+            item.status === 'in_progress' && checkingId !== item.request_id,
+          available: (item: ThawReq) => item.status === 'in_progress',
+          onClick: handleCheckNow,
+          'data-test-subj': 'thaw-check-now',
+        },
+      ],
     },
   ];
 
