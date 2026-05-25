@@ -33,6 +33,19 @@ import {
   type SnapshotRepoEsClient,
 } from '../repositories/snapshot_repo';
 import {
+  assignIlmPolicy,
+  ensureThawedIlmPolicy,
+  findLatestSnapshotForIndex,
+  getAllIndicesInRepo,
+  mountSnapshotIndex,
+  stripFmClonePrefix,
+  type SearchableSnapshotEsClient,
+} from '../repositories/searchable_snapshot';
+import {
+  getTimestampRange,
+  type DateRangeEsClient,
+} from '../repositories/repository_date_range';
+import {
   getThawRequest,
   saveThawRequest,
   type ThawRequestRepoWriteEsClient,
@@ -59,7 +72,9 @@ const RESTORE_BATCH = 10;
 export type ThawActionEsClient = SettingsRepoEsClient &
   RepositoryRepoWriteEsClient &
   ThawRequestRepoWriteEsClient &
-  SnapshotRepoEsClient;
+  SnapshotRepoEsClient &
+  SearchableSnapshotEsClient &
+  DateRangeEsClient;
 
 export interface ThawConfig {
   /** ISO 8601 inclusive start of the date range to thaw. */
@@ -448,6 +463,17 @@ export interface ThawProgressResult {
   all_complete: boolean;
   /** Set by `checkAndMaybeMount` when it just transitioned to completed. */
   mounted?: boolean;
+  /**
+   * Count of searchable_snapshot indices the mount step actually
+   * brought online for this thaw. Only present on the "just completed"
+   * response — undefined while still in_progress or for an already-
+   * completed request rechecked later.
+   */
+  indices_mounted?: number;
+  /** Count of indices the mount step pruned because their @timestamp range fell outside the request window. */
+  indices_skipped?: number;
+  /** Count of indices the mount step couldn't mount (per-index ES errors). */
+  indices_failed?: number;
   errors: ServiceError[];
   checked_at: string;
 }
@@ -680,6 +706,7 @@ export async function checkAndMaybeMount(
   // All restores complete: mount each repo and flip statuses.
   log.debug(`All restores complete for ${request_id}; mounting ${repos.length} repo(s)`);
   let mountFailed = false;
+  const mountedRepos: RepositoryDoc[] = [];
   for (const repo of repos) {
     try {
       await createSnapshotRepository(client, {
@@ -697,6 +724,7 @@ export async function checkAndMaybeMount(
         is_mounted: true,
         thawed_at: now().toISOString(),
       });
+      mountedRepos.push(repo);
     } catch (err) {
       mountFailed = true;
       const msg = err instanceof Error ? err.message : String(err);
@@ -710,8 +738,34 @@ export async function checkAndMaybeMount(
     }
   }
 
+  // Now that the repos are re-registered with ES, mount the underlying
+  // snapshot indices as searchable snapshots. Without this step the
+  // operator can see the repo in Stack Management → Snapshot and
+  // Restore but the actual data isn't queryable.
+  //
+  // Best-effort: per-index failures are folded into `errors[]` and the
+  // request still completes. A complete mount-step failure only flips
+  // the request to `failed` when the repo-level mount above also fails.
+  const indexMount = await findAndMountIndicesInDateRange(
+    client,
+    mountedRepos,
+    request.start_date,
+    request.end_date,
+    log
+  );
+  for (const e of indexMount.errors) {
+    errors.push(e);
+  }
+
   const finalStatus: ThawRequestDoc['status'] = mountFailed ? 'failed' : 'completed';
   await saveThawRequest(client, { ...request, status: finalStatus });
+
+  log.debug(
+    `Thaw ${request_id} index-mount summary: ` +
+      `${indexMount.mounted} mounted, ` +
+      `${indexMount.skipped} skipped (date range), ` +
+      `${indexMount.failed} failed`
+  );
 
   return {
     request_id,
@@ -721,7 +775,183 @@ export async function checkAndMaybeMount(
     repos: progress,
     all_complete: true,
     mounted: !mountFailed,
+    indices_mounted: indexMount.mounted,
+    indices_skipped: indexMount.skipped,
+    indices_failed: indexMount.failed,
     errors,
     checked_at,
   };
+}
+
+/**
+ * For each newly-thawed repo: create the `{repo}-thawed` ILM policy,
+ * enumerate every index in the repo's snapshots, mount each as a
+ * searchable_snapshot, and trim back any whose `@timestamp` range
+ * doesn't overlap the requested `[start_date, end_date]` window. The
+ * trim step matches Python `find_and_mount_indices_in_date_range` —
+ * we want the operator to get the indices they asked for, not every
+ * index that happens to live in the same repo.
+ *
+ * When `start_date` / `end_date` are absent (legacy thaw_request with
+ * no range, or a request whose repos lacked date ranges at the time),
+ * we mount everything and skip the trim. Matches Python's fallback.
+ *
+ * Per-index errors are best-effort — they fold into `errors[]` and the
+ * loop continues. A catastrophic per-repo error (e.g. `snapshot.get`
+ * fails) records one error and moves to the next repo.
+ */
+async function findAndMountIndicesInDateRange(
+  client: ThawActionEsClient,
+  repos: RepositoryDoc[],
+  startDate: string | undefined,
+  endDate: string | undefined,
+  log: { debug: (m: string) => void; warn: (m: string) => void }
+): Promise<{
+  mounted: number;
+  skipped: number;
+  failed: number;
+  errors: ServiceError[];
+}> {
+  const errors: ServiceError[] = [];
+  let mounted = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  // Decide whether to do the date-overlap trim. Both bounds must be
+  // present and parse as valid timestamps; otherwise we mount-and-keep.
+  const start = startDate ? Date.parse(startDate) : NaN;
+  const end = endDate ? Date.parse(endDate) : NaN;
+  const trimByDateRange = Number.isFinite(start) && Number.isFinite(end);
+
+  for (const repo of repos) {
+    let policyName: string;
+    try {
+      policyName = await ensureThawedIlmPolicy(client, repo.name);
+      log.debug(`Thawed ILM policy ${policyName} ensured for ${repo.name}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push({
+        code: 'ACTION_FAILED',
+        message: `Failed to create thawed ILM policy for ${repo.name}: ${msg}`,
+        severity: 'warning',
+        target: repo.name,
+      });
+      // Continue without the policy — the indices still mount, they
+      // just won't have lifecycle management.
+      policyName = '';
+    }
+
+    let indices: string[];
+    try {
+      indices = await getAllIndicesInRepo(client, repo.name);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(`Failed to enumerate indices in ${repo.name}: ${msg}`);
+      errors.push({
+        code: 'ACTION_FAILED',
+        message: `Failed to enumerate indices in ${repo.name}: ${msg}`,
+        severity: 'warning',
+        target: repo.name,
+      });
+      continue;
+    }
+
+    log.debug(`Repo ${repo.name}: ${indices.length} index/indices to consider`);
+
+    for (const indexInSnapshot of indices) {
+      const mountedName = stripFmClonePrefix(indexInSnapshot);
+      let snapshotName: string | null;
+      try {
+        snapshotName = await findLatestSnapshotForIndex(
+          client,
+          repo.name,
+          indexInSnapshot
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push({
+          code: 'ACTION_FAILED',
+          message: `Failed to locate snapshot for ${indexInSnapshot}: ${msg}`,
+          severity: 'warning',
+          target: indexInSnapshot,
+        });
+        failed += 1;
+        continue;
+      }
+      if (!snapshotName) {
+        log.warn(`No snapshot found for index ${indexInSnapshot} in ${repo.name}`);
+        failed += 1;
+        continue;
+      }
+
+      const result = await mountSnapshotIndex(
+        client,
+        {
+          repo: repo.name,
+          snapshot: snapshotName,
+          indexNameInSnapshot: indexInSnapshot,
+          mountedName,
+        },
+        log
+      );
+      if (!result.mounted) {
+        failed += 1;
+        errors.push({
+          code: 'ACTION_FAILED',
+          message: `Failed to mount ${mountedName} from ${repo.name}/${snapshotName}`,
+          severity: 'warning',
+          target: mountedName,
+        });
+        continue;
+      }
+
+      // Best-effort policy assignment — non-fatal.
+      if (policyName) {
+        try {
+          await assignIlmPolicy(client, mountedName, policyName);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.warn(`Failed to assign ILM policy ${policyName} to ${mountedName}: ${msg}`);
+        }
+      }
+
+      // Date-overlap pruning: if the mounted index's @timestamp range
+      // sits outside the requested window, delete it. We tolerate
+      // "couldn't determine range" by keeping the index — matches
+      // Python's defensive behavior.
+      if (trimByDateRange) {
+        try {
+          const range = await getTimestampRange(client, [mountedName]);
+          if (range.earliest && range.latest) {
+            const idxStart = Date.parse(range.earliest);
+            const idxEnd = Date.parse(range.latest);
+            if (
+              Number.isFinite(idxStart) &&
+              Number.isFinite(idxEnd) &&
+              (idxEnd < start || idxStart > end)
+            ) {
+              log.debug(
+                `Trimming ${mountedName}: range ${range.earliest}..${range.latest} outside request window`
+              );
+              try {
+                await client.indices.delete({ index: mountedName });
+                skipped += 1;
+                continue;
+              } catch (delErr) {
+                const msg = delErr instanceof Error ? delErr.message : String(delErr);
+                log.warn(`Failed to trim out-of-range index ${mountedName}: ${msg}`);
+              }
+            }
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.debug(`Skipping date-overlap check for ${mountedName}: ${msg}`);
+        }
+      }
+
+      mounted += 1;
+    }
+  }
+
+  return { mounted, skipped, failed, errors };
 }

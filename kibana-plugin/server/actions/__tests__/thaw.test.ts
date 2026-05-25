@@ -29,21 +29,65 @@ interface FakeOpts {
   repos?: RepositoryDoc[];
   /** Thaw request docs the client should serve from search by request_id. */
   thawRequests?: ThawRequestDoc[];
+  /**
+   * Snapshots per repository — drives both `snapshot.get` (for the
+   * mount step's index enumeration) and the search-by-index logic. Key
+   * is the repo name; value is the list of snapshots ES would return.
+   */
+  snapshotsByRepo?: Record<
+    string,
+    Array<{ snapshot?: string; indices?: string[] }>
+  >;
+  /** Mounted-index names that `indices.exists({index})` should report as true. Status index is handled separately by `noStatusIndex`. */
+  existingMountedIndices?: Set<string>;
+  /**
+   * For the date-overlap pruning step: maps a comma-joined index list
+   * (the `index` field passed to `search`) to a fixed @timestamp range.
+   * When absent, the aggregation returns nulls (no trim).
+   */
+  timestampRanges?: Record<string, { earliest: string; latest: string }>;
 }
 
 interface ClientTrace {
   index_calls: Array<{ index: string; id: string; document: Record<string, unknown> }>;
   createRepo_calls: Array<{ name: string; repository: { type: string; settings: Record<string, unknown> } }>;
+  mount_calls: Array<{ repository: string; snapshot: string; body: { index: string; renamed_index?: string } }>;
+  ilm_put_calls: Array<{ name: string; policy: Record<string, unknown> }>;
+  put_settings_calls: Array<{ index: string; body: Record<string, unknown> }>;
+  delete_index_calls: string[];
 }
 
 function makeClient(opts: FakeOpts = {}): { client: ThawActionEsClient; trace: ClientTrace } {
-  const trace: ClientTrace = { index_calls: [], createRepo_calls: [] };
+  const trace: ClientTrace = {
+    index_calls: [],
+    createRepo_calls: [],
+    mount_calls: [],
+    ilm_put_calls: [],
+    put_settings_calls: [],
+    delete_index_calls: [],
+  };
+  // ILM policies the test has seen: starts empty, fills as putLifecycle
+  // is called so the second call to getLifecycle on the same name
+  // returns success (idempotency check).
+  const existingPolicies = new Set<string>();
 
   const client: ThawActionEsClient = {
     indices: {
       exists: async ({ index }) => {
         if (opts.noStatusIndex && index === STATUS_INDEX) return false;
-        return true;
+        if (opts.existingMountedIndices?.has(index)) return true;
+        // Default to false for arbitrary mounted-index probes; ES wouldn't
+        // claim an index exists unless we said so. Status-index lookups
+        // still resolve true (above) so the action's startup checks pass.
+        return index === STATUS_INDEX;
+      },
+      delete: async ({ index }) => {
+        trace.delete_index_calls.push(index);
+        return {};
+      },
+      putSettings: async ({ index, body }) => {
+        trace.put_settings_calls.push({ index, body });
+        return {};
       },
     },
     get: async ({ id }) => {
@@ -54,6 +98,21 @@ function makeClient(opts: FakeOpts = {}): { client: ThawActionEsClient; trace: C
       return { found: false };
     },
     search: async (params) => {
+      // @timestamp aggregation for date-overlap pruning. The orchestrator
+      // joins the mounted-index name(s) with `,` and passes them as
+      // `index`. We key into `timestampRanges` by that exact string.
+      if (params.aggs) {
+        const range = opts.timestampRanges?.[params.index];
+        if (range) {
+          return {
+            aggregations: {
+              earliest: { value_as_string: range.earliest },
+              latest: { value_as_string: range.latest },
+            },
+          };
+        }
+        return { aggregations: {} };
+      }
       if (params.index !== STATUS_INDEX) return { hits: { hits: [] } };
       const query = (params.query ?? {}) as Record<string, unknown>;
       // thaw_request lookup by request_id
@@ -80,11 +139,36 @@ function makeClient(opts: FakeOpts = {}): { client: ThawActionEsClient; trace: C
     },
     snapshot: {
       getRepository: async () => ({}),
+      get: async ({ repository }) => ({
+        snapshots: opts.snapshotsByRepo?.[repository] ?? [],
+      }),
       createRepository: async ({ name, repository }) => {
         trace.createRepo_calls.push({ name, repository });
         return {};
       },
       deleteRepository: async () => ({}),
+    },
+    searchableSnapshots: {
+      mount: async (params) => {
+        trace.mount_calls.push(params);
+        return {};
+      },
+    },
+    ilm: {
+      getLifecycle: async ({ name }) => {
+        if (name && existingPolicies.has(name)) {
+          return { [name]: {} };
+        }
+        const err = new Error('not found') as Error & { statusCode?: number };
+        err.statusCode = 404;
+        throw err;
+      },
+      putLifecycle: async (params) => {
+        trace.ilm_put_calls.push(params);
+        existingPolicies.add(params.name);
+        return {};
+      },
+      removeLifecycle: async () => ({}),
     },
     index: async ({ index, id, document }) => {
       trace.index_calls.push({ index, id, document });
@@ -748,5 +832,201 @@ describe('checkAndMaybeMount', () => {
     await expect(
       checkAndMaybeMount(client, storage, 'req-a')
     ).rejects.toBeInstanceOf(MissingSettingsError);
+  });
+
+  it('mounts the snapshot indices, creates the thawed ILM policy, and assigns it', async () => {
+    const repo = makeRepo({ name: 'deepfreeze-000011' });
+    const request = makeThawRequest({ repos: ['deepfreeze-000011'] });
+    const { client, trace } = makeClient({
+      thawRequests: [request],
+      repos: [repo],
+      snapshotsByRepo: {
+        'deepfreeze-000011': [
+          { snapshot: 'snap-1', indices: ['logs-2026.05.23', 'metrics-2026.05.23'] },
+        ],
+      },
+    });
+    const { storage } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: 'index.latest', size: 1, storage_class: 'STANDARD' },
+        ],
+      },
+      defaultStorageClass: 'STANDARD',
+    });
+
+    const result = await checkAndMaybeMount(client, storage, 'req-a');
+
+    expect(result.status).toBe('completed');
+    expect(result.indices_mounted).toBe(2);
+    expect(result.indices_failed).toBe(0);
+    // Two mount calls, one per index. Both source/target match so no
+    // renamed_index field.
+    expect(trace.mount_calls).toHaveLength(2);
+    expect(trace.mount_calls.map((m) => m.body.index).sort()).toEqual([
+      'logs-2026.05.23',
+      'metrics-2026.05.23',
+    ]);
+    // ILM policy created (404-on-first-get, then put), then assigned to
+    // each mounted index via put_settings.
+    expect(trace.ilm_put_calls).toEqual([
+      expect.objectContaining({ name: 'deepfreeze-000011-thawed' }),
+    ]);
+    expect(trace.put_settings_calls.map((c) => c.index).sort()).toEqual([
+      'logs-2026.05.23',
+      'metrics-2026.05.23',
+    ]);
+  });
+
+  it('strips fm-clone- prefix and uses renamed_index when mounting', async () => {
+    const repo = makeRepo({ name: 'r1' });
+    const request = makeThawRequest({ repos: ['r1'] });
+    const { client, trace } = makeClient({
+      thawRequests: [request],
+      repos: [repo],
+      snapshotsByRepo: {
+        r1: [{ snapshot: 'snap-1', indices: ['fm-clone-abc-logs-2026.05.23'] }],
+      },
+    });
+    const { storage } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: 'k', size: 1, storage_class: 'STANDARD' },
+        ],
+      },
+      defaultStorageClass: 'STANDARD',
+    });
+
+    await checkAndMaybeMount(client, storage, 'req-a');
+
+    expect(trace.mount_calls).toEqual([
+      {
+        repository: 'r1',
+        snapshot: 'snap-1',
+        body: {
+          index: 'fm-clone-abc-logs-2026.05.23',
+          renamed_index: 'logs-2026.05.23',
+        },
+      },
+    ]);
+  });
+
+  it('prunes mounted indices whose @timestamp range falls outside the request window', async () => {
+    const repo = makeRepo({ name: 'r1' });
+    // Request window: just the morning of May 23.
+    const request = makeThawRequest({
+      repos: ['r1'],
+      start_date: '2026-05-23T00:00:00Z',
+      end_date: '2026-05-23T12:00:00Z',
+    });
+    const { client, trace } = makeClient({
+      thawRequests: [request],
+      repos: [repo],
+      snapshotsByRepo: {
+        r1: [{ snapshot: 'snap-1', indices: ['logs-morning', 'logs-evening'] }],
+      },
+      timestampRanges: {
+        'logs-morning': {
+          earliest: '2026-05-23T01:00:00Z',
+          latest: '2026-05-23T03:00:00Z',
+        },
+        'logs-evening': {
+          // Entirely outside the request window — should be deleted.
+          earliest: '2026-05-23T18:00:00Z',
+          latest: '2026-05-23T23:00:00Z',
+        },
+      },
+    });
+    const { storage } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: 'k', size: 1, storage_class: 'STANDARD' },
+        ],
+      },
+      defaultStorageClass: 'STANDARD',
+    });
+
+    const result = await checkAndMaybeMount(client, storage, 'req-a');
+
+    // Both indices got mounted, but the evening one gets pruned.
+    expect(trace.mount_calls).toHaveLength(2);
+    expect(trace.delete_index_calls).toEqual(['logs-evening']);
+    expect(result.indices_mounted).toBe(1);
+    expect(result.indices_skipped).toBe(1);
+  });
+
+  it('records an error and continues when a single index fails to mount', async () => {
+    const repo = makeRepo({ name: 'r1' });
+    const request = makeThawRequest({ repos: ['r1'] });
+    const { client } = makeClient({
+      thawRequests: [request],
+      repos: [repo],
+      snapshotsByRepo: {
+        r1: [{ snapshot: 'snap-1', indices: ['idx-good', 'idx-bad'] }],
+      },
+    });
+    // Override the mount handler to throw for idx-bad only.
+    const originalMount = client.searchableSnapshots.mount;
+    client.searchableSnapshots.mount = async (params) => {
+      if (params.body.index === 'idx-bad' || params.body.renamed_index === 'idx-bad') {
+        throw new Error('boom');
+      }
+      return originalMount(params);
+    };
+    const { storage } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: 'k', size: 1, storage_class: 'STANDARD' },
+        ],
+      },
+      defaultStorageClass: 'STANDARD',
+    });
+
+    const result = await checkAndMaybeMount(client, storage, 'req-a');
+
+    // idx-good mounted, idx-bad counted as failed. Status still completes
+    // (per-index failures don't abort the request).
+    expect(result.status).toBe('completed');
+    expect(result.indices_mounted).toBe(1);
+    expect(result.indices_failed).toBe(1);
+    expect(result.errors.some((e) => /idx-bad/.test(e.message ?? ''))).toBe(true);
+  });
+
+  it('skips date-overlap pruning when the request has no start/end dates', async () => {
+    const repo = makeRepo({ name: 'r1' });
+    const request = makeThawRequest({
+      repos: ['r1'],
+      start_date: undefined,
+      end_date: undefined,
+    });
+    const { client, trace } = makeClient({
+      thawRequests: [request],
+      repos: [repo],
+      snapshotsByRepo: {
+        r1: [{ snapshot: 'snap-1', indices: ['logs-anything'] }],
+      },
+      // Even though we provide a range here, it should not be queried
+      // because the request has no dates.
+      timestampRanges: {
+        'logs-anything': {
+          earliest: '2099-01-01T00:00:00Z',
+          latest: '2099-12-31T00:00:00Z',
+        },
+      },
+    });
+    const { storage } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: 'k', size: 1, storage_class: 'STANDARD' },
+        ],
+      },
+      defaultStorageClass: 'STANDARD',
+    });
+
+    const result = await checkAndMaybeMount(client, storage, 'req-a');
+
+    expect(result.indices_mounted).toBe(1);
+    expect(result.indices_skipped).toBe(0);
+    expect(trace.delete_index_calls).toEqual([]);
   });
 });

@@ -134,8 +134,11 @@ async function resolveMountedIndexNames(
  * Aggregate min/max `@timestamp` over the given indices. Returns ISO
  * strings, or null/null if the aggregation produces no values
  * (no @timestamp field, no documents).
+ *
+ * Exported for reuse by Thaw's index-mount date-overlap pruning step
+ * — same aggregation shape as repo-level date capture.
  */
-async function getTimestampRange(
+export async function getTimestampRange(
   client: DateRangeEsClient,
   indices: string[]
 ): Promise<{ earliest: string | null; latest: string | null }> {
