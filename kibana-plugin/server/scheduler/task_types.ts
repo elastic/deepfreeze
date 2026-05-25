@@ -44,11 +44,16 @@ import {
   type RepairMetadataActionEsClient,
 } from '../actions/repair_metadata';
 import {
+  checkAndMaybeMount,
+  type ThawActionEsClient,
+} from '../actions/thaw';
+import {
   runUpdateDateRanges,
   type UpdateDateRangesActionEsClient,
   type UpdateDateRangesConfig,
 } from '../actions/update_date_ranges';
 import { getSettings } from '../repositories/settings_repo';
+import { listInProgressThawRequests } from '../repositories/thaw_request_repo';
 import {
   storageClientFactory,
   type AwsStorageClientOptions,
@@ -61,6 +66,7 @@ export const TASK_TYPES = {
   cleanup: 'deepfreeze:cleanup',
   repairMetadata: 'deepfreeze:repair-metadata',
   updateDateRanges: 'deepfreeze:update-date-ranges',
+  thawCheck: 'deepfreeze:thaw-check',
 } as const;
 
 export type DeepfreezeTaskType = (typeof TASK_TYPES)[keyof typeof TASK_TYPES];
@@ -136,6 +142,7 @@ export function registerDeepfreezeTaskTypes(
       CleanupActionEsClient &
       RepairMetadataActionEsClient &
       UpdateDateRangesActionEsClient &
+      ThawActionEsClient &
       AuditEsClient
   > {
     const [coreStart] = await getStartServices();
@@ -146,6 +153,7 @@ export function registerDeepfreezeTaskTypes(
       CleanupActionEsClient &
       RepairMetadataActionEsClient &
       UpdateDateRangesActionEsClient &
+      ThawActionEsClient &
       AuditEsClient;
   }
 
@@ -338,6 +346,79 @@ export function registerDeepfreezeTaskTypes(
                 return out;
               }
             );
+          });
+        },
+      }),
+    },
+
+    [TASK_TYPES.thawCheck]: {
+      title: 'Deepfreeze: check restore progress for in-flight thaws',
+      description:
+        'Poll every in_progress thaw request, advance to completed and re-mount the repo when the underlying S3 restore is warm. Replaces the Python polling thread in orchestration/scheduler.py.',
+      // The poller is best-effort by design — per-request failures are
+      // caught and logged so a single bad request can't keep retrying
+      // and starving the rest. We never want TaskManager to retry this
+      // task itself, since the next scheduled run will pick up where
+      // we left off.
+      maxAttempts: 1,
+      createTaskRunner: () => ({
+        async run() {
+          return runWrapper(TASK_TYPES.thawCheck, logger, async () => {
+            const client = await getInternalEsClient();
+
+            // Settings drive provider selection for the StorageClient.
+            // No settings → cluster isn't initialized → nothing to do.
+            const settings = await getSettings(client);
+            if (!settings) {
+              logger.debug('[deepfreeze:thaw-check] settings doc absent; skipping run');
+              return;
+            }
+
+            // Pull in-flight requests up front so we know whether there's
+            // any work at all. Skipping the StorageClient build when the
+            // list is empty avoids burning a credential resolution on
+            // every 60s tick during quiet periods.
+            const inFlight = await listInProgressThawRequests(client);
+            if (inFlight.length === 0) {
+              logger.debug('[deepfreeze:thaw-check] no in_progress thaw requests; skipping');
+              return;
+            }
+
+            const storage = await storageClientFactory(
+              settings.provider,
+              storageOptions?.aws ?? {}
+            );
+
+            // No audit wrapper here. A 60s tick that produces a row even
+            // when nothing changed would drown the Activity tab. Per-
+            // request `thaw_check` audit rows are still produced by the
+            // /check HTTP route for user-initiated checks; the scheduled
+            // poller only logs.
+            for (const request of inFlight) {
+              try {
+                const out = await checkAndMaybeMount(client, storage, request.request_id, {
+                  log,
+                });
+                if (out.all_complete) {
+                  logger.info(
+                    `[deepfreeze:thaw-check] ${request.request_id}: restore complete (mount=${out.mounted ? 'just_mounted' : 'no-op'}, status=${out.status})`
+                  );
+                } else {
+                  logger.debug(
+                    `[deepfreeze:thaw-check] ${request.request_id}: still in progress (${out.repos.length} repo(s))`
+                  );
+                }
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                logger.warn(
+                  `[deepfreeze:thaw-check] ${request.request_id} check failed: ${msg}`
+                );
+                // Continue with the next request; the next tick will
+                // retry this one. Persistent failures show up as
+                // ThawRequest status flipping to `failed` from inside
+                // checkAndMaybeMount on its own terms.
+              }
+            }
           });
         },
       }),

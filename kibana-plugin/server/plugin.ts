@@ -26,7 +26,16 @@ import {
 } from './scheduler/diagnostics_route';
 import { migrateScheduledJobs } from './scheduler/migration';
 import { registerSchedulesRoute } from './scheduler/schedules_route';
-import { registerDeepfreezeTaskTypes } from './scheduler/task_types';
+import { registerDeepfreezeTaskTypes, TASK_TYPES } from './scheduler/task_types';
+
+/**
+ * Stable, well-known TaskManager ID for the system-owned thaw-check
+ * poller singleton. Kept here rather than in `task_types.ts` because
+ * the ID names a *scheduled instance*, not a task type — `task_types`
+ * registers the type definition; this ID identifies the one instance
+ * we always want present on a running cluster.
+ */
+const DEEPFREEZE_THAW_CHECK_TASK_ID = 'deepfreeze:system:thaw-check';
 import {
   registerScheduledJobSavedObject,
   SCHEDULED_JOB_SO_TYPE,
@@ -275,6 +284,36 @@ export class DeepfreezePlugin
           this.schedulerDiagnostics.last_result = null;
           this.schedulerDiagnostics.last_error = msg;
           this.logger.error(`deepfreeze: bootstrap failed: ${msg}`);
+        }
+
+        // Schedule the system-owned thaw-check poller. Not driven by a
+        // user-facing scheduled_job doc — every cluster running this
+        // plugin needs this poller to advance in_progress thaw requests
+        // once their S3 restores complete. `ensureScheduled` is
+        // idempotent, so restarting Kibana re-anchors the task without
+        // creating duplicates.
+        //
+        // 60s interval matches the cadence in
+        //   packages/deepfreeze-server/deepfreeze_server/orchestration/scheduler.py
+        // for the equivalent Python polling thread.
+        try {
+          await plugins.taskManager.ensureScheduled({
+            id: DEEPFREEZE_THAW_CHECK_TASK_ID,
+            taskType: TASK_TYPES.thawCheck,
+            schedule: { interval: '60s' },
+            params: {},
+            state: {},
+            scope: ['deepfreeze'],
+          });
+          this.logger.debug(
+            `deepfreeze: thaw-check poller anchored (id=${DEEPFREEZE_THAW_CHECK_TASK_ID}, interval=60s)`
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `deepfreeze: failed to anchor thaw-check poller: ${msg}. ` +
+              `In-progress thaw requests will need to be advanced manually via the /check route.`
+          );
         }
       })();
     }

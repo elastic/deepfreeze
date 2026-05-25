@@ -352,8 +352,30 @@ describe('bootstrapDeepfreezeSchedules — orphan sweep', () => {
         TASK_TYPES.cleanup,
         TASK_TYPES.repairMetadata,
         TASK_TYPES.updateDateRanges,
+        TASK_TYPES.thawCheck,
       ],
     });
+  });
+
+  it('does not remove system-owned task instances even when no SO matches', async () => {
+    // The thaw-check poller singleton is installed unconditionally by
+    // plugin.start() — it has no scheduled_job SO behind it. The sweep
+    // must leave it alone or the poller would get removed every plugin
+    // start (then re-anchored, but with a window where in_progress
+    // thaws stall).
+    const { taskManager, calls } = makeTaskManager([
+      { id: 'deepfreeze:system:thaw-check', taskType: TASK_TYPES.thawCheck },
+      { id: 'scheduled_job:stale-rotate', taskType: TASK_TYPES.rotate },
+    ]);
+    const result = await bootstrapDeepfreezeSchedules({
+      client: makeRepoClient([]),
+      taskManager,
+      logger: makeLogger(),
+    });
+    // The stale rotate task IS swept (no matching SO), but the system
+    // thaw-check singleton is preserved.
+    expect(result.removed_orphans).toEqual(['scheduled_job:stale-rotate']);
+    expect(calls.removeIfExists).toEqual(['scheduled_job:stale-rotate']);
   });
 
   it('keeps going when a single orphan removal fails', async () => {

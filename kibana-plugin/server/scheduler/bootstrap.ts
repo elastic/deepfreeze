@@ -48,11 +48,25 @@ import {
 import { TASK_TYPES, type DeepfreezeTaskType } from './task_types';
 
 /**
+ * Task types owned by the plugin itself rather than by user-defined
+ * scheduled-job SOs. The orphan-sweep skips these so the system-owned
+ * singletons (e.g. the thaw-check poller scheduled by `plugin.start()`)
+ * survive every plugin start.
+ *
+ * Add a task type here when (and only when) it's installed by code
+ * unconditionally rather than via a scheduled_job SavedObject.
+ */
+const SYSTEM_TASK_TYPES: ReadonlySet<DeepfreezeTaskType> = new Set([
+  TASK_TYPES.thawCheck,
+]);
+
+/**
  * Map a `ScheduledJobDoc.action` string to the registered TaskManager
  * task type. Returns `null` for unknown actions; the caller logs and
  * skips. The mapping mirrors Python's
  *   scheduler.py:_execute_scheduled_action — action_map dict
- * minus the actions we haven't ported (thaw_check, refreeze).
+ * minus refreeze (still not ported). thaw_check is registered as a
+ * system task type rather than a user-schedulable action.
  */
 export function resolveTaskTypeForAction(action: string): DeepfreezeTaskType | null {
   switch (action) {
@@ -182,6 +196,12 @@ async function sweepOrphanTasks(
 
   for (const doc of docs) {
     if (knownIds.has(doc.id)) continue;
+    // System-owned task types (e.g. thaw-check) are installed by
+    // plugin.start() unconditionally, not via a scheduled_job SO.
+    // They have no matching SO by design — leaving them alone.
+    if (SYSTEM_TASK_TYPES.has(doc.taskType as DeepfreezeTaskType)) {
+      continue;
+    }
     try {
       await taskManager.removeIfExists(doc.id);
       logger.info(

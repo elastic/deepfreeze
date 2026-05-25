@@ -55,6 +55,7 @@ describe('registerDeepfreezeTaskTypes', () => {
         TASK_TYPES.cleanup,
         TASK_TYPES.repairMetadata,
         TASK_TYPES.rotate,
+        TASK_TYPES.thawCheck,
         TASK_TYPES.updateDateRanges,
       ].sort()
     );

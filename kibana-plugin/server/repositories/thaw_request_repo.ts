@@ -67,6 +67,43 @@ export async function listThawRequests(
 }
 
 /**
+ * List thaw requests in the `in_progress` state. Used by the
+ * thaw-check TaskManager task to drive automatic restore-completion
+ * polling without having to enumerate every historical request.
+ *
+ * Same 404-tolerance as `listThawRequests`: missing status index →
+ * empty list. Other errors propagate.
+ */
+export async function listInProgressThawRequests(
+  client: ThawRequestRepoEsClient
+): Promise<ThawRequestDoc[]> {
+  try {
+    const response = await client.search({
+      index: STATUS_INDEX,
+      query: {
+        bool: {
+          must: [
+            { term: { doctype: DOCTYPE.thaw_request } },
+            { term: { status: 'in_progress' } },
+          ],
+        },
+      },
+      size: 10000,
+    });
+    return response.hits.hits.map(
+      (hit) => hit._source as unknown as ThawRequestDoc
+    );
+  } catch (err) {
+    if (isNotFound(err)) {
+      return [];
+    }
+    throw new ActionError(
+      `Failed to list in-progress thaw requests: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}
+
+/**
  * Fetch a single thaw request by its request_id. Returns `null` if
  * absent. Other errors propagate.
  */
