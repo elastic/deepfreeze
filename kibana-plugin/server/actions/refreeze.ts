@@ -44,11 +44,24 @@ import {
 /** Subset of `indices.*` ES methods needed to tear down searchable-snapshot indices. */
 export interface RefreezeIndicesEsClient {
   indices: {
-    getSettings: (params: { index: string }) => Promise<Record<string, unknown>>;
+    getSettings: (params: {
+      index: string;
+      /**
+       * Required when scanning `.ds-*` backing indices for searchable-
+       * snapshot teardown — those indices are `hidden: true` by default
+       * and don't match a bare `*` wildcard. Without `expand_wildcards`
+       * including `hidden`, the scan misses them entirely and the
+       * teardown silently succeeds against zero indices.
+       */
+      expand_wildcards?: string;
+    }) => Promise<Record<string, unknown>>;
     getDataStream: (params: { name: string }) => Promise<{
       data_streams?: Array<{ name: string; indices?: Array<{ index_name: string }> }>;
     }>;
-    exists: (params: { index: string }) => Promise<boolean> | boolean;
+    exists: (params: {
+      index: string;
+      expand_wildcards?: string;
+    }) => Promise<boolean> | boolean;
     delete: (params: { index: string }) => Promise<unknown>;
     /**
      * Surgical data-stream edit. Used to detach a single backing index
@@ -147,7 +160,15 @@ async function findSearchableSnapshotIndices(
   client: RefreezeActionEsClient,
   repoName: string
 ): Promise<SearchableSnapshotIndex[]> {
-  const settingsResp = await client.indices.getSettings({ index: '*' });
+  // `expand_wildcards: 'all'` is critical — `.ds-*` data-stream backing
+  // indices are hidden by default, and the bare `*` wildcard doesn't
+  // match them. Omitting this is the silent-no-op trap that caused
+  // refreeze to fall through to `deleteSnapshotRepository` with the
+  // SS indices still in place.
+  const settingsResp = await client.indices.getSettings({
+    index: '*',
+    expand_wildcards: 'all',
+  });
   const ssNames: string[] = [];
   for (const [indexName, raw] of Object.entries(settingsResp)) {
     const store = (
@@ -271,7 +292,12 @@ async function refreezeOneRepo(
 
       // Step 2: delete the (now-standalone) index.
       try {
-        const exists = await client.indices.exists({ index: name });
+        // Same hidden-index gotcha as `getSettings`: `.ds-*` indices
+        // need `expand_wildcards: 'all'` to be discoverable.
+        const exists = await client.indices.exists({
+          index: name,
+          expand_wildcards: 'all',
+        });
         if (!exists) continue;
         await client.indices.delete({ index: name });
         outcome.deleted_indices.push(name);

@@ -356,6 +356,37 @@ describe('runRefreeze happy path', () => {
     ).toBe(true);
   });
 
+  it('passes expand_wildcards=all to getSettings so hidden .ds-* indices are visible', async () => {
+    // Regression for the silent-no-op trap: .ds-* data-stream backing
+    // indices are hidden by default, and a bare `*` wildcard misses
+    // them. Without expand_wildcards: 'all', refreeze would find zero
+    // SS indices to tear down, breeze past the (empty) loop, call
+    // deleteSnapshotRepository, and ES would reject with
+    // repository_conflict_exception. The fix is in the request shape;
+    // verify it actually travels on the wire.
+    const repo = repoDoc('deepfreeze-000005');
+    const { client } = makeClient({
+      thawRequests: [thawReq('r-1', 'completed', [repo.name])],
+      repos: [repo],
+    });
+    let capturedGetSettings: {
+      index: string;
+      expand_wildcards?: string;
+    } | null = null;
+    const orig = client.indices.getSettings;
+    client.indices.getSettings = async (params) => {
+      capturedGetSettings = params;
+      return orig(params);
+    };
+
+    await runRefreeze(client, { request_id: 'r-1' });
+
+    expect(capturedGetSettings).toMatchObject({
+      index: '*',
+      expand_wildcards: 'all',
+    });
+  });
+
   it('records a warning when a thaw request references a repo that is not in the status index', async () => {
     const { client } = makeClient({
       thawRequests: [thawReq('r-1', 'completed', ['ghost-repo'])],
