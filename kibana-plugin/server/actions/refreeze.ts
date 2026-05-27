@@ -48,9 +48,22 @@ export interface RefreezeIndicesEsClient {
     getDataStream: (params: { name: string }) => Promise<{
       data_streams?: Array<{ name: string; indices?: Array<{ index_name: string }> }>;
     }>;
-    deleteDataStream: (params: { name: string }) => Promise<unknown>;
     exists: (params: { index: string }) => Promise<boolean> | boolean;
     delete: (params: { index: string }) => Promise<unknown>;
+    /**
+     * Surgical data-stream edit. Used to detach a single backing index
+     * from its data stream (so we can then `indices.delete` it) without
+     * destroying the rest of the stream. Refreeze never deletes a whole
+     * data stream — see comment on `refreezeOneRepo` for why.
+     */
+    modifyDataStream: (params: {
+      body: {
+        actions: Array<{
+          add_backing_index?: { data_stream: string; index: string };
+          remove_backing_index?: { data_stream: string; index: string };
+        }>;
+      };
+    }) => Promise<unknown>;
   };
 }
 
@@ -75,7 +88,15 @@ const NOOP_LOG = { debug: () => {}, warn: () => {} };
 
 export interface RefreezeStepRecord {
   type: 'thaw_request' | 'repository' | 'index' | 'data_stream';
-  action: 'would_refreeze' | 'refrozen' | 'deleted' | 'unmounted' | 'frozen' | 'skipped' | 'rejected';
+  action:
+    | 'would_refreeze'
+    | 'refrozen'
+    | 'deleted'
+    | 'detached'
+    | 'unmounted'
+    | 'frozen'
+    | 'skipped'
+    | 'rejected';
   name?: string;
   detail?: string;
 }
@@ -100,64 +121,65 @@ async function loadInitializedSettings(client: RefreezeActionEsClient): Promise<
   }
 }
 
-interface SearchableSnapshotIndexInfo {
-  indices: string[];
-  dataStreams: string[];
+interface SearchableSnapshotIndex {
+  /** Index name (the literal ES index, including any `.ds-` prefix). */
+  name: string;
+  /**
+   * Name of the data stream this index is currently a backing index of,
+   * or `null` if it's standalone. Drives the detach-before-delete
+   * decision in `refreezeOneRepo`.
+   */
+  datastream: string | null;
 }
 
 /**
  * Find searchable-snapshot indices whose `store.snapshot.repository_name`
- * matches `repoName`, and split them into standalone indices vs.
- * data-stream backing indices. Data streams must be deleted via the
- * data-stream API, not by deleting their `.ds-*` backing indices
- * directly.
+ * matches `repoName`, and annotate each with the data stream it
+ * currently belongs to (if any).
+ *
+ * The earlier shape of this function returned a list of data streams
+ * to *delete* — that turned out to be catastrophically wrong, because
+ * a single thawed backing index pinned the entire data stream's hot
+ * indices for deletion alongside it. See `refreezeOneRepo` for the
+ * surgical replacement.
  */
 async function findSearchableSnapshotIndices(
   client: RefreezeActionEsClient,
   repoName: string
-): Promise<SearchableSnapshotIndexInfo> {
+): Promise<SearchableSnapshotIndex[]> {
   const settingsResp = await client.indices.getSettings({ index: '*' });
-  const all: string[] = [];
+  const ssNames: string[] = [];
   for (const [indexName, raw] of Object.entries(settingsResp)) {
     const store = (
       (raw as { settings?: { index?: { store?: Record<string, unknown> } } })
         .settings?.index?.store ?? {}
     ) as { type?: string; snapshot?: { repository_name?: string } };
     if (store.type === 'snapshot' && store.snapshot?.repository_name === repoName) {
-      all.push(indexName);
+      ssNames.push(indexName);
     }
   }
-  if (all.length === 0) {
-    return { indices: [], dataStreams: [] };
-  }
+  if (ssNames.length === 0) return [];
 
-  // Resolve which data streams own any of these backing indices.
-  let dsToDelete: Set<string>;
+  // Build a `backing-index → data-stream-name` lookup so we can
+  // annotate each SS index with its current data-stream membership
+  // (if any). One scan over all data streams; cheap.
+  const indexToStream = new Map<string, string>();
   try {
     const dsResp = await client.indices.getDataStream({ name: '*' });
-    const ssSet = new Set(all);
-    dsToDelete = new Set();
     for (const ds of dsResp.data_streams ?? []) {
-      const backing = (ds.indices ?? []).map((i) => i.index_name);
-      if (backing.some((b) => ssSet.has(b))) dsToDelete.add(ds.name);
-    }
-  } catch {
-    // Data-stream API may be unavailable; fall back to no data streams.
-    dsToDelete = new Set<string>();
-  }
-
-  const dsBackingIndices = new Set<string>();
-  if (dsToDelete.size > 0) {
-    const dsResp = await client.indices.getDataStream({ name: '*' });
-    for (const ds of dsResp.data_streams ?? []) {
-      if (dsToDelete.has(ds.name)) {
-        for (const idx of ds.indices ?? []) dsBackingIndices.add(idx.index_name);
+      for (const idx of ds.indices ?? []) {
+        indexToStream.set(idx.index_name, ds.name);
       }
     }
+  } catch {
+    // Data-stream API may be unavailable on some deployments — treat
+    // every SS index as standalone in that case.
   }
 
-  const standalone = all.filter((i) => !dsBackingIndices.has(i));
-  return { indices: standalone, dataStreams: Array.from(dsToDelete) };
+  return ssNames.map((name) => ({
+    name,
+    datastream: indexToStream.get(name) ?? null,
+  }));
 }
 
 /** Result of refreezing a single repo within a request. */
@@ -165,10 +187,32 @@ interface RepoRefreezeOutcome {
   repo: string;
   success: boolean;
   deleted_indices: string[];
-  deleted_data_streams: string[];
+  detached_indices: string[];
   error?: string;
 }
 
+/**
+ * Refreeze a single repo by tearing down every searchable-snapshot
+ * index referencing it, then unregistering the snapshot repo from ES.
+ *
+ * For each SS index:
+ *   - If it's a backing index of a data stream: detach it via
+ *     `indices.modify_data_stream` (`remove_backing_index`), then
+ *     delete the now-standalone index. This is the surgical path —
+ *     the data stream itself and any sibling backing indices are
+ *     untouched.
+ *   - If it's standalone: delete directly.
+ *
+ * The prior implementation deleted whole data streams whenever any
+ * backing index referenced the repo — catastrophic, since it took
+ * the active hot backing indices down with the thawed one. NEVER
+ * delete a data stream during refreeze.
+ *
+ * If ANY index can't be torn down, we skip the `deleteSnapshotRepository`
+ * step — ES would reject it with `repository_conflict_exception`
+ * anyway, and surfacing the cleaner per-index failure is more useful
+ * than papering it over with the cascade.
+ */
 async function refreezeOneRepo(
   client: RefreezeActionEsClient,
   repo: RepositoryDoc,
@@ -179,36 +223,75 @@ async function refreezeOneRepo(
     repo: repo.name,
     success: false,
     deleted_indices: [],
-    deleted_data_streams: [],
+    detached_indices: [],
   };
 
   try {
-    const { indices, dataStreams } = await findSearchableSnapshotIndices(client, repo.name);
+    const ssIndices = await findSearchableSnapshotIndices(client, repo.name);
 
-    for (const ds of dataStreams) {
+    let perIndexFailures = 0;
+    for (const { name, datastream } of ssIndices) {
+      // Step 1: detach from the data stream if attached. A failure
+      // here means we won't be able to delete the index below, so
+      // record it and move on.
+      if (datastream) {
+        try {
+          await client.indices.modifyDataStream({
+            body: {
+              actions: [
+                {
+                  remove_backing_index: {
+                    data_stream: datastream,
+                    index: name,
+                  },
+                },
+              ],
+            },
+          });
+          outcome.detached_indices.push(name);
+          steps.push({
+            type: 'index',
+            action: 'detached',
+            name,
+            detail: `removed from data stream ${datastream}`,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.warn(`Failed to detach ${name} from data stream ${datastream}: ${msg}`);
+          steps.push({
+            type: 'index',
+            action: 'skipped',
+            name,
+            detail: `detach from ${datastream} failed: ${msg}`,
+          });
+          perIndexFailures += 1;
+          continue;
+        }
+      }
+
+      // Step 2: delete the (now-standalone) index.
       try {
-        await client.indices.deleteDataStream({ name: ds });
-        outcome.deleted_data_streams.push(ds);
-        steps.push({ type: 'data_stream', action: 'deleted', name: ds });
+        const exists = await client.indices.exists({ index: name });
+        if (!exists) continue;
+        await client.indices.delete({ index: name });
+        outcome.deleted_indices.push(name);
+        steps.push({ type: 'index', action: 'deleted', name });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        log.warn(`Failed to delete data stream ${ds}: ${msg}`);
-        steps.push({ type: 'data_stream', action: 'skipped', name: ds, detail: msg });
+        log.warn(`Failed to delete index ${name}: ${msg}`);
+        steps.push({ type: 'index', action: 'skipped', name, detail: msg });
+        perIndexFailures += 1;
       }
     }
 
-    for (const idx of indices) {
-      try {
-        const exists = await client.indices.exists({ index: idx });
-        if (!exists) continue;
-        await client.indices.delete({ index: idx });
-        outcome.deleted_indices.push(idx);
-        steps.push({ type: 'index', action: 'deleted', name: idx });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.warn(`Failed to delete index ${idx}: ${msg}`);
-        steps.push({ type: 'index', action: 'skipped', name: idx, detail: msg });
-      }
+    if (perIndexFailures > 0) {
+      // Don't even try to unregister the repo — ES will reject with
+      // repository_conflict_exception because the SS indices we couldn't
+      // delete still reference it. The per-index `skipped` steps above
+      // already explain why, and the caller's rejected_requests entry
+      // surfaces the detail to the operator.
+      outcome.error = `${perIndexFailures} index/indices could not be torn down`;
+      return outcome;
     }
 
     await deleteSnapshotRepository(client, repo.name);

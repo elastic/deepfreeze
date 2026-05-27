@@ -25,6 +25,7 @@ interface FakeOpts {
 interface Trace {
   deleted_indices: string[];
   deleted_data_streams: string[];
+  detached_from_data_stream: Array<{ data_stream: string; index: string }>;
   deleted_repos: string[];
   index_calls: Array<{ index: string; id: string; document: Record<string, unknown> }>;
 }
@@ -33,11 +34,19 @@ function makeClient(opts: FakeOpts = {}): { client: RefreezeActionEsClient; trac
   const trace: Trace = {
     deleted_indices: [],
     deleted_data_streams: [],
+    detached_from_data_stream: [],
     deleted_repos: [],
     index_calls: [],
   };
 
   const liveIndices = new Set(Object.keys(opts.indices ?? {}));
+  // Mutable view of the data streams so detach actions can be reflected
+  // on subsequent calls (matches ES behavior). Kept in scope for the
+  // lifetime of this client.
+  const dataStreams = (opts.dataStreams ?? []).map((ds) => ({
+    name: ds.name,
+    backing: [...ds.backing],
+  }));
 
   const client: RefreezeActionEsClient = {
     indices: {
@@ -58,19 +67,28 @@ function makeClient(opts: FakeOpts = {}): { client: RefreezeActionEsClient; trac
         return out;
       },
       getDataStream: async () => ({
-        data_streams: (opts.dataStreams ?? []).map((ds) => ({
+        data_streams: dataStreams.map((ds) => ({
           name: ds.name,
           indices: ds.backing.map((b) => ({ index_name: b })),
         })),
       }),
-      deleteDataStream: async ({ name }) => {
-        trace.deleted_data_streams.push(name);
-        return {};
-      },
       delete: async ({ index }) => {
         if (opts.failDeleteIndices?.includes(index)) throw new Error('boom-' + index);
         trace.deleted_indices.push(index);
         liveIndices.delete(index);
+        return {};
+      },
+      modifyDataStream: async ({ body }) => {
+        for (const action of body.actions ?? []) {
+          if (action.remove_backing_index) {
+            const { data_stream, index } = action.remove_backing_index;
+            trace.detached_from_data_stream.push({ data_stream, index });
+            // Reflect the detach in the in-memory view so a subsequent
+            // `getDataStream` would no longer report this index.
+            const ds = dataStreams.find((d) => d.name === data_stream);
+            if (ds) ds.backing = ds.backing.filter((b) => b !== index);
+          }
+        }
         return {};
       },
     } as RefreezeActionEsClient['indices'],
@@ -284,24 +302,38 @@ describe('runRefreeze happy path', () => {
     expect(thawDocSave).toMatchObject({ status: 'refrozen' });
   });
 
-  it('deletes data streams (and skips the .ds-* backing indices) before standalone indices', async () => {
+  it('detaches data-stream backing indices before deleting them; never deletes the data stream itself', async () => {
+    // Critical safety property: `logs` data stream has both a thawed
+    // backing index (.ds-logs-001) AND active hot backings
+    // (.ds-logs-002, .ds-logs-003). Refreezing the thawed one must
+    // surgically detach + delete just .ds-logs-001 — the data stream
+    // and its other backings must survive untouched. Whole-stream
+    // delete would destroy the operator's hot data.
     const { client, trace } = makeClient({
       thawRequests: [thawReq('r-1', 'completed', ['deepfreeze-000005'])],
       repos: [repoDoc('deepfreeze-000005')],
       indices: {
         '.ds-logs-001': { repository_name: 'deepfreeze-000005' },
-        '.ds-logs-002': { repository_name: 'deepfreeze-000005' },
         'standalone': { repository_name: 'deepfreeze-000005' },
       },
-      dataStreams: [{ name: 'logs', backing: ['.ds-logs-001', '.ds-logs-002'] }],
+      dataStreams: [
+        {
+          name: 'logs',
+          backing: ['.ds-logs-001', '.ds-logs-002', '.ds-logs-003'],
+        },
+      ],
     });
 
     await runRefreeze(client, { request_id: 'r-1' });
 
-    expect(trace.deleted_data_streams).toEqual(['logs']);
-    // Only the standalone index gets a direct delete; the .ds-* indices
-    // are removed via the data-stream API.
-    expect(trace.deleted_indices).toEqual(['standalone']);
+    // The backing index was detached, then deleted.
+    expect(trace.detached_from_data_stream).toEqual([
+      { data_stream: 'logs', index: '.ds-logs-001' },
+    ]);
+    expect(trace.deleted_indices.sort()).toEqual(['.ds-logs-001', 'standalone']);
+    // No data stream destruction.
+    expect(trace.deleted_data_streams).toEqual([]);
+    expect(trace.deleted_repos).toEqual(['deepfreeze-000005']);
   });
 
   it('records per-index delete failures as step skips but still proceeds with the repo', async () => {
