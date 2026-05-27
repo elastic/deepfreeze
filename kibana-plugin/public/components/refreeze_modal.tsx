@@ -82,7 +82,17 @@ export function RefreezeModal({
             (result.errors.length ? ` ${result.errors.length} warning(s).` : ''),
         });
       } else {
-        const reason = result.rejected_requests[0]?.reason ?? 'unknown reason';
+        // Prefer the server's structured rejection reason; fall back to
+        // the `errors[]` collection (which carries per-repo failure
+        // detail) when the rejection slot is empty for any reason.
+        const rejection = result.rejected_requests.find(
+          (r) => r.request_id === request_id
+        );
+        const reason =
+          rejection?.reason ||
+          (result.errors.length > 0
+            ? result.errors.map((e) => e.message).join('; ')
+            : 'unknown reason — check the Activity tab for the audit row');
         notifications.toasts.addWarning({
           title: `Refreeze of ${request_id.slice(0, 8)} did not complete`,
           text: reason,

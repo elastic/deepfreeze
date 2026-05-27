@@ -334,5 +334,39 @@ describe('runRefreeze happy path', () => {
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toMatchObject({ target: 'ghost-repo', severity: 'warning' });
     expect(result.refrozen_requests).toEqual([]);
+    // And — the rejection slot carries a specific reason so the UI
+    // toast doesn't have to fall back to "unknown reason".
+    expect(result.rejected_requests).toEqual([
+      { request_id: 'r-1', reason: expect.stringContaining('ghost-repo') },
+    ]);
+  });
+
+  it('populates rejected_requests with the per-repo error detail when a repo fails to refreeze', async () => {
+    // Repo doc exists, but one of its searchable_snapshot indices can't
+    // be deleted — that bubbles up to `outcome.error` inside
+    // refreezeOneRepo, which then propagates to the cascade
+    // `snapshot.deleteRepository` step. Either way: allRepoOk goes
+    // false, and rejected_requests must carry the reason.
+    const repo = repoDoc('deepfreeze-000005');
+    const { client } = makeClient({
+      thawRequests: [thawReq('r-1', 'completed', [repo.name])],
+      repos: [repo],
+      // No live indices, so refreezeOneRepo's index-listing finds
+      // nothing to delete; the repo unmount then runs. To force a real
+      // failure, override deleteRepository on the returned client.
+    });
+    client.snapshot.deleteRepository = async () => {
+      throw new Error('repo busy: has active searchable_snapshot indices');
+    };
+
+    const result = await runRefreeze(client, { request_id: 'r-1' });
+
+    expect(result.refrozen_requests).toEqual([]);
+    expect(result.rejected_requests).toEqual([
+      {
+        request_id: 'r-1',
+        reason: expect.stringMatching(/deepfreeze-000005.*repo busy/),
+      },
+    ]);
   });
 });

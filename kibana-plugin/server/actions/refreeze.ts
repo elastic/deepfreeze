@@ -366,10 +366,16 @@ export async function runRefreeze(
     }
 
     let allRepoOk = true;
+    // Per-request failure details so the rejection reason can carry the
+    // specific repo errors back to the UI. Without this the toast just
+    // says "unknown reason" while the actual cause is buried in errors[].
+    const thisReqFailures: string[] = [];
     for (const repoName of req.repos) {
       const repoDoc = repoByName.get(repoName);
       if (!repoDoc) {
         log.warn(`Repo ${repoName} referenced by ${req.request_id} not in status index`);
+        const detail = `${repoName}: not found in status index`;
+        thisReqFailures.push(detail);
         errors.push({
           code: 'ACTION_FAILED',
           message: `Repo ${repoName} not found in status index; cannot refreeze.`,
@@ -383,6 +389,8 @@ export async function runRefreeze(
       const outcome = await refreezeOneRepo(client, repoDoc, steps, log);
       if (!outcome.success) {
         allRepoOk = false;
+        const detail = `${repoName}: ${outcome.error ?? 'unknown error'}`;
+        thisReqFailures.push(detail);
         errors.push({
           code: 'ACTION_FAILED',
           message: `Failed to refreeze ${repoName}: ${outcome.error}`,
@@ -397,6 +405,13 @@ export async function runRefreeze(
       refrozen.push(req.request_id);
       steps.push({ type: 'thaw_request', action: 'refrozen', name: req.request_id });
     } else {
+      rejected.push({
+        request_id: req.request_id,
+        reason:
+          thisReqFailures.length > 0
+            ? thisReqFailures.join('; ')
+            : 'one or more repos failed to refreeze',
+      });
       steps.push({
         type: 'thaw_request',
         action: 'skipped',
