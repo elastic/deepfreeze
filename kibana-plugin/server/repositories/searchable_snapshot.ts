@@ -49,6 +49,15 @@ export interface SearchableSnapshotEsClient {
       index: string;
       body: Record<string, unknown>;
     }) => Promise<unknown>;
+    getDataStream: (params: { name: string }) => Promise<unknown>;
+    modifyDataStream: (params: {
+      body: {
+        actions: Array<{
+          add_backing_index?: { data_stream: string; index: string };
+          remove_backing_index?: { data_stream: string; index: string };
+        }>;
+      };
+    }) => Promise<unknown>;
   };
   ilm: {
     getLifecycle: (params: { name?: string }) => Promise<Record<string, unknown>>;
@@ -127,13 +136,22 @@ export function stripFmClonePrefix(indexName: string): string {
  * Idempotently create the `{repo}-thawed` ILM policy. Returns the
  * policy name in both the "already existed" and "just created" cases.
  *
- * The policy has a single Delete phase at min_age 29d with
- * `delete_searchable_snapshot: true`. This matches the 30-day S3
- * restore-window ceiling: ES auto-cleans the mounted index one day
- * before S3 would auto-evict the restored copy, so we never leave an
- * index pointing at a re-frozen object.
- *
- * Mirrors `create_thawed_ilm_policy` in Python utilities.py:1019.
+ * Policy shape:
+ *   - **Cold phase at min_age 0** — the mounted searchable_snapshot
+ *     enters the cold tier immediately so the local cache lands on
+ *     cold-tier nodes. The set_priority action is just a placeholder
+ *     so ILM has something to execute; the tier-preference update
+ *     happens automatically on phase entry.
+ *   - **Delete phase at min_age 29d** — one day before the S3
+ *     restore-window ceiling (30 days max). After that the mount
+ *     can no longer read its data, so ILM tears it down.
+ *   - **`delete_searchable_snapshot: false`** — project-wide rule:
+ *     deepfreeze ILM never deletes the underlying snapshot. Snapshot
+ *     deletion is a deliberate operator action (Refreeze, Rotate's
+ *     archive step, Cleanup), not an automatic ILM consequence.
+ *     Diverges from Python's `create_thawed_ilm_policy` here on
+ *     purpose — Python uses `True`, deepfreeze's Kibana plugin uses
+ *     `False`.
  */
 export async function ensureThawedIlmPolicy(
   client: SearchableSnapshotEsClient,
@@ -142,7 +160,6 @@ export async function ensureThawedIlmPolicy(
   const policyName = `${repo}-thawed`;
   try {
     await client.ilm.getLifecycle({ name: policyName });
-    // Already exists — no-op.
     return policyName;
   } catch (err) {
     if (!isNotFound(err)) throw err;
@@ -151,11 +168,17 @@ export async function ensureThawedIlmPolicy(
     name: policyName,
     policy: {
       phases: {
+        cold: {
+          min_age: '0ms',
+          actions: {
+            set_priority: { priority: 0 },
+          },
+        },
         delete: {
           min_age: '29d',
           actions: {
             delete: {
-              delete_searchable_snapshot: true,
+              delete_searchable_snapshot: false,
             },
           },
         },
@@ -236,6 +259,86 @@ export async function mountSnapshotIndex(
     const msg = err instanceof Error ? err.message : String(err);
     log.warn(`searchable_snapshot: failed to mount ${mountedName}: ${msg}`);
     return { mounted: false, alreadyMounted: false };
+  }
+}
+
+/**
+ * If `indexName` looks like a data-stream backing index, extract the
+ * data-stream name from the conventional `.ds-<ds-name>-<YYYY.MM.DD>-<NNNNNN>`
+ * pattern. Returns `null` when the name doesn't match. Pure function;
+ * no ES round-trip.
+ *
+ * Mirrors the name-parsing branch of Python's
+ * `get_index_datastream_name` (`utilities.py:2252`). Python also has a
+ * settings-lookup fallback path; we skip it because every mounted
+ * data-stream backing index we care about reaches us with the
+ * canonical `.ds-` name (fm-clone prefix stripped by `mountSnapshotIndex`).
+ */
+export function parseDataStreamFromIndexName(indexName: string): string | null {
+  if (!indexName.startsWith('.ds-')) return null;
+  const remaining = indexName.slice(4);
+  // Trailing two segments are date (YYYY.MM.DD) and rollover sequence
+  // (NNNNNN). Everything before them is the data-stream name, which
+  // may itself contain hyphens. `rsplit(remaining, '-', 2)` in Python
+  // terms — we slice manually since JS's `split` can't limit from the
+  // right.
+  const lastHyphen = remaining.lastIndexOf('-');
+  if (lastHyphen <= 0) return null;
+  const beforeSeq = remaining.slice(0, lastHyphen);
+  const penultimateHyphen = beforeSeq.lastIndexOf('-');
+  if (penultimateHyphen <= 0) return null;
+  return beforeSeq.slice(0, penultimateHyphen);
+}
+
+/**
+ * Re-add a backing index to its data stream after thaw-time mount.
+ * Returns true on success, false on any failure (best-effort — the
+ * caller logs but doesn't abort the thaw on a failed re-add).
+ *
+ * Verifies the data stream exists first; if it doesn't, returns false
+ * without attempting the modify_data_stream call. A thawed backing
+ * index whose data stream has been deleted has no home to return to.
+ *
+ * Mirrors Python's `add_index_to_datastream` (`utilities.py:2307`).
+ */
+export async function addIndexToDatastream(
+  client: SearchableSnapshotEsClient,
+  datastreamName: string,
+  indexName: string,
+  log: { debug: (m: string) => void; warn: (m: string) => void }
+): Promise<boolean> {
+  try {
+    await client.indices.getDataStream({ name: datastreamName });
+  } catch (err) {
+    if (isNotFound(err)) {
+      log.warn(
+        `Cannot re-add ${indexName} to ${datastreamName}: data stream does not exist`
+      );
+      return false;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn(`Data stream lookup failed for ${datastreamName}: ${msg}`);
+    return false;
+  }
+  try {
+    await client.indices.modifyDataStream({
+      body: {
+        actions: [
+          {
+            add_backing_index: {
+              data_stream: datastreamName,
+              index: indexName,
+            },
+          },
+        ],
+      },
+    });
+    log.debug(`Re-added ${indexName} to data stream ${datastreamName}`);
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn(`Failed to re-add ${indexName} to ${datastreamName}: ${msg}`);
+    return false;
   }
 }
 

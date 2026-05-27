@@ -33,18 +33,17 @@ import {
   type SnapshotRepoEsClient,
 } from '../repositories/snapshot_repo';
 import {
+  addIndexToDatastream,
   assignIlmPolicy,
   ensureThawedIlmPolicy,
   findLatestSnapshotForIndex,
   getAllIndicesInRepo,
   mountSnapshotIndex,
+  parseDataStreamFromIndexName,
   stripFmClonePrefix,
   type SearchableSnapshotEsClient,
 } from '../repositories/searchable_snapshot';
-import {
-  getTimestampRange,
-  type DateRangeEsClient,
-} from '../repositories/repository_date_range';
+import type { DateRangeEsClient } from '../repositories/repository_date_range';
 import {
   getThawRequest,
   saveThawRequest,
@@ -470,10 +469,15 @@ export interface ThawProgressResult {
    * completed request rechecked later.
    */
   indices_mounted?: number;
-  /** Count of indices the mount step pruned because their @timestamp range fell outside the request window. */
-  indices_skipped?: number;
   /** Count of indices the mount step couldn't mount (per-index ES errors). */
   indices_failed?: number;
+  /**
+   * Count of mounted indices the mount step successfully re-added to
+   * their owning data stream via `indices.modify_data_stream`.
+   * Indices that weren't data-stream backing indices to begin with are
+   * not counted (re-add doesn't apply to them).
+   */
+  indices_readded_to_datastream?: number;
   errors: ServiceError[];
   checked_at: string;
 }
@@ -738,21 +742,17 @@ export async function checkAndMaybeMount(
     }
   }
 
-  // Now that the repos are re-registered with ES, mount the underlying
-  // snapshot indices as searchable snapshots. Without this step the
-  // operator can see the repo in Stack Management → Snapshot and
-  // Restore but the actual data isn't queryable.
+  // Now that the repos are re-registered with ES, mount every snapshot
+  // index in those repos as a searchable snapshot. We deliberately do
+  // NOT trim by the request's date window: mounting all of the repo's
+  // indices gives the operator more context when searching the thawed
+  // data, and since the underlying S3 objects are warm until
+  // expires_at, leaving these indices visible is free.
   //
   // Best-effort: per-index failures are folded into `errors[]` and the
   // request still completes. A complete mount-step failure only flips
   // the request to `failed` when the repo-level mount above also fails.
-  const indexMount = await findAndMountIndicesInDateRange(
-    client,
-    mountedRepos,
-    request.start_date,
-    request.end_date,
-    log
-  );
+  const indexMount = await mountAllRepoIndices(client, mountedRepos, log);
   for (const e of indexMount.errors) {
     errors.push(e);
   }
@@ -762,9 +762,8 @@ export async function checkAndMaybeMount(
 
   log.debug(
     `Thaw ${request_id} index-mount summary: ` +
-      `${indexMount.mounted} mounted, ` +
-      `${indexMount.skipped} skipped (date range), ` +
-      `${indexMount.failed} failed`
+      `${indexMount.mounted} mounted, ${indexMount.failed} failed, ` +
+      `${indexMount.readded} re-added to data stream`
   );
 
   return {
@@ -776,8 +775,8 @@ export async function checkAndMaybeMount(
     all_complete: true,
     mounted: !mountFailed,
     indices_mounted: indexMount.mounted,
-    indices_skipped: indexMount.skipped,
     indices_failed: indexMount.failed,
+    indices_readded_to_datastream: indexMount.readded,
     errors,
     checked_at,
   };
@@ -785,43 +784,35 @@ export async function checkAndMaybeMount(
 
 /**
  * For each newly-thawed repo: create the `{repo}-thawed` ILM policy,
- * enumerate every index in the repo's snapshots, mount each as a
- * searchable_snapshot, and trim back any whose `@timestamp` range
- * doesn't overlap the requested `[start_date, end_date]` window. The
- * trim step matches Python `find_and_mount_indices_in_date_range` —
- * we want the operator to get the indices they asked for, not every
- * index that happens to live in the same repo.
+ * enumerate every index in the repo's snapshots, and mount each as a
+ * searchable_snapshot. The thaw_request's date window is NOT used to
+ * trim the result — we mount everything in the repo and let the
+ * operator see the full neighborhood of data. The Glacier restore has
+ * already warmed the underlying objects until `expires_at`, so leaving
+ * the non-requested indices visible is free and gives the operator
+ * more context when querying.
  *
- * When `start_date` / `end_date` are absent (legacy thaw_request with
- * no range, or a request whose repos lacked date ranges at the time),
- * we mount everything and skip the trim. Matches Python's fallback.
+ * Diverges from Python's `find_and_mount_indices_in_date_range`, which
+ * mounts-then-trims on the date window.
  *
  * Per-index errors are best-effort — they fold into `errors[]` and the
  * loop continues. A catastrophic per-repo error (e.g. `snapshot.get`
  * fails) records one error and moves to the next repo.
  */
-async function findAndMountIndicesInDateRange(
+async function mountAllRepoIndices(
   client: ThawActionEsClient,
   repos: RepositoryDoc[],
-  startDate: string | undefined,
-  endDate: string | undefined,
   log: { debug: (m: string) => void; warn: (m: string) => void }
 ): Promise<{
   mounted: number;
-  skipped: number;
   failed: number;
+  readded: number;
   errors: ServiceError[];
 }> {
   const errors: ServiceError[] = [];
   let mounted = 0;
-  let skipped = 0;
   let failed = 0;
-
-  // Decide whether to do the date-overlap trim. Both bounds must be
-  // present and parse as valid timestamps; otherwise we mount-and-keep.
-  const start = startDate ? Date.parse(startDate) : NaN;
-  const end = endDate ? Date.parse(endDate) : NaN;
-  const trimByDateRange = Number.isFinite(start) && Number.isFinite(end);
+  let readded = 0;
 
   for (const repo of repos) {
     let policyName: string;
@@ -915,43 +906,26 @@ async function findAndMountIndicesInDateRange(
         }
       }
 
-      // Date-overlap pruning: if the mounted index's @timestamp range
-      // sits outside the requested window, delete it. We tolerate
-      // "couldn't determine range" by keeping the index — matches
-      // Python's defensive behavior.
-      if (trimByDateRange) {
-        try {
-          const range = await getTimestampRange(client, [mountedName]);
-          if (range.earliest && range.latest) {
-            const idxStart = Date.parse(range.earliest);
-            const idxEnd = Date.parse(range.latest);
-            if (
-              Number.isFinite(idxStart) &&
-              Number.isFinite(idxEnd) &&
-              (idxEnd < start || idxStart > end)
-            ) {
-              log.debug(
-                `Trimming ${mountedName}: range ${range.earliest}..${range.latest} outside request window`
-              );
-              try {
-                await client.indices.delete({ index: mountedName });
-                skipped += 1;
-                continue;
-              } catch (delErr) {
-                const msg = delErr instanceof Error ? delErr.message : String(delErr);
-                log.warn(`Failed to trim out-of-range index ${mountedName}: ${msg}`);
-              }
-            }
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          log.debug(`Skipping date-overlap check for ${mountedName}: ${msg}`);
-        }
+      // If this is a data-stream backing index, re-add it to its
+      // data stream so the data shows up under the stream's normal
+      // search namespace. A mounted backing index that isn't attached
+      // to its data stream is searchable directly by name but invisible
+      // to queries that target the data stream. Best-effort —
+      // a failed re-add doesn't fail the thaw.
+      const datastreamName = parseDataStreamFromIndexName(mountedName);
+      if (datastreamName) {
+        const ok = await addIndexToDatastream(
+          client,
+          datastreamName,
+          mountedName,
+          log
+        );
+        if (ok) readded += 1;
       }
 
       mounted += 1;
     }
   }
 
-  return { mounted, skipped, failed, errors };
+  return { mounted, failed, readded, errors };
 }

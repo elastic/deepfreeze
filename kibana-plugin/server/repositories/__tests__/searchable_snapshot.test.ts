@@ -1,9 +1,11 @@
 import {
+  addIndexToDatastream,
   assignIlmPolicy,
   ensureThawedIlmPolicy,
   findLatestSnapshotForIndex,
   getAllIndicesInRepo,
   mountSnapshotIndex,
+  parseDataStreamFromIndexName,
   stripFmClonePrefix,
   type SearchableSnapshotEsClient,
 } from '../searchable_snapshot';
@@ -21,6 +23,10 @@ interface FakeOpts {
   ilmGetLifecycleNotFound?: boolean;
   /** Throw a generic error on `ilm.removeLifecycle`. */
   failIlmRemove?: boolean;
+  /** Set of data stream names that `indices.getDataStream` reports as existing. When undefined, ALL streams exist. */
+  existingDataStreams?: Set<string>;
+  /** Throw on `indices.modifyDataStream`. */
+  failModifyDataStream?: boolean;
 }
 
 interface Trace {
@@ -30,6 +36,8 @@ interface Trace {
   ilm_remove_calls: Array<{ index: string }>;
   put_settings_calls: Array<{ index: string; body: Record<string, unknown> }>;
   delete_index_calls: string[];
+  get_data_stream_calls: string[];
+  modify_data_stream_calls: Array<{ body: { actions: Array<Record<string, unknown>> } }>;
 }
 
 function makeClient(opts: FakeOpts = {}): { client: SearchableSnapshotEsClient; trace: Trace } {
@@ -40,6 +48,8 @@ function makeClient(opts: FakeOpts = {}): { client: SearchableSnapshotEsClient; 
     ilm_remove_calls: [],
     put_settings_calls: [],
     delete_index_calls: [],
+    get_data_stream_calls: [],
+    modify_data_stream_calls: [],
   };
   const client: SearchableSnapshotEsClient = {
     snapshot: {
@@ -66,6 +76,22 @@ function makeClient(opts: FakeOpts = {}): { client: SearchableSnapshotEsClient; 
       },
       putSettings: async (params) => {
         trace.put_settings_calls.push(params);
+        return {};
+      },
+      getDataStream: async ({ name }) => {
+        trace.get_data_stream_calls.push(name);
+        if (opts.existingDataStreams && !opts.existingDataStreams.has(name)) {
+          const err = new Error('not found') as Error & { statusCode?: number };
+          err.statusCode = 404;
+          throw err;
+        }
+        return {};
+      },
+      modifyDataStream: async (params) => {
+        trace.modify_data_stream_calls.push(params);
+        if (opts.failModifyDataStream) {
+          throw new Error('modify failed');
+        }
         return {};
       },
     },
@@ -159,7 +185,7 @@ describe('findLatestSnapshotForIndex', () => {
 });
 
 describe('ensureThawedIlmPolicy', () => {
-  it('creates the policy with a 29d Delete phase when none exists', async () => {
+  it('creates a cold-at-0ms + delete-at-29d policy with delete_searchable_snapshot=false', async () => {
     const { client, trace } = makeClient({ ilmGetLifecycleNotFound: true });
     const name = await ensureThawedIlmPolicy(client, 'deepfreeze-000011');
 
@@ -169,9 +195,13 @@ describe('ensureThawedIlmPolicy', () => {
       name: 'deepfreeze-000011-thawed',
       policy: {
         phases: {
+          cold: {
+            min_age: '0ms',
+            actions: { set_priority: { priority: 0 } },
+          },
           delete: {
             min_age: '29d',
-            actions: { delete: { delete_searchable_snapshot: true } },
+            actions: { delete: { delete_searchable_snapshot: false } },
           },
         },
       },
@@ -280,5 +310,86 @@ describe('mountSnapshotIndex', () => {
       noopLog
     );
     expect(out).toEqual({ mounted: false, alreadyMounted: false });
+  });
+});
+
+describe('parseDataStreamFromIndexName', () => {
+  it('returns null for names that do not start with .ds-', () => {
+    expect(parseDataStreamFromIndexName('logs-2026.05.23')).toBeNull();
+    expect(parseDataStreamFromIndexName('metrics-2026.05.23-000001')).toBeNull();
+  });
+
+  it('extracts the ds-name from a canonical backing-index name', () => {
+    expect(parseDataStreamFromIndexName('.ds-logs-2026.05.23-000001')).toBe('logs');
+  });
+
+  it('handles ds-names that themselves contain hyphens', () => {
+    expect(parseDataStreamFromIndexName('.ds-df-test-2026.05.25-000001')).toBe(
+      'df-test'
+    );
+    expect(
+      parseDataStreamFromIndexName('.ds-some-app-logs-2026.05.23-000017')
+    ).toBe('some-app-logs');
+  });
+
+  it('returns null when the name is too short to parse', () => {
+    expect(parseDataStreamFromIndexName('.ds-only-one')).toBeNull();
+    expect(parseDataStreamFromIndexName('.ds-')).toBeNull();
+  });
+});
+
+describe('addIndexToDatastream', () => {
+  it('issues a modify_data_stream add_backing_index action on success', async () => {
+    const { client, trace } = makeClient();
+    const ok = await addIndexToDatastream(
+      client,
+      'df-test',
+      '.ds-df-test-2026.05.25-000001',
+      noopLog
+    );
+    expect(ok).toBe(true);
+    expect(trace.get_data_stream_calls).toEqual(['df-test']);
+    expect(trace.modify_data_stream_calls).toEqual([
+      {
+        body: {
+          actions: [
+            {
+              add_backing_index: {
+                data_stream: 'df-test',
+                index: '.ds-df-test-2026.05.25-000001',
+              },
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it('returns false (no-op) when the data stream does not exist', async () => {
+    const { client, trace } = makeClient({
+      existingDataStreams: new Set(['other-stream']),
+    });
+    const ok = await addIndexToDatastream(
+      client,
+      'df-test',
+      '.ds-df-test-2026.05.25-000001',
+      noopLog
+    );
+    expect(ok).toBe(false);
+    // No modify call attempted when the stream is absent.
+    expect(trace.modify_data_stream_calls).toEqual([]);
+  });
+
+  it('returns false when modify_data_stream throws', async () => {
+    const { client, trace } = makeClient({ failModifyDataStream: true });
+    const ok = await addIndexToDatastream(
+      client,
+      'df-test',
+      '.ds-df-test-2026.05.25-000001',
+      noopLog
+    );
+    expect(ok).toBe(false);
+    // The modify call WAS attempted (the stream lookup succeeded).
+    expect(trace.modify_data_stream_calls).toHaveLength(1);
   });
 });

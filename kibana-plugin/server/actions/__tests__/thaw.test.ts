@@ -41,11 +41,12 @@ interface FakeOpts {
   /** Mounted-index names that `indices.exists({index})` should report as true. Status index is handled separately by `noStatusIndex`. */
   existingMountedIndices?: Set<string>;
   /**
-   * For the date-overlap pruning step: maps a comma-joined index list
-   * (the `index` field passed to `search`) to a fixed @timestamp range.
-   * When absent, the aggregation returns nulls (no trim).
+   * Data-stream names that `indices.getDataStream` should report as
+   * existing. Anything not in the set throws 404. When undefined,
+   * ALL data streams are treated as existing — many tests don't care
+   * about the re-add step and shouldn't have to enumerate.
    */
-  timestampRanges?: Record<string, { earliest: string; latest: string }>;
+  existingDataStreams?: Set<string>;
 }
 
 interface ClientTrace {
@@ -55,6 +56,10 @@ interface ClientTrace {
   ilm_put_calls: Array<{ name: string; policy: Record<string, unknown> }>;
   put_settings_calls: Array<{ index: string; body: Record<string, unknown> }>;
   delete_index_calls: string[];
+  modify_data_stream_calls: Array<{
+    body: { actions: Array<Record<string, unknown>> };
+  }>;
+  get_data_stream_calls: string[];
 }
 
 function makeClient(opts: FakeOpts = {}): { client: ThawActionEsClient; trace: ClientTrace } {
@@ -65,6 +70,8 @@ function makeClient(opts: FakeOpts = {}): { client: ThawActionEsClient; trace: C
     ilm_put_calls: [],
     put_settings_calls: [],
     delete_index_calls: [],
+    modify_data_stream_calls: [],
+    get_data_stream_calls: [],
   };
   // ILM policies the test has seen: starts empty, fills as putLifecycle
   // is called so the second call to getLifecycle on the same name
@@ -87,6 +94,19 @@ function makeClient(opts: FakeOpts = {}): { client: ThawActionEsClient; trace: C
       },
       putSettings: async ({ index, body }) => {
         trace.put_settings_calls.push({ index, body });
+        return {};
+      },
+      getDataStream: async ({ name }) => {
+        trace.get_data_stream_calls.push(name);
+        if (opts.existingDataStreams && !opts.existingDataStreams.has(name)) {
+          const err = new Error('not found') as Error & { statusCode?: number };
+          err.statusCode = 404;
+          throw err;
+        }
+        return {};
+      },
+      modifyDataStream: async (params) => {
+        trace.modify_data_stream_calls.push(params);
         return {};
       },
     },
@@ -911,9 +931,13 @@ describe('checkAndMaybeMount', () => {
     ]);
   });
 
-  it('prunes mounted indices whose @timestamp range falls outside the request window', async () => {
+  it('mounts every index in the repo without trimming by the request window', async () => {
+    // The request asks for a narrow window, but the repo's snapshot has
+    // indices spanning a wider range. Mount-everything-no-trim means
+    // they all stay mounted — gives the operator more context when
+    // searching the thawed data, and the Glacier restore keeps the
+    // underlying objects warm regardless.
     const repo = makeRepo({ name: 'r1' });
-    // Request window: just the morning of May 23.
     const request = makeThawRequest({
       repos: ['r1'],
       start_date: '2026-05-23T00:00:00Z',
@@ -924,17 +948,6 @@ describe('checkAndMaybeMount', () => {
       repos: [repo],
       snapshotsByRepo: {
         r1: [{ snapshot: 'snap-1', indices: ['logs-morning', 'logs-evening'] }],
-      },
-      timestampRanges: {
-        'logs-morning': {
-          earliest: '2026-05-23T01:00:00Z',
-          latest: '2026-05-23T03:00:00Z',
-        },
-        'logs-evening': {
-          // Entirely outside the request window — should be deleted.
-          earliest: '2026-05-23T18:00:00Z',
-          latest: '2026-05-23T23:00:00Z',
-        },
       },
     });
     const { storage } = makeStorage({
@@ -948,11 +961,10 @@ describe('checkAndMaybeMount', () => {
 
     const result = await checkAndMaybeMount(client, storage, 'req-a');
 
-    // Both indices got mounted, but the evening one gets pruned.
     expect(trace.mount_calls).toHaveLength(2);
-    expect(trace.delete_index_calls).toEqual(['logs-evening']);
-    expect(result.indices_mounted).toBe(1);
-    expect(result.indices_skipped).toBe(1);
+    // Crucially: no delete calls — the evening index is NOT pruned.
+    expect(trace.delete_index_calls).toEqual([]);
+    expect(result.indices_mounted).toBe(2);
   });
 
   it('records an error and continues when a single index fails to mount', async () => {
@@ -992,7 +1004,79 @@ describe('checkAndMaybeMount', () => {
     expect(result.errors.some((e) => /idx-bad/.test(e.message ?? ''))).toBe(true);
   });
 
-  it('skips date-overlap pruning when the request has no start/end dates', async () => {
+  it('re-adds data-stream backing indices to their data stream', async () => {
+    const repo = makeRepo({ name: 'r1' });
+    const request = makeThawRequest({ repos: ['r1'] });
+    const { client, trace } = makeClient({
+      thawRequests: [request],
+      repos: [repo],
+      snapshotsByRepo: {
+        r1: [
+          {
+            snapshot: 'snap-1',
+            indices: [
+              '.ds-df-test-2026.05.25-000001',
+              'plain-index-not-a-backing-index',
+            ],
+          },
+        ],
+      },
+    });
+    const { storage } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: 'k', size: 1, storage_class: 'STANDARD' },
+        ],
+      },
+      defaultStorageClass: 'STANDARD',
+    });
+
+    const result = await checkAndMaybeMount(client, storage, 'req-a');
+
+    expect(result.indices_mounted).toBe(2);
+    expect(result.indices_readded_to_datastream).toBe(1);
+    // The .ds- backing index triggers a getDataStream lookup + modify;
+    // the plain index doesn't.
+    expect(trace.get_data_stream_calls).toEqual(['df-test']);
+    expect(trace.modify_data_stream_calls).toHaveLength(1);
+    expect(trace.modify_data_stream_calls[0].body.actions[0]).toEqual({
+      add_backing_index: {
+        data_stream: 'df-test',
+        index: '.ds-df-test-2026.05.25-000001',
+      },
+    });
+  });
+
+  it('tolerates a missing data stream (mounted index stays; re-add count is 0)', async () => {
+    const repo = makeRepo({ name: 'r1' });
+    const request = makeThawRequest({ repos: ['r1'] });
+    const { client, trace } = makeClient({
+      thawRequests: [request],
+      repos: [repo],
+      snapshotsByRepo: {
+        r1: [{ snapshot: 'snap-1', indices: ['.ds-deleted-stream-2026.05.25-000001'] }],
+      },
+      // The data stream this backing index belonged to has since been deleted.
+      existingDataStreams: new Set(),
+    });
+    const { storage } = makeStorage({
+      objects: {
+        [`${repo.bucket}/${repo.base_path}`]: [
+          { key: 'k', size: 1, storage_class: 'STANDARD' },
+        ],
+      },
+      defaultStorageClass: 'STANDARD',
+    });
+
+    const result = await checkAndMaybeMount(client, storage, 'req-a');
+
+    expect(result.status).toBe('completed');
+    expect(result.indices_mounted).toBe(1);
+    expect(result.indices_readded_to_datastream).toBe(0);
+    expect(trace.modify_data_stream_calls).toEqual([]);
+  });
+
+  it('mounts indices even when the request lacks start/end dates', async () => {
     const repo = makeRepo({ name: 'r1' });
     const request = makeThawRequest({
       repos: ['r1'],
@@ -1004,14 +1088,6 @@ describe('checkAndMaybeMount', () => {
       repos: [repo],
       snapshotsByRepo: {
         r1: [{ snapshot: 'snap-1', indices: ['logs-anything'] }],
-      },
-      // Even though we provide a range here, it should not be queried
-      // because the request has no dates.
-      timestampRanges: {
-        'logs-anything': {
-          earliest: '2099-01-01T00:00:00Z',
-          latest: '2099-12-31T00:00:00Z',
-        },
       },
     });
     const { storage } = makeStorage({
@@ -1026,7 +1102,6 @@ describe('checkAndMaybeMount', () => {
     const result = await checkAndMaybeMount(client, storage, 'req-a');
 
     expect(result.indices_mounted).toBe(1);
-    expect(result.indices_skipped).toBe(0);
     expect(trace.delete_index_calls).toEqual([]);
   });
 });
