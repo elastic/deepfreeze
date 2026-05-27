@@ -1,11 +1,11 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   EuiBadge,
   EuiButton,
   EuiButtonEmpty,
   EuiCallOut,
+  EuiDatePicker,
   EuiFieldNumber,
-  EuiFieldText,
   EuiForm,
   EuiFormRow,
   EuiModal,
@@ -18,6 +18,7 @@ import {
   EuiText,
 } from '@elastic/eui';
 import type { CoreStart } from '@kbn/core/public';
+import moment, { type Moment } from 'moment';
 
 import { API } from '../../common/api/paths';
 import { StepList } from './step_list';
@@ -58,28 +59,16 @@ function extractErrorMessage(err: unknown): string {
 }
 
 /**
- * Promote a `<input type="datetime-local">` value to an ISO 8601 UTC
- * timestamp. The browser emits `YYYY-MM-DDTHH:MM` (no timezone) — we
- * always treat it as UTC because the entire deepfreeze data model is
- * UTC-centric (repo `start`/`end` are stored as UTC `@timestamp`).
+ * Convert a moment (constrained to UTC, see `utcOffset={0}` below) to
+ * the canonical ISO 8601 string the server expects. The moment is
+ * already in UTC so `.toISOString()` produces the right wire value.
  *
- * Both endpoints default to UTC midnight when the user only picks a
- * date — that's the browser's native time-portion default. A user who
- * wants "all of May 24" should pick start = 2026-05-24T00:00 and
- * end = 2026-05-25T00:00 (the end-of-range comparison is inclusive,
- * but for full-day windows the next-day-midnight convention is
- * unambiguous).
+ * Returns the empty string when the moment is null / invalid so the
+ * existing range-validity checks (`startMoment != null && ...`) still
+ * work without nullable plumbing.
  */
-function toIso(value: string): string {
-  // datetime-local format: `YYYY-MM-DDTHH:MM` (16 chars).
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
-    return `${value}:00.000Z`;
-  }
-  // Defensive: a bare YYYY-MM-DD (e.g. a stale value) gets UTC midnight.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return `${value}T00:00:00.000Z`;
-  }
-  return value;
+function toIso(m: Moment | null): string {
+  return m && m.isValid() ? m.toISOString() : '';
 }
 
 /**
@@ -94,12 +83,8 @@ export function ThawModal({
   onClose,
   onComplete,
 }: ThawModalProps) {
-  // `datetime-local` input's `max` accepts the same `YYYY-MM-DDTHH:MM`
-  // shape it emits. Pin to current UTC minute so users can't pick a
-  // future moment.
-  const nowUtc = useMemo(() => new Date().toISOString().slice(0, 16), []);
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [startDate, setStartDate] = useState<Moment | null>(null);
+  const [endDate, setEndDate] = useState<Moment | null>(null);
   const [restoreDays, setRestoreDays] = useState<number>(DEFAULT_RESTORE_DAYS);
   const [retrievalTier, setRetrievalTier] = useState<RetrievalTier>(
     DEFAULT_RETRIEVAL_TIER
@@ -109,7 +94,11 @@ export function ThawModal({
   const [running, setRunning] = useState(false);
 
   const rangeValid =
-    startDate !== '' && endDate !== '' && startDate <= endDate;
+    startDate !== null &&
+    endDate !== null &&
+    startDate.isValid() &&
+    endDate.isValid() &&
+    startDate.isSameOrBefore(endDate);
   const restoreDaysValid =
     Number.isInteger(restoreDays) &&
     restoreDays >= MIN_RESTORE_DAYS &&
@@ -189,34 +178,44 @@ export function ThawModal({
         <EuiForm component="div">
           <EuiFormRow
             label="Start (UTC)"
-            helpText="Defaults to UTC midnight. Override the time portion for sub-day precision."
+            helpText="Defaults to UTC midnight. Times are shown in 24-hour format."
           >
-            <EuiFieldText
-              // EuiFieldText doesn't expose `type` directly in its props,
-              // but it forwards extra HTML attributes onto the underlying input.
-              {...({ type: 'datetime-local' } as { type: string })}
-              max={nowUtc}
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+            <EuiDatePicker
+              showTimeSelect
+              selected={startDate}
+              onChange={(d) => setStartDate(d)}
+              utcOffset={0}
+              dateFormat="YYYY-MM-DD HH:mm"
+              timeFormat="HH:mm"
+              maxDate={moment.utc()}
               fullWidth
             />
           </EuiFormRow>
           <EuiFormRow
             label="End (UTC)"
             helpText="Defaults to UTC midnight. For a full-day window, pick the next day's midnight as the end."
-            isInvalid={startDate !== '' && endDate !== '' && endDate < startDate}
+            isInvalid={
+              startDate !== null &&
+              endDate !== null &&
+              endDate.isBefore(startDate)
+            }
             error={
-              startDate !== '' && endDate !== '' && endDate < startDate
+              startDate !== null &&
+              endDate !== null &&
+              endDate.isBefore(startDate)
                 ? 'End must be on or after the start.'
                 : undefined
             }
           >
-            <EuiFieldText
-              {...({ type: 'datetime-local' } as { type: string })}
-              max={nowUtc}
-              min={startDate || undefined}
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
+            <EuiDatePicker
+              showTimeSelect
+              selected={endDate}
+              onChange={(d) => setEndDate(d)}
+              utcOffset={0}
+              dateFormat="YYYY-MM-DD HH:mm"
+              timeFormat="HH:mm"
+              minDate={startDate ?? undefined}
+              maxDate={moment.utc()}
               fullWidth
             />
           </EuiFormRow>
