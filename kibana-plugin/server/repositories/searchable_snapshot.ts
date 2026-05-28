@@ -49,7 +49,12 @@ export interface SearchableSnapshotEsClient {
       index: string;
       body: Record<string, unknown>;
     }) => Promise<unknown>;
-    getDataStream: (params: { name: string }) => Promise<unknown>;
+    getDataStream: (params: { name: string }) => Promise<{
+      data_streams?: Array<{
+        name: string;
+        indices?: Array<{ index_name: string }>;
+      }>;
+    }>;
     modifyDataStream: (params: {
       body: {
         actions: Array<{

@@ -34,6 +34,11 @@ import {
   type SnapshotRepoEsClient,
 } from '../repositories/snapshot_repo';
 import {
+  getAllIndicesInRepo,
+  stripFmClonePrefix,
+  type SearchableSnapshotEsClient,
+} from '../repositories/searchable_snapshot';
+import {
   deleteThawRequest as _del,
   getThawRequest,
   listThawRequests,
@@ -84,6 +89,7 @@ export type RefreezeActionEsClient = SettingsRepoEsClient &
   RepositoryRepoWriteEsClient &
   ThawRequestRepoWriteEsClient &
   SnapshotRepoEsClient &
+  SearchableSnapshotEsClient &
   RefreezeIndicesEsClient;
 
 export interface RefreezeConfig {
@@ -216,23 +222,30 @@ interface RepoRefreezeOutcome {
  * Refreeze a single repo by tearing down every searchable-snapshot
  * index referencing it, then unregistering the snapshot repo from ES.
  *
- * For each SS index:
+ * Two-source enumeration so we don't miss indices that one source
+ * can't see:
+ *   1. The snapshot manifest (`getAllIndicesInRepo`) — authoritative
+ *      list of what the repo holds, but uses the names as stored in
+ *      the snapshot (no mount-time prefixes).
+ *   2. `findSearchableSnapshotIndices` via `getSettings` — sees
+ *      whatever ES currently has mounted with `store.type:snapshot`
+ *      pointing at our repo.
+ *
+ * For each candidate we then probe up to four name variants ES might
+ * have used at mount: the original, `restored-X`, `partial-restored-X`
+ * (partial-mount prefix), and the fm-clone-stripped form.
+ *
+ * For each existing variant:
  *   - If it's a backing index of a data stream: detach it via
  *     `indices.modify_data_stream` (`remove_backing_index`), then
- *     delete the now-standalone index. This is the surgical path —
- *     the data stream itself and any sibling backing indices are
- *     untouched.
- *   - If it's standalone: delete directly.
+ *     delete the now-standalone index. NEVER delete the data stream —
+ *     it likely still has active hot backings.
+ *   - If standalone: delete directly.
  *
- * The prior implementation deleted whole data streams whenever any
- * backing index referenced the repo — catastrophic, since it took
- * the active hot backing indices down with the thawed one. NEVER
- * delete a data stream during refreeze.
- *
- * If ANY index can't be torn down, we skip the `deleteSnapshotRepository`
- * step — ES would reject it with `repository_conflict_exception`
- * anyway, and surfacing the cleaner per-index failure is more useful
- * than papering it over with the cascade.
+ * Final verification: before `deleteSnapshotRepository`, re-scan to
+ * confirm no SS indices reference this repo. If any remain, skip
+ * the unmount and surface a precise "still referenced by ..." message.
+ * That's friendlier than letting ES return the noisy cascade.
  */
 async function refreezeOneRepo(
   client: RefreezeActionEsClient,
@@ -248,13 +261,56 @@ async function refreezeOneRepo(
   };
 
   try {
-    const ssIndices = await findSearchableSnapshotIndices(client, repo.name);
+    // ---- Discovery ----------------------------------------------------
+    // Source 1: snapshot manifest. Authoritative for "what indices does
+    // this repo claim", but doesn't account for mount-time renames.
+    let manifestIndices: string[] = [];
+    try {
+      manifestIndices = await getAllIndicesInRepo(client, repo.name);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(`Could not enumerate snapshot manifest for ${repo.name}: ${msg}`);
+    }
 
+    // Source 2: cluster's getSettings — sees mounted SS indices,
+    // including renamed variants and orphans.
+    const ssFromSettings = await findSearchableSnapshotIndices(client, repo.name);
+    const datastreamByName = new Map(
+      ssFromSettings.map((i) => [i.name, i.datastream])
+    );
+
+    // Generate candidate names. The settings-derived names are taken
+    // as-is (they're the actual mounted names). For manifest-derived
+    // names, also try the known ES mount-rename prefixes.
+    const candidateSet = new Set<string>();
+    for (const idx of ssFromSettings) candidateSet.add(idx.name);
+    for (const idx of manifestIndices) {
+      candidateSet.add(idx);
+      candidateSet.add(`restored-${idx}`);
+      candidateSet.add(`partial-restored-${idx}`);
+      if (idx.startsWith('fm-clone-')) {
+        candidateSet.add(stripFmClonePrefix(idx));
+      }
+    }
+
+    // ---- Per-index teardown -------------------------------------------
     let perIndexFailures = 0;
-    for (const { name, datastream } of ssIndices) {
-      // Step 1: detach from the data stream if attached. A failure
-      // here means we won't be able to delete the index below, so
-      // record it and move on.
+    for (const name of candidateSet) {
+      // Skip names that don't actually exist in the cluster.
+      let exists: boolean;
+      try {
+        exists = Boolean(
+          await client.indices.exists({ index: name, expand_wildcards: 'all' })
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.warn(`exists() probe failed for ${name}: ${msg}`);
+        continue;
+      }
+      if (!exists) continue;
+
+      // Step 1: detach from data stream if attached.
+      const datastream = datastreamByName.get(name) ?? null;
       if (datastream) {
         try {
           await client.indices.modifyDataStream({
@@ -292,13 +348,6 @@ async function refreezeOneRepo(
 
       // Step 2: delete the (now-standalone) index.
       try {
-        // Same hidden-index gotcha as `getSettings`: `.ds-*` indices
-        // need `expand_wildcards: 'all'` to be discoverable.
-        const exists = await client.indices.exists({
-          index: name,
-          expand_wildcards: 'all',
-        });
-        if (!exists) continue;
         await client.indices.delete({ index: name });
         outcome.deleted_indices.push(name);
         steps.push({ type: 'index', action: 'deleted', name });
@@ -310,12 +359,25 @@ async function refreezeOneRepo(
       }
     }
 
+    // ---- Final verification + unmount ---------------------------------
+    // Re-scan now that we've torn down everything we could find. If any
+    // SS indices STILL reference this repo, the unmount call will fail
+    // with `repository_conflict_exception` — produce a clean error
+    // message instead of letting the cascade through.
+    const remaining = await findSearchableSnapshotIndices(client, repo.name);
+    if (remaining.length > 0) {
+      const names = remaining.map((r) => r.name).join(', ');
+      outcome.error = `Could not unmount ${repo.name}: ${remaining.length} searchable_snapshot index/indices still reference it (${names})`;
+      steps.push({
+        type: 'repository',
+        action: 'skipped',
+        name: repo.name,
+        detail: outcome.error,
+      });
+      return outcome;
+    }
+
     if (perIndexFailures > 0) {
-      // Don't even try to unregister the repo — ES will reject with
-      // repository_conflict_exception because the SS indices we couldn't
-      // delete still reference it. The per-index `skipped` steps above
-      // already explain why, and the caller's rejected_requests entry
-      // surfaces the detail to the operator.
       outcome.error = `${perIndexFailures} index/indices could not be torn down`;
       return outcome;
     }

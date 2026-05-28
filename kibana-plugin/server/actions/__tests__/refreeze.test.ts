@@ -20,6 +20,14 @@ interface FakeOpts {
   indices?: Record<string, { repository_name?: string }>;
   dataStreams?: Array<{ name: string; backing: string[] }>;
   failDeleteIndices?: string[];
+  /**
+   * Snapshot manifest: which indices each repo's snapshots list. Used
+   * by `getAllIndicesInRepo` (the second-source enumeration).
+   */
+  snapshotsByRepo?: Record<
+    string,
+    Array<{ snapshot?: string; indices?: string[] }>
+  >;
 }
 
 interface Trace {
@@ -54,6 +62,11 @@ function makeClient(opts: FakeOpts = {}): { client: RefreezeActionEsClient; trac
       getSettings: async () => {
         const out: Record<string, unknown> = {};
         for (const [name, cfg] of Object.entries(opts.indices ?? {})) {
+          // Reflect deletions: only return entries still considered live.
+          // Without this, the final-verification re-scan in
+          // `refreezeOneRepo` would see freshly-deleted indices and
+          // incorrectly bail out before unmount.
+          if (!liveIndices.has(name)) continue;
           out[name] = {
             settings: {
               index: {
@@ -78,6 +91,7 @@ function makeClient(opts: FakeOpts = {}): { client: RefreezeActionEsClient; trac
         liveIndices.delete(index);
         return {};
       },
+      putSettings: async () => ({}),
       modifyDataStream: async ({ body }) => {
         for (const action of body.actions ?? []) {
           if (action.remove_backing_index) {
@@ -145,12 +159,19 @@ function makeClient(opts: FakeOpts = {}): { client: RefreezeActionEsClient; trac
         trace.deleted_repos.push(name);
         return {};
       },
+      get: async ({ repository }) => ({
+        snapshots: opts.snapshotsByRepo?.[repository] ?? [],
+      }),
+    },
+    searchableSnapshots: {
+      mount: async () => ({}),
     },
     ilm: {
       getLifecycle: async () => ({}),
       putLifecycle: async () => ({}),
+      removeLifecycle: async () => ({}),
     },
-  };
+  } as RefreezeActionEsClient;
 
   return { client, trace };
 }
@@ -401,6 +422,92 @@ describe('runRefreeze happy path', () => {
     // toast doesn't have to fall back to "unknown reason".
     expect(result.rejected_requests).toEqual([
       { request_id: 'r-1', reason: expect.stringContaining('ghost-repo') },
+    ]);
+  });
+
+  it('cleans up an orphaned mounted .ds-* index discoverable via getSettings even when it is not in any data stream', async () => {
+    // Reproduces the user-reported scenario: a `.ds-foo-...` index was
+    // mounted by a thaw before our data-stream-re-add logic shipped,
+    // so it sits in the cluster orphaned from any data stream. Refreeze
+    // must still find it via getSettings (with expand_wildcards=all)
+    // and tear it down — no detach needed since it's not attached
+    // anywhere.
+    const repo = repoDoc('deepfreeze-000001');
+    const { client, trace } = makeClient({
+      thawRequests: [thawReq('r-old', 'completed', [repo.name])],
+      repos: [repo],
+      indices: {
+        '.ds-df-test-2026.05.25-000001': { repository_name: repo.name },
+      },
+      // df-test data stream exists but does NOT currently include the
+      // orphaned backing index. So `findSearchableSnapshotIndices`
+      // returns the index with `datastream: null`.
+      dataStreams: [
+        { name: 'df-test', backing: ['.ds-df-test-2026.05.27-000119'] },
+      ],
+    });
+
+    const result = await runRefreeze(client, { request_id: 'r-old' });
+
+    expect(result.refrozen_requests).toEqual(['r-old']);
+    // No detach (it wasn't attached), but the index gets deleted and
+    // the repo unmounted.
+    expect(trace.detached_from_data_stream).toEqual([]);
+    expect(trace.deleted_indices).toEqual(['.ds-df-test-2026.05.25-000001']);
+    expect(trace.deleted_repos).toEqual([repo.name]);
+  });
+
+  it('uses the snapshot manifest as a second-source discovery path', async () => {
+    // Belt-and-suspenders: if getSettings somehow misses an index that
+    // the snapshot manifest knows about, the manifest path still finds
+    // it. Here `getSettings` returns nothing (no `indices` configured)
+    // but the manifest lists an index that exists in `liveIndices`
+    // and references our repo.
+    const repo = repoDoc('deepfreeze-000005');
+    const { client, trace } = makeClient({
+      thawRequests: [thawReq('r-1', 'completed', [repo.name])],
+      repos: [repo],
+      indices: {
+        // Indices section returns settings without the snapshot store
+        // type — simulates the "getSettings hides system indices" trap.
+        'logs-001': {},
+      },
+      snapshotsByRepo: {
+        [repo.name]: [{ snapshot: 'snap-1', indices: ['logs-001'] }],
+      },
+    });
+
+    const result = await runRefreeze(client, { request_id: 'r-1' });
+
+    expect(result.refrozen_requests).toEqual(['r-1']);
+    expect(trace.deleted_indices).toEqual(['logs-001']);
+  });
+
+  it('skips the unmount and reports cleanly when an index cannot be torn down', async () => {
+    // Even when detach + delete both fail, the failure mode should be
+    // a clear per-repo error rather than a `repository_conflict_exception`
+    // cascade from the unmount step.
+    const repo = repoDoc('deepfreeze-000005');
+    const { client, trace } = makeClient({
+      thawRequests: [thawReq('r-1', 'completed', [repo.name])],
+      repos: [repo],
+      indices: {
+        stuck: { repository_name: repo.name },
+      },
+      failDeleteIndices: ['stuck'],
+    });
+
+    const result = await runRefreeze(client, { request_id: 'r-1' });
+
+    expect(result.refrozen_requests).toEqual([]);
+    // The unmount step was skipped — no deleteRepository call.
+    expect(trace.deleted_repos).toEqual([]);
+    // The rejection reason carries the precise blocker.
+    expect(result.rejected_requests).toEqual([
+      {
+        request_id: 'r-1',
+        reason: expect.stringMatching(/still reference.*stuck/),
+      },
     ]);
   });
 
