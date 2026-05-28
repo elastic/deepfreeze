@@ -66,6 +66,7 @@ interface Trace {
   deleted_repos: string[];
   index_calls: Array<{ index: string; id: string; document: Record<string, unknown> }>;
   ilm_puts: Array<{ name: string; policy: Record<string, unknown> }>;
+  ilm_deletes: string[];
   template_puts: Array<{ name: string; body: Record<string, unknown> }>;
   legacy_template_puts: Array<{ name: string; body: Record<string, unknown> }>;
 }
@@ -78,6 +79,7 @@ function makeClient(
     deleted_repos: [],
     index_calls: [],
     ilm_puts: [],
+    ilm_deletes: [],
     template_puts: [],
     legacy_template_puts: [],
   };
@@ -226,6 +228,11 @@ function makeClient(
         if (opts.failPutIlm) throw new Error('boom-ilm');
         trace.ilm_puts.push(args);
         ilmPolicies[args.name] = args.policy as Record<string, unknown>;
+        return {};
+      },
+      deleteLifecycle: async ({ name }: { name: string }) => {
+        trace.ilm_deletes.push(name);
+        delete ilmPolicies[name];
         return {};
       },
     },
@@ -1018,5 +1025,80 @@ describe('runRotate date-range update', () => {
     // The bulk-pass code only writes when changed; with only-extend
     // merge producing the same range, nothing is persisted.
     expect(startEndWrites).toEqual([]);
+  });
+});
+
+describe('runRotate orphan ILM policy reaping', () => {
+  it('deletes versioned policies that point at the just-archived repo', async () => {
+    // Cluster state: deepfreeze-000001 and deepfreeze-000002 are
+    // currently mounted; ILM has the base `logs` policy plus two
+    // versioned variants. Rotate's `keep: 1` will archive
+    // deepfreeze-000001, which makes `logs-000001` an orphan. The
+    // inline reap step should remove it before the rotation returns.
+    const { client, trace } = makeClient({
+      settings: settings({
+        ilm_policy_name: 'logs',
+        last_suffix: '000002',
+      }),
+      repositoryDocs: [
+        repoDoc('deepfreeze-000001'),
+        repoDoc('deepfreeze-000002'),
+      ],
+      liveRepos: {
+        'deepfreeze-000001': { type: 's3', settings: { bucket: 'my-bucket' } },
+        'deepfreeze-000002': { type: 's3', settings: { bucket: 'my-bucket' } },
+      },
+      existingIlmPolicies: {
+        logs: {
+          phases: {
+            frozen: {
+              actions: {
+                searchable_snapshot: { snapshot_repository: 'deepfreeze-000002' },
+              },
+            },
+          },
+        },
+        // Versioned policy that pointed at the now-being-archived repo.
+        'logs-000001': {
+          phases: {
+            frozen: {
+              actions: {
+                searchable_snapshot: { snapshot_repository: 'deepfreeze-000001' },
+              },
+            },
+          },
+        },
+        // Sibling versioned policy pointing at a still-live repo —
+        // must NOT be reaped.
+        'logs-000002': {
+          phases: {
+            frozen: {
+              actions: {
+                searchable_snapshot: { snapshot_repository: 'deepfreeze-000002' },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const result = await runRotate(client, { keep: 1 });
+
+    // 000001 was archived as expected.
+    expect(result.archived).toEqual(['deepfreeze-000001']);
+    // And its orphan versioned policy got reaped inline.
+    expect(trace.ilm_deletes).toEqual(['logs-000001']);
+    expect(
+      result.steps.some(
+        (s) =>
+          s.type === 'ilm_policy' &&
+          s.action === 'deleted' &&
+          s.name === 'logs-000001'
+      )
+    ).toBe(true);
+    // The base policy and the live-repo-referencing versioned policy
+    // are untouched.
+    expect(trace.ilm_deletes).not.toContain('logs');
+    expect(trace.ilm_deletes).not.toContain('logs-000002');
   });
 });

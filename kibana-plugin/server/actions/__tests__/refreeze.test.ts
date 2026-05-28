@@ -35,6 +35,7 @@ interface Trace {
   deleted_data_streams: string[];
   detached_from_data_stream: Array<{ data_stream: string; index: string }>;
   deleted_repos: string[];
+  deleted_ilm_policies: string[];
   index_calls: Array<{ index: string; id: string; document: Record<string, unknown> }>;
 }
 
@@ -44,6 +45,7 @@ function makeClient(opts: FakeOpts = {}): { client: RefreezeActionEsClient; trac
     deleted_data_streams: [],
     detached_from_data_stream: [],
     deleted_repos: [],
+    deleted_ilm_policies: [],
     index_calls: [],
   };
 
@@ -167,9 +169,18 @@ function makeClient(opts: FakeOpts = {}): { client: RefreezeActionEsClient; trac
       mount: async () => ({}),
     },
     ilm: {
-      getLifecycle: async () => ({}),
+      // For `isPolicySafeToDelete`: returns the policy entry with no
+      // `in_use_by` → safe-to-delete returns true. Sufficient for the
+      // existing tests; the thawed-policy-cleanup test asserts the
+      // delete actually fired.
+      getLifecycle: async ({ name }: { name?: string } = {}) =>
+        name ? { [name]: {} } : ({} as Record<string, unknown>),
       putLifecycle: async () => ({}),
       removeLifecycle: async () => ({}),
+      deleteLifecycle: async ({ name }: { name: string }) => {
+        trace.deleted_ilm_policies.push(name);
+        return {};
+      },
     },
   } as RefreezeActionEsClient;
 
@@ -423,6 +434,23 @@ describe('runRefreeze happy path', () => {
     expect(result.rejected_requests).toEqual([
       { request_id: 'r-1', reason: expect.stringContaining('ghost-repo') },
     ]);
+  });
+
+  it('deletes the {repo}-thawed ILM policy after the repo is successfully unmounted', async () => {
+    // Verifies the thawed-policy cleanup that happens at the end of
+    // a successful refreezeOneRepo. Without this, every thaw/refreeze
+    // cycle accumulates a `{repo}-thawed` policy in the cluster.
+    const repo = repoDoc('deepfreeze-000005');
+    const { client, trace } = makeClient({
+      thawRequests: [thawReq('r-1', 'completed', [repo.name])],
+      repos: [repo],
+      indices: { 'restored-foo': { repository_name: repo.name } },
+    });
+
+    const result = await runRefreeze(client, { request_id: 'r-1' });
+
+    expect(result.refrozen_requests).toEqual(['r-1']);
+    expect(trace.deleted_ilm_policies).toEqual(['deepfreeze-000005-thawed']);
   });
 
   it('cleans up an orphaned mounted .ds-* index discoverable via getSettings even when it is not in any data stream', async () => {

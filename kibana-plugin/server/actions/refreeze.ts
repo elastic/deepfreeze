@@ -39,6 +39,11 @@ import {
   type SearchableSnapshotEsClient,
 } from '../repositories/searchable_snapshot';
 import {
+  deleteIlmPolicy,
+  isPolicySafeToDelete,
+  type IlmRepoWriteEsClient,
+} from '../repositories/ilm_repo';
+import {
   deleteThawRequest as _del,
   getThawRequest,
   listThawRequests,
@@ -90,6 +95,7 @@ export type RefreezeActionEsClient = SettingsRepoEsClient &
   ThawRequestRepoWriteEsClient &
   SnapshotRepoEsClient &
   SearchableSnapshotEsClient &
+  IlmRepoWriteEsClient &
   RefreezeIndicesEsClient;
 
 export interface RefreezeConfig {
@@ -106,7 +112,7 @@ export interface RunRefreezeOptions {
 const NOOP_LOG = { debug: () => {}, warn: () => {} };
 
 export interface RefreezeStepRecord {
-  type: 'thaw_request' | 'repository' | 'index' | 'data_stream';
+  type: 'thaw_request' | 'repository' | 'index' | 'data_stream' | 'ilm_policy';
   action:
     | 'would_refreeze'
     | 'refrozen'
@@ -394,6 +400,32 @@ async function refreezeOneRepo(
       expires_at: null,
     });
     steps.push({ type: 'repository', action: 'frozen', name: repo.name });
+
+    // Clean up the `{repo}-thawed` ILM policy created during the thaw.
+    // It has no callers once the searchable_snapshot indices are gone,
+    // and it would otherwise accumulate across thaw/refreeze cycles.
+    // Best-effort: a stuck delete here doesn't roll back the unmount.
+    const thawedPolicyName = `${repo.name}-thawed`;
+    try {
+      if (await isPolicySafeToDelete(client, thawedPolicyName)) {
+        await deleteIlmPolicy(client, thawedPolicyName);
+        steps.push({
+          type: 'ilm_policy',
+          action: 'deleted',
+          name: thawedPolicyName,
+          detail: `thawed-policy cleanup for ${repo.name}`,
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(`Failed to delete thawed ILM policy ${thawedPolicyName}: ${msg}`);
+      steps.push({
+        type: 'ilm_policy',
+        action: 'skipped',
+        name: thawedPolicyName,
+        detail: msg,
+      });
+    }
 
     outcome.success = true;
   } catch (err) {

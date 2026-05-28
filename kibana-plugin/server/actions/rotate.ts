@@ -54,6 +54,7 @@ import {
 import {
   createVersionedIlmPolicy,
   getIlmPolicy,
+  reapOrphanedIlmPolicies,
   type IlmRepoWriteEsClient,
 } from '../repositories/ilm_repo';
 import {
@@ -141,6 +142,7 @@ export interface RotateStepRecord {
     | 'unchanged'
     | 'archived'
     | 'archived_objects'
+    | 'deleted'
     | 'skipped';
   name?: string;
   detail?: string;
@@ -748,6 +750,46 @@ export async function runRotate(
     }
     archived.push(name);
     steps.push({ type: 'snapshot_repository', action: 'archived', name });
+  }
+
+  // Reap orphan versioned ILM policies inline. Archiving a repo just
+  // now made its versioned policy `{base}-{old_suffix}` reference a
+  // non-existent repo; rather than waiting for the next Cleanup run
+  // (which a high-rotation cluster may not see often enough), prune
+  // them here. Mirrors Python's `_cleanup_orphaned_policies` call at
+  // the end of `Rotate.do_action`.
+  {
+    const reap = await reapOrphanedIlmPolicies(client, settings, log);
+    for (const p of reap.deleted) {
+      steps.push({
+        type: 'ilm_policy',
+        action: 'deleted',
+        name: p.policy_name,
+        detail: `was referencing ${p.referenced_repo}`,
+      });
+    }
+    for (const p of reap.skipped) {
+      steps.push({
+        type: 'ilm_policy',
+        action: 'skipped',
+        name: p.policy_name,
+        detail: 'still in use by indices, data streams, or templates',
+      });
+    }
+    for (const p of reap.failed) {
+      errors.push({
+        code: 'ACTION_FAILED',
+        message: `Failed to reap orphaned policy ${p.policy_name}: ${p.error}`,
+        severity: 'warning',
+        target: p.policy_name,
+      });
+      steps.push({
+        type: 'ilm_policy',
+        action: 'skipped',
+        name: p.policy_name,
+        detail: p.error,
+      });
+    }
   }
 
   return {

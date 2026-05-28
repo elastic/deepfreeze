@@ -49,9 +49,8 @@ import {
   type ThawRequestRepoWriteEsClient,
 } from '../repositories/thaw_request_repo';
 import {
-  deleteIlmPolicy,
-  isPolicySafeToDelete,
-  type IlmPolicyEntry,
+  findOrphanedPolicies,
+  reapOrphanedIlmPolicies,
   type IlmRepoWriteEsClient,
 } from '../repositories/ilm_repo';
 
@@ -183,54 +182,6 @@ async function loadInitializedSettings(client: CleanupActionEsClient): Promise<S
     throw new MissingSettingsError('Settings document not found in status index');
   }
   return settings;
-}
-
-/**
- * Find versioned ILM policies that reference a deepfreeze repository
- * which no longer exists in ES. The base policy (settings.ilm_policy_name
- * without a suffix) is never considered orphaned — it's the stable
- * source-of-truth Setup and Rotate clone from.
- *
- * Mirrors `_find_orphaned_policies` in
- *   packages/deepfreeze-core/deepfreeze_core/actions/cleanup.py
- */
-async function findOrphanedPolicies(
-  client: CleanupActionEsClient,
-  settings: SettingsDoc
-): Promise<Array<{ policy_name: string; referenced_repo: string }>> {
-  if (!settings.ilm_policy_name) return [];
-
-  const allPolicies = (await client.ilm.getLifecycle()) as Record<
-    string,
-    IlmPolicyEntry
-  >;
-  // Live snapshot repos in the cluster — anything not in this set
-  // that's referenced by a policy is a candidate orphan.
-  const liveRepos = await client.snapshot.getRepository();
-  const existing = new Set(Object.keys(liveRepos));
-
-  const orphans: Array<{ policy_name: string; referenced_repo: string }> = [];
-
-  for (const [policyName, policyData] of Object.entries(allPolicies)) {
-    // Never touch the base policy itself — it's the immutable source
-    // of truth that Setup writes once and Rotate clones from.
-    if (policyName === settings.ilm_policy_name) continue;
-
-    const phases = policyData.policy?.phases ?? {};
-    for (const phaseConfig of Object.values(phases)) {
-      const snapshotRepo = phaseConfig.actions?.searchable_snapshot?.snapshot_repository;
-      if (
-        snapshotRepo &&
-        snapshotRepo.startsWith(`${settings.repo_name_prefix}-`) &&
-        !existing.has(snapshotRepo)
-      ) {
-        orphans.push({ policy_name: policyName, referenced_repo: snapshotRepo });
-        break; // one entry per policy
-      }
-    }
-  }
-
-  return orphans;
 }
 
 /**
@@ -380,57 +331,39 @@ export async function runCleanup(
   // Orphaned versioned-policy reaper. Runs after repo cleanup because
   // archiving an expired repo can newly orphan its versioned policy
   // (the same-run case for clusters where Cleanup is the first thing
-  // run after a long absence).
-  const deletedPolicies: string[] = [];
-  try {
-    const candidates = await findOrphanedPolicies(client, settings);
-    for (const orphan of candidates) {
-      try {
-        const safe = await isPolicySafeToDelete(client, orphan.policy_name);
-        if (!safe) {
-          steps.push({
-            type: 'ilm_policy',
-            action: 'skipped',
-            name: orphan.policy_name,
-            detail: 'still in use by indices, data streams, or templates',
-          });
-          continue;
-        }
-        await deleteIlmPolicy(client, orphan.policy_name);
-        deletedPolicies.push(orphan.policy_name);
-        steps.push({
-          type: 'ilm_policy',
-          action: 'deleted',
-          name: orphan.policy_name,
-          detail: `was referencing ${orphan.referenced_repo}`,
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.warn(`Failed to reap orphaned policy ${orphan.policy_name}: ${msg}`);
-        errors.push({
-          code: 'ACTION_FAILED',
-          message: `Failed to reap orphaned policy ${orphan.policy_name}: ${msg}`,
-          severity: 'warning',
-          target: orphan.policy_name,
-        });
-        steps.push({
-          type: 'ilm_policy',
-          action: 'skipped',
-          name: orphan.policy_name,
-          detail: msg,
-        });
-      }
-    }
-  } catch (err) {
-    // Enumeration itself failed (ES auth, ILM API down, etc.). Log
-    // and continue — thaw_request + expired_repo cleanup already
-    // happened above and shouldn't be lost.
-    const msg = err instanceof Error ? err.message : String(err);
-    log.warn(`Orphaned-policy detection failed: ${msg}`);
+  // run after a long absence). The reaper is now shared with Rotate
+  // (which calls it inline after its own archive loop) — both end up
+  // here through `reapOrphanedIlmPolicies`.
+  const reap = await reapOrphanedIlmPolicies(client, settings, log);
+  const deletedPolicies = reap.deleted.map((p) => p.policy_name);
+  for (const p of reap.deleted) {
+    steps.push({
+      type: 'ilm_policy',
+      action: 'deleted',
+      name: p.policy_name,
+      detail: `was referencing ${p.referenced_repo}`,
+    });
+  }
+  for (const p of reap.skipped) {
+    steps.push({
+      type: 'ilm_policy',
+      action: 'skipped',
+      name: p.policy_name,
+      detail: 'still in use by indices, data streams, or templates',
+    });
+  }
+  for (const p of reap.failed) {
     errors.push({
       code: 'ACTION_FAILED',
-      message: `Orphaned-policy detection failed: ${msg}`,
+      message: `Failed to reap orphaned policy ${p.policy_name}: ${p.error}`,
       severity: 'warning',
+      target: p.policy_name,
+    });
+    steps.push({
+      type: 'ilm_policy',
+      action: 'skipped',
+      name: p.policy_name,
+      detail: p.error,
     });
   }
 

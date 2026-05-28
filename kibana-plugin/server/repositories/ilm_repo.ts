@@ -255,6 +255,126 @@ export async function deleteIlmPolicy(
   }
 }
 
+/**
+ * One orphan policy candidate as returned by `findOrphanedPolicies`.
+ */
+export interface OrphanedIlmPolicy {
+  policy_name: string;
+  referenced_repo: string;
+}
+
+/**
+ * Outcome of `reapOrphanedIlmPolicies`. Callers translate these into
+ * action-specific step records (rotate's `RotateStepRecord`, cleanup's
+ * `CleanupStepRecord`, etc.).
+ */
+export interface ReapOrphanedPoliciesResult {
+  deleted: OrphanedIlmPolicy[];
+  /** Found, but still referenced by some index/data-stream/template. */
+  skipped: OrphanedIlmPolicy[];
+  /** Encountered an ES error during the safety check or delete. */
+  failed: Array<OrphanedIlmPolicy & { error: string }>;
+}
+
+/**
+ * ES client surface required to find + reap orphan deepfreeze policies.
+ */
+export type IlmReapEsClient = IlmRepoWriteEsClient & {
+  snapshot: { getRepository: () => Promise<Record<string, unknown>> };
+};
+
+/**
+ * Find every deepfreeze ILM policy whose `searchable_snapshot.snapshot_repository`
+ * names a repo that no longer exists in ES's live snapshot registry.
+ *
+ * The base policy (`settings.ilm_policy_name` with no suffix) is never
+ * a candidate — it's the immutable source-of-truth that Setup writes
+ * and Rotate clones from. Only versioned variants are considered.
+ *
+ * Returns at most one entry per policy (first orphan reference wins).
+ */
+export async function findOrphanedPolicies(
+  client: IlmReapEsClient,
+  settings: { ilm_policy_name?: string | null; repo_name_prefix: string }
+): Promise<OrphanedIlmPolicy[]> {
+  if (!settings.ilm_policy_name) return [];
+
+  const allPolicies = (await client.ilm.getLifecycle()) as Record<string, IlmPolicyEntry>;
+  const liveRepos = await client.snapshot.getRepository();
+  const existing = new Set(Object.keys(liveRepos));
+
+  const orphans: OrphanedIlmPolicy[] = [];
+  for (const [policyName, policyData] of Object.entries(allPolicies)) {
+    if (policyName === settings.ilm_policy_name) continue;
+    const phases = policyData.policy?.phases ?? {};
+    for (const phaseConfig of Object.values(phases)) {
+      const snapshotRepo = phaseConfig.actions?.searchable_snapshot?.snapshot_repository;
+      if (
+        snapshotRepo &&
+        snapshotRepo.startsWith(`${settings.repo_name_prefix}-`) &&
+        !existing.has(snapshotRepo)
+      ) {
+        orphans.push({ policy_name: policyName, referenced_repo: snapshotRepo });
+        break;
+      }
+    }
+  }
+  return orphans;
+}
+
+/**
+ * Find orphan deepfreeze ILM policies, gate each on
+ * `isPolicySafeToDelete`, and delete the safe ones.
+ *
+ * Used inline by Rotate after the per-repo archive loop (matches
+ * Python's `_cleanup_orphaned_policies` running at the end of
+ * `Rotate.do_action`) AND by Cleanup as part of its periodic sweep,
+ * so a high-rotation cluster doesn't accumulate orphan policies
+ * between Cleanup runs.
+ *
+ * Per-policy failures (404, in-use, ES error) are caught and folded
+ * into the result — the function never throws.
+ */
+export async function reapOrphanedIlmPolicies(
+  client: IlmReapEsClient,
+  settings: { ilm_policy_name?: string | null; repo_name_prefix: string },
+  log: { debug: (m: string) => void; warn: (m: string) => void }
+): Promise<ReapOrphanedPoliciesResult> {
+  const result: ReapOrphanedPoliciesResult = {
+    deleted: [],
+    skipped: [],
+    failed: [],
+  };
+  let candidates: OrphanedIlmPolicy[];
+  try {
+    candidates = await findOrphanedPolicies(client, settings);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn(`Orphan ILM policy scan failed: ${msg}`);
+    return result;
+  }
+
+  for (const orphan of candidates) {
+    try {
+      const safe = await isPolicySafeToDelete(client, orphan.policy_name);
+      if (!safe) {
+        result.skipped.push(orphan);
+        continue;
+      }
+      await deleteIlmPolicy(client, orphan.policy_name);
+      result.deleted.push(orphan);
+      log.debug(
+        `Reaped orphan ILM policy ${orphan.policy_name} (referenced ${orphan.referenced_repo})`
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(`Failed to reap orphan policy ${orphan.policy_name}: ${msg}`);
+      result.failed.push({ ...orphan, error: msg });
+    }
+  }
+  return result;
+}
+
 function isNotFound(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const e = err as { statusCode?: number; meta?: { statusCode?: number } };
