@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   EuiBadge,
-  EuiBasicTable,
   EuiButton,
   EuiButtonEmpty,
   EuiCallOut,
@@ -11,12 +10,13 @@ import {
   EuiFlyout,
   EuiFlyoutBody,
   EuiFlyoutHeader,
+  EuiInMemoryTable,
   EuiProgress,
   EuiSpacer,
   EuiText,
   EuiTitle,
-  type CriteriaWithPagination,
   type EuiBasicTableColumn,
+  type EuiSearchBarProps,
 } from '@elastic/eui';
 import type { CoreStart } from '@kbn/core/public';
 
@@ -191,10 +191,6 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
   const [flyoutItem, setFlyoutItem] = useState<ThawReq | null>(null);
   const [refreezeTarget, setRefreezeTarget] = useState<ThawReq | null>(null);
   const [thawOpen, setThawOpen] = useState(false);
-  const [sortField, setSortField] = useState<keyof ThawReq>('created_at');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [pageIndex, setPageIndex] = useState(0);
-  const [pageSize, setPageSize] = useState(20);
   // Per-row "checking now" state — keyed by request_id so multiple
   // in_progress rows don't block each other.
   const [checkingId, setCheckingId] = useState<string | null>(null);
@@ -239,17 +235,13 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
     [status]
   );
 
-  const sorted = useMemo(() => {
-    const copy = [...requests];
-    copy.sort((a, b) => {
-      const aVal = String(a[sortField] ?? '');
-      const bVal = String(b[sortField] ?? '');
-      return sortDirection === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-    });
-    return copy;
-  }, [requests, sortField, sortDirection]);
-
-  const paged = sorted.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize);
+  const statusOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const r of requests) {
+      if (r.status) seen.add(r.status);
+    }
+    return [...seen].sort().map((value) => ({ value, name: value }));
+  }, [requests]);
 
   if (loading && !status) return <PageLoading />;
   if (error && !status) return <PageError message={error} onRetry={refresh} />;
@@ -320,15 +312,28 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
     },
   ];
 
-  const onTableChange = ({ page, sort }: CriteriaWithPagination<ThawReq>) => {
-    if (page) {
-      setPageIndex(page.index);
-      setPageSize(page.size);
-    }
-    if (sort) {
-      setSortField(sort.field as keyof ThawReq);
-      setSortDirection(sort.direction);
-    }
+  const search: EuiSearchBarProps = {
+    box: { incremental: true, schema: true, placeholder: 'Search thaw requests…' },
+    toolsRight: [
+      <EuiButton
+        key="new-thaw"
+        iconType="plusInCircle"
+        fill
+        onClick={() => setThawOpen(true)}
+      >
+        Initiate thaw
+      </EuiButton>,
+      <RefreshControl key="refresh" onRefresh={refresh} loading={loading} />,
+    ],
+    filters: [
+      {
+        type: 'field_value_selection',
+        field: 'status',
+        name: 'Status',
+        multiSelect: 'or',
+        options: statusOptions,
+      },
+    ],
   };
 
   return (
@@ -339,33 +344,19 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
             <h2>Thaw requests</h2>
           </EuiTitle>
         </EuiFlexItem>
-        <EuiFlexItem grow={false}>
-          <EuiFlexGroup gutterSize="s" alignItems="center">
-            <EuiFlexItem grow={false}>
-              <EuiButton iconType="plusInCircle" onClick={() => setThawOpen(true)}>
-                Initiate thaw
-              </EuiButton>
-            </EuiFlexItem>
-            <EuiFlexItem grow={false}>
-              <RefreshControl onRefresh={refresh} loading={loading} />
-            </EuiFlexItem>
-          </EuiFlexGroup>
-        </EuiFlexItem>
       </EuiFlexGroup>
 
       <EuiSpacer size="m" />
 
-      <EuiBasicTable
-        items={paged}
+      <EuiInMemoryTable
+        items={requests}
         columns={columns}
-        sorting={{ sort: { field: sortField, direction: sortDirection } }}
-        pagination={{
-          pageIndex,
-          pageSize,
-          totalItemCount: sorted.length,
-          pageSizeOptions: [10, 20, 50],
-        }}
-        onChange={onTableChange}
+        compressed
+        responsiveBreakpoint={false}
+        search={search}
+        sorting={{ sort: { field: 'created_at', direction: 'desc' } }}
+        pagination={{ pageSizeOptions: [10, 25, 50], initialPageSize: 25 }}
+        loading={loading}
         rowProps={(item: ThawReq) => ({
           onClick: () => setFlyoutItem(item),
           style: { cursor: 'pointer' },
@@ -383,7 +374,7 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
               </EuiFlexItem>
             </EuiFlexGroup>
           ) : (
-            'No thaw requests found'
+            'No thaw requests match the current filters.'
           )
         }
       />
