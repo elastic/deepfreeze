@@ -1,6 +1,7 @@
 import {
   formatDate,
   formatDuration,
+  formatRemaining,
   formatStoredDatetime,
   formatTimestamp,
 } from '../format';
@@ -104,5 +105,41 @@ describe('formatDuration', () => {
   it('handles null / undefined defensively', () => {
     expect(formatDuration(null as unknown as number)).toBe('--');
     expect(formatDuration(undefined as unknown as number)).toBe('--');
+  });
+});
+
+describe('formatRemaining', () => {
+  const NOW = new Date('2026-05-28T12:00:00Z');
+
+  it('returns empty for null / undefined / unparseable', () => {
+    expect(formatRemaining(null, NOW)).toBe('');
+    expect(formatRemaining(undefined, NOW)).toBe('');
+    expect(formatRemaining('', NOW)).toBe('');
+    expect(formatRemaining('not a date', NOW)).toBe('');
+  });
+
+  it('formats future ≥1d as "in Nd Nh"', () => {
+    expect(formatRemaining('2026-06-02T17:00:00Z', NOW)).toBe('in 5d 5h');
+  });
+
+  it('drops the hours portion when exactly N days remaining', () => {
+    expect(formatRemaining('2026-06-04T12:00:00Z', NOW)).toBe('in 7d');
+  });
+
+  it('formats sub-day future as "in Nh Nm"', () => {
+    expect(formatRemaining('2026-05-28T15:30:00Z', NOW)).toBe('in 3h 30m');
+  });
+
+  it('formats sub-hour future as "in Nm"', () => {
+    expect(formatRemaining('2026-05-28T12:25:00Z', NOW)).toBe('in 25m');
+  });
+
+  it('formats expired absolute as "expired Nd Nh ago" or similar', () => {
+    expect(formatRemaining('2026-05-26T08:00:00Z', NOW)).toBe('expired 2d 4h ago');
+  });
+
+  it('formats almost-now as "less than a minute" / "moments ago"', () => {
+    expect(formatRemaining('2026-05-28T12:00:30Z', NOW)).toBe('less than a minute');
+    expect(formatRemaining('2026-05-28T11:59:30Z', NOW)).toBe('expired moments ago');
   });
 });

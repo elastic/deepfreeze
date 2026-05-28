@@ -27,7 +27,11 @@ import { PageLoading, PageError } from '../components/page_states';
 import { RotateModal } from '../components/rotate_modal';
 import { CleanupModal } from '../components/cleanup_modal';
 import { RefreezeModal } from '../components/refreeze_modal';
-import { formatStoredDatetime, formatTimestamp } from '../utils/format';
+import {
+  formatRemaining,
+  formatStoredDatetime,
+  formatTimestamp,
+} from '../utils/format';
 import { SetupWizard } from './setup_wizard';
 import type { StatusResult } from '../../server/actions/status';
 
@@ -454,7 +458,10 @@ export function OverviewPage({ http, notifications }: OverviewPageProps) {
             </EuiTitle>
           </EuiFlyoutHeader>
           <EuiFlyoutBody>
-            <ThawDetailContent item={detailThaw} />
+            <ThawDetailContent
+              item={detailThaw}
+              repos={status.repositories ?? []}
+            />
             {detailThaw.status === 'completed' && (
               <>
                 <EuiSpacer size="l" />
@@ -578,7 +585,13 @@ function RecordList({ record }: { record: object }) {
   );
 }
 
-function ThawDetailContent({ item }: { item: ThawReq }) {
+function ThawDetailContent({
+  item,
+  repos,
+}: {
+  item: ThawReq;
+  repos: Repo[];
+}) {
   const items: FieldRow[] = [
     { field: 'Request ID', value: String(item.request_id || '--') },
     { field: 'Status', value: String(item.status || '--') },
@@ -588,6 +601,34 @@ function ThawDetailContent({ item }: { item: ThawReq }) {
       value: `${formatStoredDatetime(item.start_date) || '?'} → ${formatStoredDatetime(item.end_date) || '?'}`,
     },
   ];
+
+  // For completed requests, surface when the temporary S3 restore copy
+  // expires — at that point the data goes back to Glacier and queries
+  // against the mounted indices stop working. We use the earliest
+  // expires_at across all of this request's repos.
+  if (item.status === 'completed') {
+    const lookup = new Map(repos.map((r) => [r.name, r]));
+    const expiries: string[] = [];
+    for (const name of item.repos ?? []) {
+      const repo = lookup.get(String(name));
+      if (repo?.expires_at) expiries.push(repo.expires_at);
+    }
+    if (expiries.length > 0) {
+      const earliest = expiries.reduce((a, b) =>
+        new Date(a).getTime() <= new Date(b).getTime() ? a : b
+      );
+      const remaining = formatRemaining(earliest);
+      items.push({
+        field:
+          item.repos.length > 1
+            ? 'Returns to Glacier (earliest)'
+            : 'Returns to Glacier',
+        value: remaining
+          ? `${formatStoredDatetime(earliest)} (${remaining})`
+          : formatStoredDatetime(earliest),
+      });
+    }
+  }
 
   return (
     <>
@@ -605,11 +646,28 @@ function ThawDetailContent({ item }: { item: ThawReq }) {
             <h3>Repositories ({item.repos.length})</h3>
           </EuiTitle>
           <EuiSpacer size="s" />
-          {item.repos.map((name, i) => (
-            <div key={i} style={{ marginBottom: 8 }}>
-              <EuiBadge color="hollow">{String(name)}</EuiBadge>
-            </div>
-          ))}
+          {item.repos.map((name, i) => {
+            const repo = repos.find((r) => r.name === String(name));
+            const remaining = formatRemaining(repo?.expires_at);
+            return (
+              <div
+                key={i}
+                style={{
+                  marginBottom: 8,
+                  display: 'flex',
+                  gap: 8,
+                  alignItems: 'center',
+                }}
+              >
+                <EuiBadge color="hollow">{String(name)}</EuiBadge>
+                {remaining && (
+                  <EuiText size="xs" color="subdued">
+                    returns to Glacier {remaining}
+                  </EuiText>
+                )}
+              </div>
+            );
+          })}
         </>
       )}
     </>

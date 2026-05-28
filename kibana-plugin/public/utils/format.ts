@@ -86,3 +86,41 @@ export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }
+
+/**
+ * "Time until / since" formatter for an absolute ISO timestamp,
+ * relative to now. Used for thaw-expiration countdown displays.
+ *
+ *   future ~12h from now → "in 12h 4m"
+ *   future ~3d 5h        → "in 3d 5h"
+ *   past   ~2d ago       → "expired 2d ago"
+ *   present (< 1min)     → "less than a minute"
+ *   null / unparseable   → empty string
+ *
+ * Resolution: days + hours when ≥1d remaining/elapsed; hours + minutes
+ * for sub-day. The operator cares more about days for a 7-day restore
+ * window than seconds.
+ */
+export function formatRemaining(val: unknown, now: Date = new Date()): string {
+  if (val === null || val === undefined || val === '') return '';
+  const target = new Date(String(val));
+  if (Number.isNaN(target.getTime())) return '';
+  const diffMs = target.getTime() - now.getTime();
+  const absMs = Math.abs(diffMs);
+  const expired = diffMs < 0;
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (absMs < minute) return expired ? 'expired moments ago' : 'less than a minute';
+  let label: string;
+  if (absMs >= day) {
+    const days = Math.floor(absMs / day);
+    const hours = Math.floor((absMs % day) / hour);
+    label = hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  } else {
+    const hours = Math.floor(absMs / hour);
+    const minutes = Math.floor((absMs % hour) / minute);
+    label = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+  }
+  return expired ? `expired ${label} ago` : `in ${label}`;
+}

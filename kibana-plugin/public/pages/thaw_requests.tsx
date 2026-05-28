@@ -26,15 +26,55 @@ import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
 import { RefreezeModal } from '../components/refreeze_modal';
 import { ThawModal } from '../components/thaw_modal';
-import { formatStoredDatetime, formatTimestamp } from '../utils/format';
+import {
+  formatRemaining,
+  formatStoredDatetime,
+  formatTimestamp,
+} from '../utils/format';
 import type { StatusResult } from '../../server/actions/status';
 import type { ThawProgressResult } from '../../server/actions/thaw';
 
 type ThawReq = StatusResult['thaw_requests'][number];
+type Repo = StatusResult['repositories'][number];
 
 interface ThawRequestsPageProps {
   http: CoreStart['http'];
   notifications: CoreStart['notifications'];
+}
+
+/**
+ * Compute the practical "data goes back to Glacier at" deadline for a
+ * thaw request. Each repository under the request has its own
+ * `expires_at` (set at thaw time from `restore_days`); we surface the
+ * earliest among them, since that's when the operator first loses
+ * access to some of the thawed data.
+ *
+ * Returns an empty label for non-completed requests, requests with no
+ * recorded expiry on any repo, or when the matching repo docs aren't
+ * in the status response yet.
+ */
+function computeThawExpiry(
+  req: ThawReq,
+  repos: Repo[]
+): { label: string; earliest?: string } {
+  if (req.status !== 'completed') return { label: '' };
+  const lookup = new Map(repos.map((r) => [r.name, r]));
+  const expiries: string[] = [];
+  for (const name of req.repos ?? []) {
+    const repo = lookup.get(name);
+    if (repo?.expires_at) expiries.push(repo.expires_at);
+  }
+  if (expiries.length === 0) return { label: '' };
+  const earliest = expiries.reduce((a, b) =>
+    new Date(a).getTime() <= new Date(b).getTime() ? a : b
+  );
+  const remaining = formatRemaining(earliest);
+  return {
+    earliest,
+    label: remaining
+      ? `${formatStoredDatetime(earliest)} (${remaining})`
+      : formatStoredDatetime(earliest),
+  };
 }
 
 function statusColor(
@@ -390,10 +430,12 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
             </EuiTitle>
           </EuiFlyoutHeader>
           <EuiFlyoutBody>
-            <EuiDescriptionList
-              type="column"
-              compressed
-              listItems={[
+            {(() => {
+              const expiryInfo = computeThawExpiry(
+                flyoutItem,
+                status?.repositories ?? []
+              );
+              const baseItems = [
                 { title: 'Request ID', description: String(flyoutItem.request_id || '--') },
                 { title: 'Status', description: String(flyoutItem.status || '--') },
                 {
@@ -406,8 +448,24 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
                     formatStoredDatetime(flyoutItem.end_date) || '?'
                   }`,
                 },
-              ]}
-            />
+              ];
+              if (expiryInfo.label) {
+                baseItems.push({
+                  title:
+                    flyoutItem.repos.length > 1
+                      ? 'Returns to Glacier (earliest)'
+                      : 'Returns to Glacier',
+                  description: expiryInfo.label,
+                });
+              }
+              return (
+                <EuiDescriptionList
+                  type="column"
+                  compressed
+                  listItems={baseItems}
+                />
+              );
+            })()}
 
             {Array.isArray(flyoutItem.repos) && flyoutItem.repos.length > 0 && (
               <>
@@ -416,11 +474,30 @@ export function ThawRequestsPage({ http, notifications }: ThawRequestsPageProps)
                   <h3>Repositories ({flyoutItem.repos.length})</h3>
                 </EuiTitle>
                 <EuiSpacer size="s" />
-                {flyoutItem.repos.map((name, i) => (
-                  <div key={i} style={{ marginBottom: 8 }}>
-                    <EuiBadge color="hollow">{String(name)}</EuiBadge>
-                  </div>
-                ))}
+                {flyoutItem.repos.map((name, i) => {
+                  const repo = status?.repositories?.find(
+                    (r) => r.name === name
+                  );
+                  const remaining = formatRemaining(repo?.expires_at);
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        marginBottom: 8,
+                        display: 'flex',
+                        gap: 8,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <EuiBadge color="hollow">{String(name)}</EuiBadge>
+                      {remaining && (
+                        <EuiText size="xs" color="subdued">
+                          returns to Glacier {remaining}
+                        </EuiText>
+                      )}
+                    </div>
+                  );
+                })}
               </>
             )}
 
