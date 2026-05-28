@@ -26,6 +26,7 @@ import { RefreshControl } from '../components/refresh_control';
 import { PageLoading, PageError } from '../components/page_states';
 import { RotateModal } from '../components/rotate_modal';
 import { CleanupModal } from '../components/cleanup_modal';
+import { RefreezeModal } from '../components/refreeze_modal';
 import { formatStoredDatetime, formatTimestamp } from '../utils/format';
 import { SetupWizard } from './setup_wizard';
 import type { StatusResult } from '../../server/actions/status';
@@ -225,6 +226,7 @@ export function OverviewPage({ http, notifications }: OverviewPageProps) {
   const [flyout, setFlyout] = useState<FlyoutState | null>(null);
   const [detailRepo, setDetailRepo] = useState<Repo | null>(null);
   const [detailThaw, setDetailThaw] = useState<ThawReq | null>(null);
+  const [refreezeTarget, setRefreezeTarget] = useState<ThawReq | null>(null);
   const [activeAction, setActiveAction] = useState<'rotate' | 'cleanup' | null>(null);
   const ilmColumns = useMemo(() => buildIlmColumns(http), [http]);
 
@@ -453,8 +455,35 @@ export function OverviewPage({ http, notifications }: OverviewPageProps) {
           </EuiFlyoutHeader>
           <EuiFlyoutBody>
             <ThawDetailContent item={detailThaw} />
+            {detailThaw.status === 'completed' && (
+              <>
+                <EuiSpacer size="l" />
+                <EuiButton
+                  color="danger"
+                  iconType="snowflake"
+                  onClick={() => {
+                    setRefreezeTarget(detailThaw);
+                    setDetailThaw(null);
+                  }}
+                  fullWidth
+                >
+                  Refreeze this request
+                </EuiButton>
+              </>
+            )}
           </EuiFlyoutBody>
         </EuiFlyout>
+      )}
+
+      {refreezeTarget && (
+        <RefreezeModal
+          http={http}
+          notifications={notifications}
+          request_id={refreezeTarget.request_id}
+          repo_names={refreezeTarget.repos}
+          onClose={() => setRefreezeTarget(null)}
+          onComplete={refresh}
+        />
       )}
 
       {activeAction === 'rotate' && (
