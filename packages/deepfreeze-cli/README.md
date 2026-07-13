@@ -329,4 +329,4 @@ pytest tests/test_actions.py
 
 ## License
 
-Apache-2.0
+Elastic License 2.0

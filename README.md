@@ -323,4 +323,4 @@ deepfreeze/
 
 ## License
 
-Apache License 2.0
+[Elastic License 2.0](LICENSE). See the `LICENSE` file for terms.
