@@ -29,6 +29,7 @@ import { api, type RestoreProgress, type CommandResult } from '../api/client';
 import RefreshControl from '../components/RefreshControl';
 import Actions from '../components/Actions';
 import ColumnsDescriptionList from '../components/ColumnsDescriptionList';
+import SetupWizard from './SetupWizard';
 
 type Repo = Record<string, unknown>;
 type ThawReq = Record<string, unknown>;
@@ -318,6 +319,12 @@ export default function Overview() {
   }
 
   if (!status) return null;
+
+  // Not yet initialized: gate the Overview behind the setup wizard. Once setup
+  // completes, refresh status so the real Overview takes over.
+  if (!status.initialized) {
+    return <SetupWizard onComplete={() => refresh(true)} />;
+  }
 
   const repos = status.repositories || [];
   const stateCounts: Record<string, number> = {};

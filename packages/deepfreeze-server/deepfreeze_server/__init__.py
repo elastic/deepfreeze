@@ -1,3 +1,3 @@
 """Deepfreeze Server — persistent daemon with REST API, job management, and SSE events."""
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"

@@ -221,16 +221,34 @@ class DeepfreezeOrchestrator:
         self,
         repo_name_prefix: str = "deepfreeze",
         bucket_name_prefix: str = "deepfreeze",
+        base_path_prefix: str = "snapshots",
+        provider: str = "aws",
+        rotate_by: str = "path",
+        style: str = "oneup",
+        year: int | None = None,
+        month: int | None = None,
+        canned_acl: str = "private",
+        storage_class: str = "intelligent_tiering",
         ilm_policy_name: str | None = None,
         index_template_name: str | None = None,
+        create_bucket: bool = True,
         dry_run: bool = False,
     ) -> JobSubmission:
         action = Setup(
             client=self._client,
             repo_name_prefix=repo_name_prefix,
             bucket_name_prefix=bucket_name_prefix,
+            base_path_prefix=base_path_prefix,
+            provider=provider,
+            rotate_by=rotate_by,
+            style=style,
+            year=year,
+            month=month,
+            canned_acl=canned_acl,
+            storage_class=storage_class,
             ilm_policy_name=ilm_policy_name,
             index_template_name=index_template_name,
+            create_bucket=create_bucket,
             porcelain=True,
             audit=self._audit,
         )
@@ -239,9 +257,69 @@ class DeepfreezeOrchestrator:
             params={
                 "repo_name_prefix": repo_name_prefix,
                 "bucket_name_prefix": bucket_name_prefix,
+                "base_path_prefix": base_path_prefix,
+                "provider": provider,
+                "rotate_by": rotate_by,
+                "style": style,
+                "create_bucket": create_bucket,
                 "dry_run": dry_run,
             },
         )
+
+    async def get_setup_options(self) -> dict[str, list[str]]:
+        """Enumerate the choices the setup wizard's dropdowns need.
+
+        Reads existing cluster state — buckets and s3 client names already in
+        use by snapshot repos, plus ILM policy and index template names — so
+        the wizard can offer real values without creating anything.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._gather_setup_options)
+
+    def _gather_setup_options(self) -> dict[str, list[str]]:
+        """Synchronous option gathering — runs in a thread pool."""
+        buckets: set[str] = set()
+        s3_clients: set[str] = set()
+        try:
+            repos = self._client.snapshot.get_repository(name="_all")
+            for repo in repos.values():
+                settings = repo.get("settings", {}) or {}
+                bucket = settings.get("bucket")
+                if bucket:
+                    buckets.add(str(bucket))
+                # ES defaults the s3 client to "default" when unset.
+                if repo.get("type") == "s3":
+                    s3_clients.add(str(settings.get("client", "default")))
+        except Exception as e:  # noqa: BLE001 - surface empty lists, not a 500
+            logger.warning("Could not list snapshot repositories: %s", e)
+
+        ilm_names: list[str] = []
+        try:
+            ilm_names = sorted(self._client.ilm.get_lifecycle().keys())
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not list ILM policies: %s", e)
+
+        template_names: set[str] = set()
+        try:
+            composable = self._client.indices.get_index_template()
+            for tmpl in composable.get("index_templates", []):
+                name = tmpl.get("name")
+                if name:
+                    template_names.add(str(name))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not list composable index templates: %s", e)
+        try:
+            legacy = self._client.indices.get_template()
+            template_names.update(str(k) for k in legacy.keys())
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not list legacy index templates: %s", e)
+
+        return {
+            "buckets_in_use": sorted(buckets),
+            "ilm_policy_names": ilm_names,
+            "index_template_names": sorted(template_names),
+            "s3_client_names": sorted(s3_clients),
+        }
 
     async def get_thaw_restore_progress(self, request_id: str) -> list[dict]:
         """Get S3 restore progress for each repo in a thaw request."""

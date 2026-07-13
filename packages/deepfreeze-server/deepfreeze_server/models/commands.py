@@ -61,6 +61,17 @@ class RepairRequest(BaseModel):
 class SetupRequest(BaseModel):
     repo_name_prefix: str = "deepfreeze"
     bucket_name_prefix: str = "deepfreeze"
+    base_path_prefix: str = "snapshots"
+    provider: str = "aws"
+    rotate_by: str = "path"
+    style: str = "oneup"
+    year: int | None = None
+    month: int | None = None
+    canned_acl: str = "private"
+    storage_class: str = "intelligent_tiering"
     ilm_policy_name: str | None = None
     index_template_name: str | None = None
+    # When False, reuse an existing bucket instead of creating one (web
+    # setup wizard's "reuse existing bucket" mode).
+    create_bucket: bool = True
     dry_run: bool = False
