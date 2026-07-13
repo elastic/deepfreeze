@@ -1,0 +1,1122 @@
+"""
+Deepfreeze CLI entry point
+
+This module provides the main CLI entry point for the standalone deepfreeze package.
+It mirrors the interface of `curator_cli deepfreeze` exactly.
+"""
+
+import logging
+from datetime import datetime
+from pathlib import Path
+
+import click
+from deepfreeze_core import (
+    ActionError,
+    AuditLogger,
+    DeepfreezeException,
+    PreconditionError,
+    apply_storage_credentials,
+    create_es_client,
+)
+
+from deepfreeze import __version__
+from deepfreeze.config import (
+    configure_logging,
+    get_elasticsearch_config,
+    get_server_config,
+    load_config,
+)
+
+today = datetime.today()
+
+# Default config file location
+DEFAULT_CONFIG_PATH = Path.home() / ".deepfreeze" / "config.yml"
+
+
+def get_default_config_file():
+    """
+    Get the default configuration file path if it exists.
+
+    :returns: Path to ~/.deepfreeze/config.yml if it exists, None otherwise
+    """
+    if DEFAULT_CONFIG_PATH.is_file():
+        return str(DEFAULT_CONFIG_PATH)
+    return None
+
+
+def get_client_from_context(ctx):
+    """
+    Get or create an Elasticsearch client from the CLI context.
+
+    This lazily creates the client on first use.
+    """
+    if "client" not in ctx.obj or ctx.obj["client"] is None:
+        config = ctx.obj.get("configdict", {})
+        try:
+            es_config = get_elasticsearch_config(config)
+            ctx.obj["client"] = create_es_client(**es_config)
+        except Exception as e:
+            click.echo(f"Error connecting to Elasticsearch: {e}", err=True)
+            ctx.exit(1)
+    return ctx.obj["client"]
+
+
+@click.group()
+@click.version_option(version=__version__, prog_name="deepfreeze")
+@click.option(
+    "--config",
+    "-c",
+    "config_path",
+    type=click.Path(exists=True),
+    default=None,
+    help=f"Path to configuration file (default: {DEFAULT_CONFIG_PATH})",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Do not perform any changes, only show what would happen",
+)
+@click.option(
+    "--local",
+    is_flag=True,
+    default=False,
+    help="Force local mode (direct ES connection) even if a server URL is configured",
+)
+@click.option(
+    "--server-url",
+    envvar="DEEPFREEZE_SERVER_URL",
+    default=None,
+    help="URL of the deepfreeze-server (overrides config file)",
+)
+@click.pass_context
+def cli(ctx, config_path, dry_run, local, server_url):
+    """
+    Deepfreeze - Elasticsearch S3 Glacier archival tool
+
+    Provides cost-effective S3 Glacier archival and lifecycle management
+    for Elasticsearch snapshot repositories.
+
+    \b
+    Configuration:
+      Default config file: ~/.deepfreeze/config.yml
+      Override with: --config /path/to/config.yml
+
+    \b
+    Modes:
+      Remote (default when server.url is configured):
+        Commands are sent to a deepfreeze-server over HTTP.
+      Local (--local flag, or no server.url):
+        Commands run directly against Elasticsearch.
+
+    \b
+    Available commands:
+      setup           Initialize deepfreeze environment
+      status          Show deepfreeze status
+      rotate          Rotate repositories (create new, archive old)
+      thaw            Thaw frozen repositories
+      refreeze        Refreeze thawed repositories
+      cleanup         Clean up expired repositories
+      repair-metadata Repair metadata discrepancies
+    """
+    ctx.ensure_object(dict)
+    ctx.obj["dry_run"] = dry_run
+
+    # Use default config if none provided
+    using_default_config = False
+    if config_path is None:
+        config_path = get_default_config_file()
+        if config_path:
+            using_default_config = True
+
+    # Load configuration
+    try:
+        config = load_config(config_path)
+        ctx.obj["configdict"] = config
+        ctx.obj["config_path"] = config_path
+
+        # Configure logging first
+        configure_logging(config)
+
+        # Honor config.yml's storage block: populate the standard cloud-SDK env
+        # vars so local actions (setup/rotate/thaw/...) pick up credentials from
+        # config without the operator exporting AWS_*/GOOGLE_*/AZURE_* by hand.
+        # (The server does the same at startup; this keeps the CLI consistent.)
+        apply_storage_credentials(config)
+
+        # Now log the config path (after logging is configured)
+        if using_default_config:
+            logging.getLogger("deepfreeze.cli").info(
+                "Using default config: %s", config_path
+            )
+
+        # Determine remote vs local mode
+        ctx.obj["remote_client"] = None
+        if not local:
+            server_cfg = get_server_config(config)
+            url = server_url or server_cfg.get("url")
+            if url:
+                from deepfreeze.client import DeepfreezeClient
+
+                ctx.obj["remote_client"] = DeepfreezeClient(
+                    server_url=url,
+                    api_token=server_cfg.get("api_token"),
+                )
+                logging.getLogger("deepfreeze.cli").info(
+                    "Remote mode: %s", url
+                )
+
+        # Client will be created lazily when needed (local mode)
+        ctx.obj["client"] = None
+
+        # AuditLogger will be created lazily when needed
+        ctx.obj["audit"] = None
+
+    except ActionError as e:
+        click.echo(f"Configuration error: {e}", err=True)
+        ctx.exit(1)
+
+
+def display_remote_result(result: dict, porcelain: bool = False) -> bool:
+    """Display a remote API result, handling both completed and 202 job responses.
+
+    Returns True if the action was successful (or still running), False on failure.
+    """
+    from deepfreeze.cli.display import display_command_result, display_job_submitted
+
+    if "job_id" in result or "id" in result and "action" not in result:
+        # Server returned a 202 job-submitted response (still running)
+        display_job_submitted(result)
+        return True
+    else:
+        display_command_result(result, porcelain=porcelain)
+        return result.get("success", False)
+
+
+def get_audit_from_context(ctx):
+    """Get or create an AuditLogger from the CLI context."""
+    if "audit" not in ctx.obj or ctx.obj["audit"] is None:
+        try:
+            client = get_client_from_context(ctx)
+            ctx.obj["audit"] = AuditLogger(client)
+        except Exception:
+            # Audit logging is optional - if ES is not available, proceed without audit
+            ctx.obj["audit"] = None
+    return ctx.obj["audit"]
+
+
+@cli.command()
+@click.option(
+    "-y",
+    "--year",
+    type=int,
+    default=today.year,
+    show_default=True,
+    help="Year for the new repo. Only used if style=date.",
+)
+@click.option(
+    "-m",
+    "--month",
+    type=int,
+    default=today.month,
+    show_default=True,
+    help="Month for the new repo. Only used if style=date.",
+)
+@click.option(
+    "-r",
+    "--repo_name_prefix",
+    type=str,
+    default="deepfreeze",
+    show_default=True,
+    help="prefix for naming rotating repositories",
+)
+@click.option(
+    "-b",
+    "--bucket_name_prefix",
+    type=str,
+    default="deepfreeze",
+    show_default=True,
+    help="prefix for naming buckets",
+)
+@click.option(
+    "-d",
+    "--base_path_prefix",
+    type=str,
+    default="snapshots",
+    show_default=True,
+    help="base path in the bucket to use for searchable snapshots",
+)
+@click.option(
+    "-a",
+    "--canned_acl",
+    type=click.Choice(
+        [
+            "private",
+            "public-read",
+            "public-read-write",
+            "authenticated-read",
+            "log-delivery-write",
+            "bucket-owner-read",
+            "bucket-owner-full-control",
+        ]
+    ),
+    default="private",
+    show_default=True,
+    help="Canned ACL as defined by AWS",
+)
+@click.option(
+    "-s",
+    "--storage_class",
+    type=click.Choice(
+        [
+            "standard",
+            "reduced_redundancy",
+            "standard_ia",
+            "intelligent_tiering",
+            "onezone_ia",
+        ]
+    ),
+    default="standard",
+    show_default=True,
+    help="What storage class to use, as defined by AWS",
+)
+@click.option(
+    "-o",
+    "--provider",
+    type=click.Choice(["aws", "azure", "gcp"]),
+    default="aws",
+    help="Cloud storage provider to use (aws, azure, or gcp)",
+)
+@click.option(
+    "-t",
+    "--rotate_by",
+    type=click.Choice(
+        [
+            #    "bucket",
+            "path",
+        ]
+    ),
+    default="path",
+    help="Rotate by path. This is the only option available for now",
+)
+@click.option(
+    "-n",
+    "--style",
+    type=click.Choice(
+        [
+            # "date",
+            "oneup",
+        ]
+    ),
+    default="oneup",
+    help="How to number (suffix) the rotating repositories. Oneup is the only option available for now.",
+)
+@click.option(
+    "-i",
+    "--ilm_policy_name",
+    type=str,
+    required=True,
+    help="Name of the ILM policy to create/modify. If the policy exists, it will be "
+    "updated to use the deepfreeze repository. If not, a new policy will be created "
+    "with tiering: 7d hot, 30d cold, 365d frozen, then delete.",
+)
+@click.option(
+    "-x",
+    "--index_template_name",
+    type=str,
+    required=True,
+    help="Name of the index template to attach the ILM policy to. "
+    "The template will be updated to use the specified ILM policy.",
+)
+@click.option(
+    "--create-data-stream-template",
+    "create_data_stream_template",
+    is_flag=True,
+    default=False,
+    help="If the index template named by --index_template_name does not exist, "
+    "create a minimal data-stream template for it (index_patterns=[<name>], "
+    "data_stream enabled, @timestamp:date) instead of failing. Convenience for "
+    "dev/test bootstrap; normally the data template is your own.",
+)
+@click.option(
+    "-p",
+    "--porcelain",
+    is_flag=True,
+    default=False,
+    help="Machine-readable output (tab-separated values, no formatting)",
+)
+@click.pass_context
+def setup(
+    ctx,
+    year,
+    month,
+    repo_name_prefix,
+    bucket_name_prefix,
+    base_path_prefix,
+    canned_acl,
+    storage_class,
+    provider,
+    rotate_by,
+    style,
+    ilm_policy_name,
+    index_template_name,
+    create_data_stream_template,
+    porcelain,
+):
+    """
+    Set up a cluster for deepfreeze and save the configuration for all future actions.
+
+    Setup can be tuned by setting the following options to override defaults. Note that
+    --year and --month are only used if style=date. If style=oneup, then year and month
+    are ignored.
+
+    Depending on the S3 provider chosen, some options might not be available, or option
+    values may vary.
+
+    \b
+    ILM Policy Configuration (--ilm_policy_name, REQUIRED):
+      - If the policy exists: Updates it to use the deepfreeze repository
+      - If not: Creates a new policy with tiering strategy:
+        * Hot: 7 days (with rollover at 45GB or 7d)
+        * Cold: 30 days
+        * Frozen: 365 days (searchable snapshot to deepfreeze repo)
+        * Delete: after frozen phase (delete_searchable_snapshot=false)
+
+    \b
+    Index Template Configuration (--index_template_name, REQUIRED):
+      - The template will be updated to use the specified ILM policy
+      - Ensures new indices will automatically use the deepfreeze ILM policy
+    """
+    # Setup always runs in local mode — it needs direct ES access to create
+    # the status index, register repositories, and configure ILM policies.
+    from deepfreeze_core.actions import Setup
+
+    client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
+
+    # Azure container names don't allow underscores - offer to convert them
+    if provider == "azure":
+        names_to_check = {
+            "bucket_name_prefix": bucket_name_prefix,
+            "repo_name_prefix": repo_name_prefix,
+            "base_path_prefix": base_path_prefix,
+        }
+        names_with_underscores = {
+            name: value
+            for name, value in names_to_check.items()
+            if value and "_" in value
+        }
+        if names_with_underscores:
+            converted = {
+                name: value.replace("_", "-")
+                for name, value in names_with_underscores.items()
+            }
+            click.echo(
+                "Azure container names cannot contain underscores. "
+                "The following names would be converted:"
+            )
+            for name, value in names_with_underscores.items():
+                click.echo(f"  {name}: {value} -> {converted[name]}")
+
+            if not click.confirm("Do you want to proceed with these converted names?"):
+                click.echo("Aborted. Please provide names without underscores.")
+                ctx.exit(1)
+
+            # Apply conversions
+            if "bucket_name_prefix" in converted:
+                bucket_name_prefix = converted["bucket_name_prefix"]
+            if "repo_name_prefix" in converted:
+                repo_name_prefix = converted["repo_name_prefix"]
+            if "base_path_prefix" in converted:
+                base_path_prefix = converted["base_path_prefix"]
+
+    action = Setup(
+        client=client,
+        audit=audit,
+        year=year,
+        month=month,
+        repo_name_prefix=repo_name_prefix,
+        bucket_name_prefix=bucket_name_prefix,
+        base_path_prefix=base_path_prefix,
+        canned_acl=canned_acl,
+        storage_class=storage_class,
+        provider=provider,
+        rotate_by=rotate_by,
+        style=style,
+        ilm_policy_name=ilm_policy_name,
+        index_template_name=index_template_name,
+        create_data_stream_template=create_data_stream_template,
+        porcelain=porcelain,
+    )
+
+    try:
+        if ctx.obj["dry_run"]:
+            action.do_dry_run()
+        else:
+            action.do_action()
+    except PreconditionError:
+        # Detailed error panels were already printed by _check_preconditions()
+        ctx.exit(1)
+    except DeepfreezeException as e:
+        if not porcelain:
+            click.echo(f"Error: {e}", err=True)
+        ctx.exit(1)
+
+
+@cli.command()
+@click.option(
+    "-y",
+    "--year",
+    type=int,
+    default=today.year,
+    help="Year for the new repo (default is today)",
+)
+@click.option(
+    "-m",
+    "--month",
+    type=int,
+    default=today.month,
+    help="Month for the new repo (default is today)",
+)
+@click.option(
+    "-k",
+    "--keep",
+    type=int,
+    default=6,
+    help="How many repositories should remain mounted?",
+)
+@click.option(
+    "-p",
+    "--porcelain",
+    is_flag=True,
+    default=False,
+    help="Machine-readable output (tab-separated values, no formatting)",
+)
+@click.pass_context
+def rotate(
+    ctx,
+    year,
+    month,
+    keep,
+    porcelain,
+):
+    """
+    Deepfreeze rotation (add a new repo and age oldest off)
+    """
+    remote = ctx.obj.get("remote_client")
+    if remote:
+        try:
+            result = remote.rotate(year=year, month=month, keep=keep, dry_run=ctx.obj["dry_run"])
+            if not display_remote_result(result, porcelain=porcelain):
+                ctx.exit(1)
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            ctx.exit(1)
+        return
+
+    from deepfreeze_core.actions import Rotate
+
+    client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
+
+    action = Rotate(
+        client=client,
+        audit=audit,
+        year=year,
+        month=month,
+        keep=keep,
+        porcelain=porcelain,
+    )
+
+    try:
+        if ctx.obj["dry_run"]:
+            action.do_dry_run()
+        else:
+            action.do_action()
+    except DeepfreezeException as e:
+        if not porcelain:
+            click.echo(f"Error: {e}", err=True)
+        ctx.exit(1)
+
+
+@cli.command()
+@click.option(
+    "-l",
+    "--limit",
+    type=int,
+    default=None,
+    help="Limit display to the last N repositories (default: show all)",
+)
+@click.option(
+    "-r",
+    "--repos",
+    is_flag=True,
+    default=False,
+    help="Show repositories section only",
+)
+@click.option(
+    "-t",
+    "--time",
+    "show_time",
+    is_flag=True,
+    default=False,
+    help="Include full date+time in repository (and thaw request) tables",
+)
+@click.option(
+    "--thawed",
+    "thawed",
+    is_flag=True,
+    default=False,
+    help="Show thawed repositories section only",
+)
+@click.option(
+    "-b",
+    "--buckets",
+    is_flag=True,
+    default=False,
+    help="Show buckets section only",
+)
+@click.option(
+    "-i",
+    "--ilm",
+    is_flag=True,
+    default=False,
+    help="Show ILM policies section only",
+)
+@click.option(
+    "-c",
+    "--config",
+    "show_config_flag",
+    is_flag=True,
+    default=False,
+    help="Show configuration section only",
+)
+@click.option(
+    "-a",
+    "--audit",
+    "show_audit",
+    type=int,
+    default=None,
+    is_flag=False,
+    flag_value=25,
+    help="Show recent audit log entries (default: 25, or specify count)",
+)
+@click.option(
+    "-p",
+    "--porcelain",
+    is_flag=True,
+    default=False,
+    help="Output plain text without formatting (suitable for scripting)",
+)
+@click.pass_context
+def status(
+    ctx,
+    limit,
+    repos,
+    show_time,
+    thawed,
+    buckets,
+    ilm,
+    show_config_flag,
+    show_audit,
+    porcelain,
+):
+    """
+    Show the status of deepfreeze
+
+    By default, all sections are displayed. Use section flags (-r, -b, -i, -c, --thawed)
+    to show specific sections only. Use -t/--time to include full date+time in the
+    repository and thaw request tables.
+    """
+    remote = ctx.obj.get("remote_client")
+    if remote:
+        from deepfreeze.cli.display import display_status
+        try:
+            data = remote.get_status()
+            display_status(data, porcelain=porcelain)
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            ctx.exit(1)
+        return
+
+    from deepfreeze_core.actions import Status
+
+    client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
+
+    # Create action with all status parameters
+    action = Status(
+        client=client,
+        porcelain=porcelain,
+        limit=limit,
+        show_repos=repos,
+        show_thawed=thawed,
+        show_buckets=buckets,
+        show_ilm=ilm,
+        show_config=show_config_flag,
+        show_time=show_time,
+        show_audit=show_audit,
+        audit=audit,
+    )
+
+    try:
+        if ctx.obj["dry_run"]:
+            action.do_dry_run()
+        else:
+            action.do_action()
+    except DeepfreezeException as e:
+        if not porcelain:
+            click.echo(f"Error: {e}", err=True)
+        ctx.exit(1)
+
+
+@cli.command()
+@click.option(
+    "-f",
+    "--refrozen-retention-days",
+    type=int,
+    default=None,
+    help="Override retention period for refrozen thaw requests (default: from config, typically 35 days)",
+)
+@click.option(
+    "-p",
+    "--porcelain",
+    is_flag=True,
+    default=False,
+    help="Machine-readable output (tab-separated values, no formatting)",
+)
+@click.pass_context
+def cleanup(
+    ctx,
+    refrozen_retention_days,
+    porcelain,
+):
+    """
+    Clean up expired thawed repositories
+    """
+    remote = ctx.obj.get("remote_client")
+    if remote:
+        try:
+            result = remote.cleanup(
+                refrozen_retention_days=refrozen_retention_days,
+                dry_run=ctx.obj["dry_run"],
+            )
+            if not display_remote_result(result, porcelain=porcelain):
+                ctx.exit(1)
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            ctx.exit(1)
+        return
+
+    from deepfreeze_core.actions import Cleanup
+
+    client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
+
+    action = Cleanup(
+        client=client,
+        audit=audit,
+        porcelain=porcelain,
+        refrozen_retention_days=refrozen_retention_days,
+    )
+
+    try:
+        if ctx.obj["dry_run"]:
+            action.do_dry_run()
+        else:
+            action.do_action()
+    except DeepfreezeException as e:
+        if not porcelain:
+            click.echo(f"Error: {e}", err=True)
+        ctx.exit(1)
+
+
+@cli.command()
+@click.option(
+    "-t",
+    "--thaw-request-id",
+    "thaw_request_id",
+    type=str,
+    default=None,
+    help="The ID of the thaw request to refreeze (optional - if not provided, all open requests)",
+)
+@click.option(
+    "-p",
+    "--porcelain",
+    is_flag=True,
+    default=False,
+    help="Machine-readable output (tab-separated values, no formatting)",
+)
+@click.pass_context
+def refreeze(
+    ctx,
+    thaw_request_id,
+    porcelain,
+):
+    """
+    Unmount repositories from thaw request(s) and reset them to frozen state.
+
+    This is a user-initiated operation to signal "I'm done with this thaw."
+    It unmounts all repositories associated with the thaw request(s) and resets
+    their state back to frozen, even if the S3 restore hasn't expired yet.
+
+    \b
+    Two modes of operation:
+    1. Specific request: Provide -t <thaw-request-id> to refreeze one request
+    2. All open requests: Omit -t to refreeze all open requests (requires confirmation)
+
+    \b
+    Examples:
+
+      # Refreeze a specific thaw request
+
+      deepfreeze refreeze -t <thaw-request-id>
+
+      # Refreeze all open thaw requests (with confirmation)
+
+      deepfreeze refreeze
+    """
+    remote = ctx.obj.get("remote_client")
+    if remote:
+        try:
+            result = remote.refreeze(
+                request_id=thaw_request_id,
+                dry_run=ctx.obj["dry_run"],
+            )
+            if not display_remote_result(result, porcelain=porcelain):
+                ctx.exit(1)
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            ctx.exit(1)
+        return
+
+    from deepfreeze_core.actions import Refreeze
+
+    client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
+
+    # Determine if refreezing all requests
+    all_requests = thaw_request_id is None
+
+    action = Refreeze(
+        client=client,
+        audit=audit,
+        request_id=thaw_request_id,
+        all_requests=all_requests,
+        porcelain=porcelain,
+    )
+
+    try:
+        if ctx.obj["dry_run"]:
+            action.do_dry_run()
+        else:
+            action.do_action()
+    except DeepfreezeException as e:
+        if not porcelain:
+            click.echo(f"Error: {e}", err=True)
+        ctx.exit(1)
+
+
+@cli.command()
+@click.option(
+    "-s",
+    "--start-date",
+    type=str,
+    default=None,
+    help="Start of date range. Format: ISO 8601 date-time (e.g. 2025-01-15T00:00:00Z)",
+)
+@click.option(
+    "-e",
+    "--end-date",
+    type=str,
+    default=None,
+    help="End of date range. Format: ISO 8601 date-time (e.g. 2025-01-31T23:59:59Z)",
+)
+@click.option(
+    "--sync/--async",
+    "sync",
+    default=True,
+    show_default=True,
+    help="Wait for restore and mount (sync) or return immediately (async)",
+)
+@click.option(
+    "-d",
+    "--duration",
+    type=int,
+    default=30,
+    show_default=True,
+    help="Number of days to keep objects restored from Glacier",
+)
+@click.option(
+    "-t",
+    "--retrieval-tier",
+    type=click.Choice(["Standard", "Expedited", "Bulk"]),
+    default="Standard",
+    show_default=True,
+    help="AWS Glacier retrieval tier",
+)
+@click.option(
+    "-k",
+    "--check-status",
+    "check_status",
+    is_flag=True,
+    default=False,
+    help="Check status of thaw request(s). Use alone to check all, or with REQUEST_ID to check one",
+)
+@click.argument("request_id", required=False)
+@click.option(
+    "-l",
+    "--list",
+    "list_requests",
+    is_flag=True,
+    default=False,
+    help="List all active thaw requests",
+)
+@click.option(
+    "-c",
+    "--include-completed",
+    "include_completed",
+    is_flag=True,
+    default=False,
+    help="Include completed requests when listing (default: exclude completed)",
+)
+@click.option(
+    "-p",
+    "--porcelain",
+    is_flag=True,
+    default=False,
+    help="Machine-readable output (tab-separated values, no formatting)",
+)
+@click.pass_context
+def thaw(
+    ctx,
+    request_id,
+    start_date,
+    end_date,
+    sync,
+    duration,
+    retrieval_tier,
+    check_status,
+    list_requests,
+    include_completed,
+    porcelain,
+):
+    """
+    Thaw repositories from Glacier storage for a specified date range,
+    or check status of existing thaw requests.
+
+    Date range (--start-date / --end-date) must be ISO 8601 date-time,
+    e.g. 2025-01-01T00:00:00Z or 2025-01-15T23:59:59+00:00.
+
+    \b
+    Four modes of operation:
+    1. Create new thaw: Requires --start-date and --end-date
+    2. Check specific request: Use --check-status REQUEST_ID (mounts if ready)
+    3. Check all requests: Use --check-status with no argument (mounts if ready)
+    4. List requests: Use --list (shows summary table)
+
+    \b
+    Examples:
+
+      # Create new thaw request (sync - waits for completion)
+
+      deepfreeze thaw -s 2025-01-01T00:00:00Z -e 2025-01-15T23:59:59Z
+
+      # Create new thaw request (async - returns immediately)
+
+      deepfreeze thaw -s 2025-01-01T00:00:00Z -e 2025-01-15T23:59:59Z --async
+
+      # Check status of a specific request and mount if ready
+
+      deepfreeze thaw --check-status <thaw-id>
+      deepfreeze thaw -k <thaw-id>
+
+      # Check status of ALL thaw requests and mount if ready (no argument)
+
+      deepfreeze thaw --check-status
+      deepfreeze thaw -k
+
+      # List active thaw requests (excludes completed by default)
+
+      deepfreeze thaw --list
+      deepfreeze thaw -l
+
+      # List all thaw requests (including completed)
+
+      deepfreeze thaw --list --include-completed
+      deepfreeze thaw -l -c
+    """
+    from datetime import datetime as dt
+
+    # Validate mutual exclusivity
+    # check_status is a flag; request_id is the optional argument when -k is used
+    modes_active = sum(
+        [bool(start_date or end_date), check_status, bool(list_requests)]
+    )
+
+    if modes_active == 0:
+        click.echo(
+            "Error: Must specify one of: --start-date/--end-date (-s/-e), --check-status (-k), or --list (-l)",
+            err=True,
+        )
+        ctx.exit(1)
+
+    if modes_active > 1:
+        click.echo(
+            "Error: Cannot use --start-date/--end-date with --check-status (-k) or --list (-l)",
+            err=True,
+        )
+        ctx.exit(1)
+
+    # Validate that create mode has both start and end dates
+    if (start_date or end_date) and not (start_date and end_date):
+        click.echo(
+            "Error: Both --start-date and --end-date are required for creating a new thaw request",
+            err=True,
+        )
+        ctx.exit(1)
+
+    remote = ctx.obj.get("remote_client")
+    if remote:
+        from deepfreeze.cli.display import display_status
+        try:
+            if list_requests:
+                # List mode — fetch thaw requests from status endpoint
+                data = remote.get_status()
+                import json
+                thaw_reqs = data.get("thaw_requests", [])
+                if porcelain:
+                    print(json.dumps(thaw_reqs, indent=2))
+                else:
+                    display_status({"thaw_requests": thaw_reqs}, porcelain=False)
+            elif check_status:
+                # Check status mode
+                request_id_for_check = request_id if request_id else None
+                result = remote.thaw_check(request_id=request_id_for_check)
+                if not display_remote_result(result, porcelain=porcelain):
+                    ctx.exit(1)
+            else:
+                # Create mode
+                result = remote.thaw_create(
+                    start_date=start_date,
+                    end_date=end_date,
+                    duration=duration,
+                    tier=retrieval_tier,
+                    sync=sync,
+                    dry_run=ctx.obj["dry_run"],
+                )
+                if not display_remote_result(result, porcelain=porcelain):
+                    ctx.exit(1)
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            ctx.exit(1)
+        return
+
+    from deepfreeze_core.actions import Thaw
+
+    # Pass request_id to Thaw only when --check-status (-k) is used with an ID
+    # check_all is True when --check-status is used without an ID
+    request_id_for_action = request_id if check_status else None
+    check_all = check_status and not request_id
+
+    # Parse dates if provided
+    parsed_start_date = None
+    parsed_end_date = None
+    if start_date and end_date:
+        try:
+            # Parse ISO 8601 format
+            parsed_start_date = dt.fromisoformat(start_date.replace("Z", "+00:00"))
+            parsed_end_date = dt.fromisoformat(end_date.replace("Z", "+00:00"))
+        except ValueError as e:
+            click.echo(f"Error parsing dates: {e}", err=True)
+            ctx.exit(1)
+
+    client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
+
+    action = Thaw(
+        client=client,
+        audit=audit,
+        start_date=parsed_start_date,
+        end_date=parsed_end_date,
+        request_id=request_id_for_action,
+        check_all=check_all,
+        list_requests=list_requests,
+        restore_days=duration,
+        retrieval_tier=retrieval_tier,
+        sync=sync,
+        porcelain=porcelain,
+        include_completed=include_completed,
+    )
+
+    try:
+        if ctx.obj["dry_run"]:
+            action.do_dry_run()
+        else:
+            action.do_action()
+    except DeepfreezeException as e:
+        if not porcelain:
+            click.echo(f"Error: {e}", err=True)
+        ctx.exit(1)
+
+
+@cli.command(name="repair-metadata")
+@click.option(
+    "-p",
+    "--porcelain",
+    is_flag=True,
+    default=False,
+    help="Output plain text without formatting (suitable for scripting)",
+)
+@click.pass_context
+def repair_metadata(ctx, porcelain):
+    """
+    Repair repository metadata to match actual S3 storage state
+
+    Scans all repositories and checks if their metadata (thaw_state) matches
+    the actual S3 storage class. Repositories stored in GLACIER should have
+    thaw_state='frozen', but sometimes metadata can get out of sync.
+
+    This command will:
+    - Scan all repositories in the status index
+    - Check actual S3 storage class for each repository
+    - Update thaw_state='frozen' for repositories actually in GLACIER
+    - Report on all changes made
+
+    Use --dry-run to see what would be changed without making modifications.
+    """
+    remote = ctx.obj.get("remote_client")
+    if remote:
+        try:
+            result = remote.repair_metadata(dry_run=ctx.obj["dry_run"])
+            if not display_remote_result(result, porcelain=porcelain):
+                ctx.exit(1)
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            ctx.exit(1)
+        return
+
+    from deepfreeze_core.actions import RepairMetadata
+
+    client = get_client_from_context(ctx)
+    audit = get_audit_from_context(ctx)
+
+    action = RepairMetadata(
+        client=client,
+        audit=audit,
+        porcelain=porcelain,
+    )
+
+    try:
+        if ctx.obj["dry_run"]:
+            action.do_dry_run()
+        else:
+            action.do_action()
+    except DeepfreezeException as e:
+        if not porcelain:
+            click.echo(f"Error: {e}", err=True)
+        ctx.exit(1)
+
+
+if __name__ == "__main__":
+    cli()

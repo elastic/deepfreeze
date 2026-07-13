@@ -12,8 +12,8 @@ from pathlib import Path
 
 
 def test_exception_classes_importable():
-    """Test that all exception classes can be imported from elastic_deepfreeze.exceptions"""
-    from elastic_deepfreeze import (
+    """Test that all exception classes can be imported from deepfreeze.exceptions"""
+    from deepfreeze import (
         ActionError,
         ActionException,
         DeepfreezeException,
@@ -35,7 +35,7 @@ def test_exception_classes_importable():
 
 def test_exception_instantiation():
     """Test that exception classes can be instantiated with messages"""
-    from elastic_deepfreeze import (
+    from deepfreeze import (
         ActionError,
         DeepfreezeException,
         MissingIndexError,
@@ -59,8 +59,8 @@ def test_exception_instantiation():
 
 
 def test_constants_importable():
-    """Test that all constants can be imported from elastic_deepfreeze.constants"""
-    from elastic_deepfreeze_core.constants import (
+    """Test that all constants can be imported from deepfreeze.constants"""
+    from deepfreeze_core.constants import (
         PROVIDERS,
         SETTINGS_ID,
         STATUS_INDEX,
@@ -80,7 +80,7 @@ def test_constants_importable():
     # Verify values
     assert STATUS_INDEX == "deepfreeze-status"
     assert SETTINGS_ID == "1"
-    assert PROVIDERS == ["aws"]
+    assert PROVIDERS == ["aws", "azure", "gcp"]
 
     # Verify thaw states
     assert THAW_STATE_ACTIVE == "active"
@@ -100,9 +100,9 @@ def test_constants_importable():
 
 def test_no_curator_imports_in_exceptions_module():
     """Test that no curator imports exist in exceptions.py"""
-    import elastic_deepfreeze_core
+    import deepfreeze_core
 
-    exceptions_file = Path(elastic_deepfreeze_core.__file__).parent / "exceptions.py"
+    exceptions_file = Path(deepfreeze_core.__file__).parent / "exceptions.py"
 
     with open(exceptions_file) as f:
         tree = ast.parse(f.read())
@@ -122,9 +122,9 @@ def test_no_curator_imports_in_exceptions_module():
 
 def test_no_curator_imports_in_constants_module():
     """Test that no curator imports exist in constants.py"""
-    import elastic_deepfreeze_core
+    import deepfreeze_core
 
-    constants_file = Path(elastic_deepfreeze_core.__file__).parent / "constants.py"
+    constants_file = Path(deepfreeze_core.__file__).parent / "constants.py"
 
     with open(constants_file) as f:
         tree = ast.parse(f.read())

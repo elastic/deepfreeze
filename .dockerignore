@@ -1,0 +1,34 @@
+# Keep the build context small and deterministic. The frontend is rebuilt and
+# the Python package's static/ dir is regenerated inside the image, so any
+# local copies are excluded.
+
+.git
+.gitignore
+**/.DS_Store
+
+# Node / frontend build artifacts (rebuilt in the frontend stage)
+**/node_modules
+packages/deepfreeze-server/frontend/dist
+packages/deepfreeze-server/deepfreeze_server/static
+
+# Python build/venv/cache artifacts
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.benchmarks
+**/*.egg-info
+**/build
+**/dist
+.venv
+venv
+
+# Tests and local-only files (not needed at runtime)
+tests
+**/*.log
+config.yml
+.env
+
+# Docs / editor / planning cruft
+.opencode
+AGENTS.md

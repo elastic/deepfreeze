@@ -1,0 +1,19 @@
+[Unit]
+Description=Deepfreeze Server
+After=network.target elasticsearch.service
+
+[Service]
+Type=simple
+# --- Edit these to match your environment ---
+User=deepfreeze
+Environment="PATH=/home/deepfreeze/.pyenv/shims:/home/deepfreeze/.pyenv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/deepfreeze/.pyenv/shims/deepfreeze-server --config /home/deepfreeze/.deepfreeze/config.yml --host 0.0.0.0 --port 8000
+WorkingDirectory=/home/deepfreeze
+# ---------------------------------------------
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
