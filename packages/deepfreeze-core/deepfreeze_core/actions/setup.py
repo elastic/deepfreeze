@@ -46,6 +46,10 @@ class Setup:
         Hot (7d) -> Cold (30d) -> Frozen (365d) -> Delete (delete_searchable_snapshot=false)
     :param index_template_name: Name of the index template to attach the ILM policy to.
         Requires ilm_policy_name to be specified.
+    :param create_bucket: When True (default), deepfreeze creates the storage bucket and
+        fails if it already exists. When False, an existing bucket is reused: the
+        precondition instead requires the bucket to exist, and no bucket is created or
+        rolled back. Used by the web setup wizard's "reuse existing bucket" mode.
 
     :raises RepositoryException: If a repository with the given prefix already exists
 
@@ -79,6 +83,7 @@ class Setup:
         ilm_policy_name: str = None,
         index_template_name: str = None,
         create_data_stream_template: bool = False,
+        create_bucket: bool = True,
         porcelain: bool = False,
         audit: AuditLogger = None,
         **kwargs,  # Accept extra kwargs for compatibility with curator CLI
@@ -110,6 +115,15 @@ class Setup:
         self.ilm_policy_name = ilm_policy_name
         self.index_template_name = index_template_name
         self.create_data_stream_template = create_data_stream_template
+        # When False, an existing bucket is reused: the bucket-already-exists
+        # precondition is inverted (the bucket must exist) and do_action does
+        # not create or roll back the bucket. Used by the web setup wizard's
+        # "reuse existing bucket" mode; the CLI keeps the default create flow.
+        self.create_bucket = create_bucket
+        # Structured, machine-readable step records mirrored to the audit
+        # tracker. The server reads these to drive the setup wizard's dry-run
+        # preview and completion summary.
+        self._results: list[dict] = []
         self.base_path = self.settings.base_path_prefix
 
         self.s3 = s3_client_factory(self.settings.provider)
@@ -189,10 +203,13 @@ class Setup:
                 }
             )
 
-        # Third, check if the bucket already exists
+        # Third, check the bucket. In create mode (default) the bucket must NOT
+        # already exist; in reuse mode (create_bucket=False, used by the web
+        # wizard's "reuse existing bucket" flow) the bucket MUST already exist.
         self.loggit.debug("Checking if bucket %s exists", self.new_bucket_name)
-        if self.s3.bucket_exists(self.new_bucket_name):
-            storage_type = self.s3.STORAGE_TYPE
+        bucket_exists = self.s3.bucket_exists(self.new_bucket_name)
+        storage_type = self.s3.STORAGE_TYPE
+        if self.create_bucket and bucket_exists:
             delete_cmd = self.s3.STORAGE_DELETE_CMD.format(bucket=self.new_bucket_name)
             errors.append(
                 {
@@ -201,6 +218,15 @@ class Setup:
                     f"  [yellow]{delete_cmd}[/yellow]\n"
                     "\n[bold]WARNING:[/bold] This will delete all data in the bucket!\n"
                     "Or use a different bucket_name_prefix in your configuration.",
+                }
+            )
+        elif not self.create_bucket and not bucket_exists:
+            errors.append(
+                {
+                    "issue": f"{storage_type} [cyan]{self.new_bucket_name}[/cyan] does not exist",
+                    "solution": "Reuse mode expects an existing bucket. Create the "
+                    f"{storage_type.lower()} first, pick a different bucket, or run setup "
+                    "in create mode so deepfreeze provisions the bucket for you.",
                 }
             )
 
@@ -561,41 +587,48 @@ class Setup:
         try:
             self._check_preconditions()
 
+            def record(step: dict) -> None:
+                """Mirror a step record to _results and the audit tracker."""
+                self._results.append(step)
+                if tracker:
+                    tracker.add_result(step)
+
             # Record what would be created
+            record({"type": "settings_index", "action": "would_create"})
+            record(
+                {
+                    "type": "bucket",
+                    "name": self.new_bucket_name,
+                    "action": "would_create" if self.create_bucket else "unchanged",
+                    "detail": None if self.create_bucket else "reuse existing bucket",
+                }
+            )
+            record(
+                {
+                    "type": "repository",
+                    "name": self.new_repo_name,
+                    "bucket": self.new_bucket_name,
+                    "base_path": self.base_path,
+                    "action": "would_create",
+                }
+            )
+            if self.ilm_policy_name:
+                record(
+                    {
+                        "type": "ilm_policy",
+                        "name": self.ilm_policy_name,
+                        "action": "would_create_or_update",
+                    }
+                )
+            if self.index_template_name:
+                record(
+                    {
+                        "type": "index_template",
+                        "name": self.index_template_name,
+                        "action": "would_update",
+                    }
+                )
             if tracker:
-                tracker.add_result({"type": "settings_index", "action": "would_create"})
-                tracker.add_result(
-                    {
-                        "type": "bucket",
-                        "name": self.new_bucket_name,
-                        "action": "would_create",
-                    }
-                )
-                tracker.add_result(
-                    {
-                        "type": "repository",
-                        "name": self.new_repo_name,
-                        "bucket": self.new_bucket_name,
-                        "base_path": self.base_path,
-                        "action": "would_create",
-                    }
-                )
-                if self.ilm_policy_name:
-                    tracker.add_result(
-                        {
-                            "type": "ilm_policy",
-                            "name": self.ilm_policy_name,
-                            "action": "would_create_or_update",
-                        }
-                    )
-                if self.index_template_name:
-                    tracker.add_result(
-                        {
-                            "type": "index_template",
-                            "name": self.index_template_name,
-                            "action": "would_update",
-                        }
-                    )
                 tracker.set_summary(
                     {
                         "would_create_repository": self.new_repo_name,
@@ -604,7 +637,7 @@ class Setup:
                     }
                 )
 
-            self.loggit.info("DRY-RUN: Creating bucket %s", self.new_bucket_name)
+            self.loggit.info("DRY-RUN: validating repository %s", self.new_repo_name)
             create_repo(
                 self.client,
                 self.new_repo_name,
@@ -689,33 +722,48 @@ class Setup:
                     )
                 raise
 
-            # Create S3 bucket
+            # Create the S3 bucket, or reuse an existing one when the caller
+            # opted out of creation (create_bucket=False — the web wizard's
+            # "reuse existing bucket" mode). Either way the repo is created
+            # against new_bucket_name below.
             # ENHANCED LOGGING: Log bucket creation parameters
             self.loggit.info(
-                "Creating S3 bucket %s with ACL=%s, storage_class=%s",
+                "%s S3 bucket %s with ACL=%s, storage_class=%s",
+                "Creating" if self.create_bucket else "Reusing",
                 self.new_bucket_name,
                 self.settings.canned_acl,
                 self.settings.storage_class,
             )
             self.loggit.debug(
-                "Full bucket creation parameters: bucket=%s, ACL=%s, storage_class=%s, provider=%s",
+                "Full bucket parameters: bucket=%s, ACL=%s, storage_class=%s, provider=%s",
                 self.new_bucket_name,
                 self.settings.canned_acl,
                 self.settings.storage_class,
                 self.settings.provider,
             )
             try:
-                self.s3.create_bucket(self.new_bucket_name)
-                self._bucket_created_this_run = True
-                self.loggit.info(
-                    "Successfully created S3 bucket %s", self.new_bucket_name
-                )
+                if self.create_bucket:
+                    self.s3.create_bucket(self.new_bucket_name)
+                    self._bucket_created_this_run = True
+                    self.loggit.info(
+                        "Successfully created S3 bucket %s", self.new_bucket_name
+                    )
+                    bucket_action = {"action": "created"}
+                else:
+                    self.loggit.info(
+                        "Reusing existing bucket %s (create_bucket=False)",
+                        self.new_bucket_name,
+                    )
+                    bucket_action = {
+                        "action": "unchanged",
+                        "detail": "reuse existing bucket",
+                    }
                 if tracker:
                     tracker.add_result(
                         {
                             "type": "bucket",
                             "name": self.new_bucket_name,
-                            "action": "created",
+                            **bucket_action,
                         }
                     )
             except Exception as e:
@@ -1044,7 +1092,42 @@ class Setup:
                     "post-setup validation failed: " + "; ".join(validation_failures)
                 )
 
-            # Success!
+            # Success! Assemble the machine-readable step list the server
+            # surfaces to the setup wizard, from the outcomes we observed.
+            self._results = [
+                {"type": "audit_index", "action": "created"},
+                {"type": "settings_index", "action": "created"},
+                {
+                    "type": "bucket",
+                    "name": self.new_bucket_name,
+                    "action": "created" if self._bucket_created_this_run else "unchanged",
+                    "detail": None if self._bucket_created_this_run else "reused existing bucket",
+                },
+                {
+                    "type": "repository",
+                    "name": self.new_repo_name,
+                    "bucket": self.new_bucket_name,
+                    "base_path": self.base_path,
+                    "action": "created",
+                },
+            ]
+            if ilm_result:
+                self._results.append(
+                    {
+                        "type": "ilm_policy",
+                        "name": self.ilm_policy_name,
+                        "action": ilm_result.get("action", "unchanged"),
+                    }
+                )
+            if template_result:
+                self._results.append(
+                    {
+                        "type": "index_template",
+                        "name": self.index_template_name,
+                        "action": template_result.get("action", "unchanged"),
+                    }
+                )
+
             if tracker:
                 tracker.set_summary(
                     {

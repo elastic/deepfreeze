@@ -160,8 +160,26 @@ async def setup(
     submission = await orch.setup(
         repo_name_prefix=body.repo_name_prefix,
         bucket_name_prefix=body.bucket_name_prefix,
+        base_path_prefix=body.base_path_prefix,
+        provider=body.provider,
+        rotate_by=body.rotate_by,
+        style=body.style,
+        year=body.year,
+        month=body.month,
+        canned_acl=body.canned_acl,
+        storage_class=body.storage_class,
         ilm_policy_name=body.ilm_policy_name,
         index_template_name=body.index_template_name,
+        create_bucket=body.create_bucket,
         dry_run=body.dry_run,
     )
     return await _submit_or_wait(orch, submission, wait, timeout)
+
+
+@router.get("/setup/options")
+async def setup_options(
+    orch: DeepfreezeOrchestrator = Depends(get_orchestrator),
+):
+    """Enumerate choices for the setup wizard (buckets, ILM policies,
+    index templates, s3 client names already in use on the cluster)."""
+    return await orch.get_setup_options()

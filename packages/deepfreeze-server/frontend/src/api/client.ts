@@ -214,6 +214,30 @@ export interface AuditEntry {
   version: string;
 }
 
+export interface SetupConfig {
+  repo_name_prefix: string;
+  bucket_name_prefix: string;
+  base_path_prefix: string;
+  provider: 'aws' | 'azure' | 'gcp';
+  rotate_by: 'path' | 'bucket';
+  style: 'oneup' | 'date';
+  year?: number;
+  month?: number;
+  canned_acl: string;
+  storage_class: string;
+  ilm_policy_name?: string;
+  index_template_name?: string;
+  create_bucket: boolean;
+  dry_run?: boolean;
+}
+
+export interface SetupOptions {
+  buckets_in_use: string[];
+  ilm_policy_names: string[];
+  index_template_names: string[];
+  s3_client_names: string[];
+}
+
 export interface ScheduledJob {
   name: string;
   action: string;
@@ -303,6 +327,21 @@ export const api = {
     request<CommandResult>('/actions/repair', {
       method: 'POST',
       body: JSON.stringify(params),
+    }),
+
+  // Setup wizard
+  getSetupOptions: () => request<SetupOptions>('/setup/options'),
+
+  setup: (config: SetupConfig) =>
+    request<CommandResult>('/actions/setup', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+
+  setupDryRun: (config: SetupConfig) =>
+    request<CommandResult>('/actions/setup', {
+      method: 'POST',
+      body: JSON.stringify({ ...config, dry_run: true }),
     }),
 
   // Scheduler
