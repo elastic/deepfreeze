@@ -1,0 +1,71 @@
+# Deepfreeze server — Docker Compose deployment.
+#
+# 1. Copy packages/deepfreeze-cli/config.yml.example to ./config.yml and edit it
+#    (Elasticsearch connection, auth tokens, scheduled jobs).
+#    NOTE: elasticsearch.hosts must be reachable FROM INSIDE the container. If ES
+#    runs on the Docker host, use http://host.docker.internal:9200 instead of
+#    localhost (the extra_hosts entry below enables that name on Linux).
+# 2. docker compose up -d --build
+# 3. Browse to http://localhost:8000
+#
+# Optional settings below are commented out with the '#' in column 1. To enable
+# one, delete only its leading '#' — the indentation that remains is already
+# correct. Lines that are plain prose (no YAML after the '#') stay as comments.
+#
+# See packages/deepfreeze-server/README.md ("Docker") for details.
+
+services:
+  deepfreeze-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+# Cloud extras baked into the image. Default covers all backends; override to
+# slim down, e.g. "[azure]", "[gcp]", or "" for aws-only.
+      args:
+        CORE_EXTRAS: "[azure,gcp]"
+    image: deepfreeze-server:latest
+    container_name: deepfreeze-server
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.yml:/etc/deepfreeze/config.yml:ro
+# Cloud storage credentials — IMPORTANT, common pitfall:
+# A credential FILE referenced by config.yml (e.g. storage.gcp.credentials_file,
+# or any cert/key path) must be (1) MOUNTED into the container here AND (2) have
+# config.yml point at the IN-CONTAINER path, NOT the host path. A host path that
+# is not mounted does not exist inside the container — you will get
+# "[Errno 2] No such file or directory: '/home/you/key.json'" at startup.
+# In each mount, left = host path, right = in-container path; set config.yml to
+# the right-hand path. The container runs as uid 1000, so mounted files must be
+# readable by that uid (e.g. chmod 644 the key).
+# AWS — mount your credentials/profile directory:
+#      - ${HOME}/.aws:/home/deepfreeze/.aws:ro
+# GCP — project and location stay in config.yml's storage.gcp block (they are
+#       config, not credentials). Mount the service-account key and set, in that
+#       same block, credentials_file: /etc/deepfreeze/gcp-key.json
+#      - /host/path/to/key.json:/etc/deepfreeze/gcp-key.json:ro
+# Azure — no mount needed; supply credentials via environment below.
+# TLS — if config.server.tls is set, mount the cert/key:
+#      - ./tls:/etc/deepfreeze/tls:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Storage credentials may instead be supplied as environment variables. The
+    # `environment:` key below is already active (seeded with the no-op default
+    # DEEPFREEZE_PORT), so just delete the leading '#' from the lines you need —
+    # they append correctly without re-enabling the key. A bare name passes the
+    # value through from your shell; NAME=value sets it explicitly.
+    environment:
+      - DEEPFREEZE_PORT=8000
+# AWS:
+#      - AWS_ACCESS_KEY_ID
+#      - AWS_SECRET_ACCESS_KEY
+#      - AWS_DEFAULT_REGION
+# Azure (one of):
+#      - AZURE_STORAGE_CONNECTION_STRING
+#      - AZURE_STORAGE_ACCOUNT
+#      - AZURE_STORAGE_KEY
+# GCP (env alternatives to the config storage.gcp block; still mount the key):
+#      - GOOGLE_APPLICATION_CREDENTIALS=/etc/deepfreeze/gcp-key.json
+#      - GOOGLE_CLOUD_PROJECT=my-gcp-project
+#      - GOOGLE_CLOUD_LOCATION=US

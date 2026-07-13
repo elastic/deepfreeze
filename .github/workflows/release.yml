@@ -18,32 +18,86 @@ jobs:
 
     - name: Validate version sync
       run: |
-        CORE_VERSION=$(python -c "import re; print(re.search(r'__version__ = \"([^\"]+)\"', open('packages/elastic-deepfreeze-core/elastic_deepfreeze_core/__init__.py').read()).group(1))")
-        CLI_VERSION=$(python -c "import re; print(re.search(r'__version__ = \"([^\"]+)\"', open('packages/elastic-deepfreeze-cli/elastic_deepfreeze/__init__.py').read()).group(1))")
+        get_ver() { python -c "import re,sys; print(re.search(r'__version__ = \"([^\"]+)\"', open(sys.argv[1]).read()).group(1))" "$1"; }
+        CORE_VERSION=$(get_ver packages/deepfreeze-core/deepfreeze_core/__init__.py)
+        CLI_VERSION=$(get_ver packages/deepfreeze-cli/deepfreeze/__init__.py)
+        SERVER_VERSION=$(get_ver packages/deepfreeze-server/deepfreeze_server/__init__.py)
         TAG_VERSION=${GITHUB_REF#refs/tags/v}
+        TAG_VERSION=${TAG_VERSION%%-*}   # strip pre-release suffix (e.g. -RC1, -alpha1)
 
-        echo "Core version: $CORE_VERSION"
-        echo "CLI version: $CLI_VERSION"
-        echo "Tag version: $TAG_VERSION"
+        echo "Core version:   $CORE_VERSION"
+        echo "CLI version:    $CLI_VERSION"
+        echo "Server version: $SERVER_VERSION"
+        echo "Tag version:    $TAG_VERSION"
 
-        if [ "$CORE_VERSION" != "$CLI_VERSION" ]; then
+        if [ "$CORE_VERSION" != "$CLI_VERSION" ] || [ "$CORE_VERSION" != "$SERVER_VERSION" ]; then
           echo "ERROR: Version mismatch between packages!"
-          echo "  elastic-deepfreeze-core: $CORE_VERSION"
-          echo "  elastic-deepfreeze-cli: $CLI_VERSION"
+          echo "  deepfreeze-core:   $CORE_VERSION"
+          echo "  deepfreeze-cli:    $CLI_VERSION"
+          echo "  deepfreeze-server: $SERVER_VERSION"
           exit 1
         fi
 
         if [ "$CORE_VERSION" != "$TAG_VERSION" ]; then
           echo "ERROR: Version doesn't match git tag!"
           echo "  Code version: $CORE_VERSION"
-          echo "  Tag version: $TAG_VERSION"
+          echo "  Tag version:  $TAG_VERSION"
           exit 1
         fi
 
         echo "All versions match: $CORE_VERSION"
 
-  release:
+  build:
     needs: validate-versions
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12.7'
+
+    - name: Build sdists and wheels for all packages
+      run: |
+        python -m pip install --upgrade build
+        for pkg in deepfreeze-core deepfreeze-cli deepfreeze-server; do
+          echo "::group::build $pkg"
+          python -m build --outdir dist "packages/$pkg"
+          echo "::endgroup::"
+        done
+        ls -l dist
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist
+        path: dist/
+
+  # Publishes deepfreeze-core, deepfreeze-cli and deepfreeze-server to PyPI via
+  # Trusted Publishing (OIDC). Each PyPI project must have a trusted publisher
+  # configured for: repo elastic/deepfreeze, workflow release.yml, environment pypi.
+  # No API tokens are stored — the upload is authorized by GitHub's OIDC identity.
+  publish-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/deepfreeze-core/
+    permissions:
+      id-token: write   # required for Trusted Publishing
+    steps:
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: dist
+        path: dist/
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: publish-pypi
     runs-on: ubuntu-latest
     permissions:
       contents: write

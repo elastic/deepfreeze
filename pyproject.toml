@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "deepfreeze-workspace"
-version = "1.0.0"
+version = "2.0.0"
 description = "Deepfreeze monorepo - Elasticsearch S3 Glacier archival"
 readme = "README.md"
 license = "Apache-2.0"
@@ -12,24 +12,37 @@ requires-python = ">=3.8"
 
 [tool.hatch.envs.default]
 dependencies = [
-    "packages/elastic-deepfreeze-core",
-    "packages/elastic-deepfreeze-cli",
+    "packages/deepfreeze-core",
+    "packages/deepfreeze-cli",
 ]
 
 [tool.hatch.envs.test]
 dependencies = [
-    "packages/elastic-deepfreeze-core",
-    "packages/elastic-deepfreeze-cli",
+    "packages/deepfreeze-core",
+    "packages/deepfreeze-cli",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "pytest-timeout>=2.2.0",
     "moto[s3]>=4.0.0",
+    "httpx>=0.24.0",
 ]
 
 [tool.hatch.envs.test.scripts]
 all = "pytest tests/ -v"
 core = "pytest tests/core/ -v"
 cli = "pytest tests/cli/ -v"
-cov = "pytest tests/ --cov=elastic_deepfreeze_core --cov=elastic_deepfreeze --cov-report=term-missing"
+cov = "pytest tests/ --cov=deepfreeze_core --cov=deepfreeze --cov-report=term-missing"
+integration = "pytest tests/integration/ -v -m integration"
+integration-fast = "pytest tests/integration/ -v -m 'integration and not slow and not webui'"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: Tests requiring a real Elasticsearch cluster",
+    "slow: Tests that may take minutes (thaw/restore operations)",
+    "cli: CLI invocation tests",
+    "api: Server API tests",
+    "webui: Playwright browser tests",
+]
 
 [tool.black]
 line-length = 88
@@ -38,5 +51,7 @@ target-version = ["py38", "py39", "py310", "py311", "py312"]
 [tool.ruff]
 line-length = 88
 target-version = "py38"
+
+[tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4"]
 ignore = ["E501"]

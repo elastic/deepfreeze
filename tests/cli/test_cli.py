@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
-from elastic_deepfreeze.cli.main import cli
+from deepfreeze.cli.main import cli
 
 
 @pytest.fixture
@@ -81,7 +81,7 @@ class TestCLIOptionParsing:
 
     def test_setup_requires_ilm_policy(self, runner, temp_config_file):
         """Test that setup requires --ilm_policy_name."""
-        with patch("elastic_deepfreeze.cli.main.get_client_from_context"):
+        with patch("deepfreeze.cli.main.get_client_from_context"):
             result = runner.invoke(
                 cli,
                 [
@@ -98,7 +98,7 @@ class TestCLIOptionParsing:
 
     def test_setup_requires_index_template(self, runner, temp_config_file):
         """Test that setup requires --index_template_name."""
-        with patch("elastic_deepfreeze.cli.main.get_client_from_context"):
+        with patch("deepfreeze.cli.main.get_client_from_context"):
             result = runner.invoke(
                 cli,
                 ["-c", temp_config_file, "setup", "--ilm_policy_name", "test-policy"],
@@ -109,14 +109,30 @@ class TestCLIOptionParsing:
 
     def test_thaw_requires_mode(self, runner, temp_config_file):
         """Test that thaw requires one of the operation modes."""
-        with patch("elastic_deepfreeze.cli.main.get_client_from_context"):
+        with patch("deepfreeze.cli.main.get_client_from_context"):
             result = runner.invoke(cli, ["-c", temp_config_file, "thaw"])
             assert result.exit_code != 0
             assert "Must specify one of" in result.output
 
+    def test_thaw_check_status_without_argument_accepted(
+        self, runner, temp_config_file
+    ):
+        """Test that thaw --check-status (or -k) without argument is allowed (check all)."""
+        with patch("deepfreeze.cli.main.get_client_from_context"):
+            with patch("deepfreeze_core.actions.Thaw") as mock_thaw_class:
+                result = runner.invoke(
+                    cli, ["-c", temp_config_file, "thaw", "--check-status"]
+                )
+                # Should not fail with "requires an argument" (Click would use exit 2)
+                assert "requires an argument" not in result.output, result.output
+                # Should have invoked Thaw with request_id=None (check all)
+                mock_thaw_class.assert_called_once()
+                call_kwargs = mock_thaw_class.call_args[1]
+                assert call_kwargs.get("request_id") is None
+
     def test_thaw_date_range_requires_both_dates(self, runner, temp_config_file):
         """Test that thaw with date range requires both start and end dates."""
-        with patch("elastic_deepfreeze.cli.main.get_client_from_context"):
+        with patch("deepfreeze.cli.main.get_client_from_context"):
             result = runner.invoke(
                 cli,
                 [
@@ -134,7 +150,7 @@ class TestCLIOptionParsing:
 class TestCLIWithMockedClient:
     """Test CLI commands with mocked Elasticsearch client."""
 
-    @patch("elastic_deepfreeze.cli.main.create_es_client")
+    @patch("deepfreeze.cli.main.create_es_client")
     def test_dry_run_flag_parsed(self, mock_create_client, runner, temp_config_file):
         """Test that --dry-run flag is parsed correctly."""
         mock_client = MagicMock()
@@ -143,7 +159,7 @@ class TestCLIWithMockedClient:
         # We need to mock the entire chain to avoid errors
         mock_client.indices.exists.return_value = False
 
-        with patch("elastic_deepfreeze_core.actions.setup.Setup") as mock_setup_class:
+        with patch("deepfreeze_core.actions.setup.Setup") as mock_setup_class:
             mock_setup = MagicMock()
             mock_setup_class.return_value = mock_setup
 
@@ -197,6 +213,8 @@ class TestCLICommandRegistration:
         assert "--limit" in result.output
         assert "--repos" in result.output
         assert "--porcelain" in result.output
+        assert "--time" in result.output
+        assert "--thawed" in result.output
 
     def test_rotate_command_options(self, runner):
         """Test that rotate command has expected options."""
@@ -218,9 +236,9 @@ class TestDefaultConfig:
 
     def test_get_default_config_file_not_exists(self):
         """Test that get_default_config_file returns None when file doesn't exist."""
-        from elastic_deepfreeze.cli.main import get_default_config_file
+        from deepfreeze.cli.main import get_default_config_file
 
-        with patch("elastic_deepfreeze.cli.main.DEFAULT_CONFIG_PATH") as mock_path:
+        with patch("deepfreeze.cli.main.DEFAULT_CONFIG_PATH") as mock_path:
             mock_path.is_file.return_value = False
             result = get_default_config_file()
             assert result is None
@@ -228,13 +246,13 @@ class TestDefaultConfig:
     def test_get_default_config_file_exists(self, tmp_path):
         """Test that get_default_config_file returns path when file exists."""
 
-        from elastic_deepfreeze.cli.main import get_default_config_file
+        from deepfreeze.cli.main import get_default_config_file
 
         # Create a temporary config file
         config_file = tmp_path / "config.yml"
         config_file.write_text("elasticsearch:\n  hosts:\n    - localhost:9200\n")
 
-        with patch("elastic_deepfreeze.cli.main.DEFAULT_CONFIG_PATH", config_file):
+        with patch("deepfreeze.cli.main.DEFAULT_CONFIG_PATH", config_file):
             result = get_default_config_file()
             assert result == str(config_file)
 
@@ -252,9 +270,9 @@ elasticsearch:
 """
         config_file.write_text(config_content)
 
-        with patch("elastic_deepfreeze.cli.main.DEFAULT_CONFIG_PATH", config_file):
+        with patch("deepfreeze.cli.main.DEFAULT_CONFIG_PATH", config_file):
             with patch(
-                "elastic_deepfreeze.cli.main.get_default_config_file",
+                "deepfreeze.cli.main.get_default_config_file",
                 return_value=str(config_file),
             ):
                 result = runner.invoke(cli, ["--help"])
