@@ -7,7 +7,7 @@ name = "deepfreeze-workspace"
 version = "2.0.0"
 description = "Deepfreeze monorepo - Elasticsearch S3 Glacier archival"
 readme = "README.md"
-license = "Apache-2.0"
+license = "Elastic-2.0"
 requires-python = ">=3.8"
 
 [tool.hatch.envs.default]

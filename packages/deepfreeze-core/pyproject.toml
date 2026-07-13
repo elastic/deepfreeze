@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "deepfreeze-core"
-version = "2.0.3"
+version = "2.1.0"
 description = "Core library for Elasticsearch S3 Glacier archival - shared between curator and standalone deepfreeze"
 readme = "README.md"
-license = "Apache-2.0"
+license = "Elastic-2.0"
 requires-python = ">=3.8"
 authors = [
     { name = "Bret Wortman" }
@@ -23,7 +23,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",

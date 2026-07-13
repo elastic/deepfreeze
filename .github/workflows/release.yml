@@ -9,52 +9,63 @@ jobs:
   validate-versions:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.12.7'
 
-    - name: Validate version sync
+    - name: Validate versions
       run: |
-        get_ver() { python -c "import re,sys; print(re.search(r'__version__ = \"([^\"]+)\"', open(sys.argv[1]).read()).group(1))" "$1"; }
-        CORE_VERSION=$(get_ver packages/deepfreeze-core/deepfreeze_core/__init__.py)
-        CLI_VERSION=$(get_ver packages/deepfreeze-cli/deepfreeze/__init__.py)
-        SERVER_VERSION=$(get_ver packages/deepfreeze-server/deepfreeze_server/__init__.py)
-        TAG_VERSION=${GITHUB_REF#refs/tags/v}
-        TAG_VERSION=${TAG_VERSION%%-*}   # strip pre-release suffix (e.g. -RC1, -alpha1)
+        # Per-package: __init__ __version__ must match the pyproject version.
+        # Cross-package versions are NOT required to match — packages release
+        # independently and gh-action-pypi-publish skips already-published ones.
+        # The git tag must match at least one package (so a tag maps to a release).
+        python - "$GITHUB_REF" <<'PY'
+        import re, sys, tomllib, pathlib
 
-        echo "Core version:   $CORE_VERSION"
-        echo "CLI version:    $CLI_VERSION"
-        echo "Server version: $SERVER_VERSION"
-        echo "Tag version:    $TAG_VERSION"
+        tag = sys.argv[1].removeprefix("refs/tags/v").split("-", 1)[0]
+        pkgs = {
+            "deepfreeze-core":   "deepfreeze_core",
+            "deepfreeze-cli":    "deepfreeze",
+            "deepfreeze-server": "deepfreeze_server",
+        }
+        problems, versions = [], {}
+        for dist, mod in pkgs.items():
+            root = pathlib.Path("packages") / dist
+            proj = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+            init = re.search(r'__version__ = "([^"]+)"',
+                             (root / mod / "__init__.py").read_text()).group(1)
+            versions[dist] = proj
+            marker = "" if proj == init else f"  <-- __init__ says {init}"
+            print(f"{dist:20} pyproject={proj} init={init}{marker}")
+            if proj != init:
+                problems.append(f"{dist}: pyproject {proj} != __init__ {init}")
 
-        if [ "$CORE_VERSION" != "$CLI_VERSION" ] || [ "$CORE_VERSION" != "$SERVER_VERSION" ]; then
-          echo "ERROR: Version mismatch between packages!"
-          echo "  deepfreeze-core:   $CORE_VERSION"
-          echo "  deepfreeze-cli:    $CLI_VERSION"
-          echo "  deepfreeze-server: $SERVER_VERSION"
-          exit 1
-        fi
+        print(f"\ntag = {tag}")
+        if tag not in versions.values():
+            problems.append(f"tag v{tag} matches no package version {sorted(set(versions.values()))}")
 
-        if [ "$CORE_VERSION" != "$TAG_VERSION" ]; then
-          echo "ERROR: Version doesn't match git tag!"
-          echo "  Code version: $CORE_VERSION"
-          echo "  Tag version:  $TAG_VERSION"
-          exit 1
-        fi
+        will_publish = [d for d, v in versions.items() if v == tag]
+        print("packages at tag version (will publish if new):", will_publish or "none")
 
-        echo "All versions match: $CORE_VERSION"
+        if problems:
+            print("\nERROR:")
+            for p in problems:
+                print("  -", p)
+            sys.exit(1)
+        print("\nversion checks passed")
+        PY
 
   build:
     needs: validate-versions
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.12.7'
 
@@ -69,7 +80,7 @@ jobs:
         ls -l dist
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: dist
         path: dist/
@@ -78,6 +89,8 @@ jobs:
   # Trusted Publishing (OIDC). Each PyPI project must have a trusted publisher
   # configured for: repo elastic/deepfreeze, workflow release.yml, environment pypi.
   # No API tokens are stored — the upload is authorized by GitHub's OIDC identity.
+  # skip-existing lets unchanged packages ride along harmlessly: any (name, version)
+  # already on PyPI is skipped rather than failing the run.
   publish-pypi:
     needs: build
     runs-on: ubuntu-latest
@@ -88,13 +101,15 @@ jobs:
       id-token: write   # required for Trusted Publishing
     steps:
     - name: Download build artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: dist
         path: dist/
 
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        skip-existing: true
 
   github-release:
     needs: publish-pypi
@@ -102,9 +117,9 @@ jobs:
     permissions:
       contents: write
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v3
       with:
         generate_release_notes: true
